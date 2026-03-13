@@ -360,6 +360,16 @@ class AmazonService : Service() {
         fun getActiveDownloads(): Map<String, DownloadInfo> =
             getInstance()?.activeDownloads?.let { HashMap(it) } ?: emptyMap()
 
+        suspend fun getPartialDownloads(context: Context): List<String> {
+            val instance = getInstance() ?: return emptyList()
+            return instance.amazonManager.getNonInstalledGames()
+                .filter { game ->
+                    !instance.activeDownloads.containsKey(game.productId) &&
+                        hasPartialDownloadByAppId(context, game.appId)
+                }
+                .map { it.productId }
+        }
+
         /** Returns the active [DownloadInfo] for [appId], or null if not downloading. */
         fun getDownloadInfoByAppId(appId: Int): DownloadInfo? {
             val productId = getProductIdByAppId(appId) ?: return null
