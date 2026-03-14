@@ -71,24 +71,67 @@ class DownloadsViewModel @Inject constructor(
         super.onCleared()
     }
 
+    private suspend fun getSteamMetadata(appId: Int): Pair<String, String> {
+        val key = "${GameSource.STEAM}_$appId"
+        val name = gameNameCache.getOrPut(key) {
+            steamAppDao.findApp(appId)?.name ?: "Steam App $appId"
+        }
+        val icon = gameIconCache.getOrPut(key) {
+            val app = steamAppDao.findApp(appId)
+            if (app != null && app.clientIconHash.isNotEmpty()) {
+                "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/${app.id}/${app.clientIconHash}.ico"
+            } else {
+                ""
+            }
+        }
+
+        return Pair(name, icon)
+    }
+
+    private suspend fun getEpicMetadata(appId: Int): Pair<String, String> {
+        val key = "${GameSource.EPIC}_$appId"
+        val name = gameNameCache.getOrPut(key) {
+            epicGameDao.getById(appId)?.title ?: "Epic Game $appId"
+        }
+        val icon = gameIconCache.getOrPut(key) {
+            epicGameDao.getById(appId)?.artCover ?: ""
+        }
+
+        return Pair(name, icon)
+    }
+
+    private suspend fun getGOGMetadata(gameId: String): Pair<String, String> {
+        val key = "${GameSource.GOG}_$gameId"
+        val name = gameNameCache.getOrPut(key) {
+            gogGameDao.getById(gameId)?.title ?: "GOG Game $gameId"
+        }
+        val icon = gameIconCache.getOrPut(key) {
+            val game = gogGameDao.getById(gameId)
+            game?.imageUrl?.ifEmpty { game.iconUrl } ?: ""
+        }
+
+        return Pair(name, icon)
+    }
+
+    private suspend fun getAmazonMetadata(productId: String): Pair<String, String> {
+        val key = "${GameSource.AMAZON}_$productId"
+        val name = gameNameCache.getOrPut(key) {
+            amazonGameDao.getByProductId(productId)?.title ?: "Amazon Game"
+        }
+        val icon = gameIconCache.getOrPut(key) {
+            amazonGameDao.getByProductId(productId)?.artUrl ?: ""
+        }
+
+        return Pair(name, icon)
+    }
+
     private suspend fun pollDownloads() {
         try {
             val items = mutableMapOf<String, DownloadItemState>()
 
             // Steam downloads
             for ((appId, info) in SteamService.getActiveDownloads()) {
-                val key = "${GameSource.STEAM}_$appId"
-                val name = gameNameCache.getOrPut(key) {
-                    steamAppDao.findApp(appId)?.name ?: "Steam App $appId"
-                }
-                val icon = gameIconCache.getOrPut(key) {
-                    val app = steamAppDao.findApp(appId)
-                    if (app != null && app.clientIconHash.isNotEmpty()) {
-                        "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/${app.id}/${app.clientIconHash}.ico"
-                    } else {
-                        ""
-                    }
-                }
+                val (name, icon) = getSteamMetadata(appId)
                 val (downloaded, total) = info.getBytesProgress()
                 items[appId.toString()] = DownloadItemState(
                     appId = appId.toString(),
@@ -107,18 +150,7 @@ class DownloadsViewModel @Inject constructor(
 
             for (appId in SteamService.getPartialDownloads()) {
                 if (items.containsKey(appId.toString())) continue
-                val key = "${GameSource.STEAM}_$appId"
-                val name = gameNameCache.getOrPut(key) {
-                    steamAppDao.findApp(appId)?.name ?: "Steam App $appId"
-                }
-                val icon = gameIconCache.getOrPut(key) {
-                    val app = steamAppDao.findApp(appId)
-                    if (app != null && app.clientIconHash.isNotEmpty()) {
-                        "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/${app.id}/${app.clientIconHash}.ico"
-                    } else {
-                        ""
-                    }
-                }
+                val (name, icon) = getSteamMetadata(appId)
                 items[appId.toString()] = DownloadItemState(
                     appId = appId.toString(),
                     gameSource = GameSource.STEAM,
@@ -136,13 +168,7 @@ class DownloadsViewModel @Inject constructor(
 
             // Epic downloads
             for ((appId, info) in EpicService.getActiveDownloads()) {
-                val key = "${GameSource.EPIC}_$appId"
-                val name = gameNameCache.getOrPut(key) {
-                    epicGameDao.getById(appId)?.title ?: "Epic Game $appId"
-                }
-                val icon = gameIconCache.getOrPut(key) {
-                    epicGameDao.getById(appId)?.artCover ?: ""
-                }
+                val (name, icon) = getEpicMetadata(appId)
                 val (downloaded, total) = info.getBytesProgress()
                 items[appId.toString()] = DownloadItemState(
                     appId = appId.toString(),
@@ -161,13 +187,7 @@ class DownloadsViewModel @Inject constructor(
 
             for (appId in EpicService.getPartialDownloads()) {
                 if (items.containsKey(appId.toString())) continue
-                val key = "${GameSource.EPIC}_$appId"
-                val name = gameNameCache.getOrPut(key) {
-                    epicGameDao.getById(appId)?.title ?: "Epic Game $appId"
-                }
-                val icon = gameIconCache.getOrPut(key) {
-                    epicGameDao.getById(appId)?.artCover ?: ""
-                }
+                val (name, icon) = getEpicMetadata(appId)
                 items[appId.toString()] = DownloadItemState(
                     appId = appId.toString(),
                     gameSource = GameSource.EPIC,
@@ -185,14 +205,7 @@ class DownloadsViewModel @Inject constructor(
 
             // GOG downloads
             for ((gameId, info) in GOGService.getActiveDownloads()) {
-                val key = "${GameSource.GOG}_$gameId"
-                val name = gameNameCache.getOrPut(key) {
-                    gogGameDao.getById(gameId)?.title ?: "GOG Game $gameId"
-                }
-                val icon = gameIconCache.getOrPut(key) {
-                    val game = gogGameDao.getById(gameId)
-                    game?.imageUrl?.ifEmpty { game.iconUrl } ?: ""
-                }
+                val (name, icon) = getGOGMetadata(gameId)
                 val (downloaded, total) = info.getBytesProgress()
                 items[gameId] = DownloadItemState(
                     appId = gameId,
@@ -211,14 +224,7 @@ class DownloadsViewModel @Inject constructor(
 
             for (gameId in GOGService.getPartialDownloads()) {
                 if (items.containsKey(gameId)) continue
-                val key = "${GameSource.GOG}_$gameId"
-                val name = gameNameCache.getOrPut(key) {
-                    gogGameDao.getById(gameId)?.title ?: "GOG Game $gameId"
-                }
-                val icon = gameIconCache.getOrPut(key) {
-                    val game = gogGameDao.getById(gameId)
-                    game?.imageUrl?.ifEmpty { game.iconUrl } ?: ""
-                }
+                val (name, icon) = getGOGMetadata(gameId)
                 items[gameId] = DownloadItemState(
                     appId = gameId,
                     gameSource = GameSource.GOG,
@@ -236,13 +242,7 @@ class DownloadsViewModel @Inject constructor(
 
             // Amazon downloads
             for ((productId, info) in AmazonService.getActiveDownloads()) {
-                val key = "${GameSource.AMAZON}_$productId"
-                val name = gameNameCache.getOrPut(key) {
-                    amazonGameDao.getByProductId(productId)?.title ?: "Amazon Game"
-                }
-                val icon = gameIconCache.getOrPut(key) {
-                    amazonGameDao.getByProductId(productId)?.artUrl ?: ""
-                }
+                val (name, icon) = getAmazonMetadata(productId)
                 val (downloaded, total) = info.getBytesProgress()
                 items[productId] = DownloadItemState(
                     appId = productId,
@@ -261,13 +261,7 @@ class DownloadsViewModel @Inject constructor(
 
             for (productId in AmazonService.getPartialDownloads(appContext)) {
                 if (items.containsKey(productId)) continue
-                val key = "${GameSource.AMAZON}_$productId"
-                val name = gameNameCache.getOrPut(key) {
-                    amazonGameDao.getByProductId(productId)?.title ?: "Amazon Game"
-                }
-                val icon = gameIconCache.getOrPut(key) {
-                    amazonGameDao.getByProductId(productId)?.artUrl ?: ""
-                }
+                val (name, icon) = getAmazonMetadata(productId)
                 items[productId] = DownloadItemState(
                     appId = productId,
                     gameSource = GameSource.AMAZON,
