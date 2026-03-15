@@ -339,6 +339,7 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
         AppOptionMenuType.ImportConfig -> Icons.Default.ArrowDownward
         AppOptionMenuType.ExportConfig -> Icons.Default.ArrowUpward
         AppOptionMenuType.ManageGameContent -> Icons.Default.Apps
+        AppOptionMenuType.ChangeBranch -> Icons.Default.Settings
     }
 }
 
@@ -362,6 +363,7 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             AppOptionMenuType.Uninstall,
             AppOptionMenuType.VerifyFiles,
             AppOptionMenuType.Update,
+            AppOptionMenuType.ChangeBranch,
             AppOptionMenuType.MoveToExternalStorage,
             AppOptionMenuType.MoveToInternalStorage,
             -> gameManagement.add(option)
