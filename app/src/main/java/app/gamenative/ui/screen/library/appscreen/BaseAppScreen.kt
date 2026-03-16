@@ -2,8 +2,6 @@ package app.gamenative.ui.screen.library.appscreen
 
 import android.content.Context
 import android.content.Intent
-import app.gamenative.ui.util.SnackbarManager
-import app.gamenative.ui.util.ContainerConfigTransfer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,9 +31,14 @@ import app.gamenative.ui.component.dialog.ContainerConfigDialog
 import app.gamenative.ui.data.AppMenuOption
 import app.gamenative.ui.data.GameDisplayInfo
 import app.gamenative.ui.enums.AppOptionMenuType
+import app.gamenative.ui.util.ContainerConfigTransfer
+import app.gamenative.ui.util.SnackbarManager
+import app.gamenative.utils.BestConfigService
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.createPinnedShortcut
+import kotlinx.coroutines.CancellationException
 import com.winlator.container.ContainerData
+import com.winlator.core.GPUInformation
 import java.io.File
 import kotlin.text.Charsets
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +46,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 /**
  * Abstract base class for AppScreen implementations.
@@ -277,6 +281,26 @@ abstract class BaseAppScreen {
     }
 
     /**
+     * Get "Use known config" menu option. Subclasses can override to customize behavior
+     * or disable it entirely by returning null.
+     */
+    @Composable
+    protected open fun getUseKnownConfigOption(
+        context: Context,
+        libraryItem: LibraryItem,
+    ): AppMenuOption? {
+        val scope = rememberCoroutineScope()
+        return AppMenuOption(
+            optionType = AppOptionMenuType.UseKnownConfig,
+            onClick = {
+                scope.launch(Dispatchers.IO) {
+                    applyKnownConfigForLibraryItem(context, libraryItem)
+                }
+            },
+        )
+    }
+
+    /**
      * Get export-config menu option. Subclasses can override to customize behavior
      * or disable export-config entirely by returning null.
      */
@@ -318,6 +342,7 @@ abstract class BaseAppScreen {
     ): List<AppMenuOption> {
         return if (supportsContainerConfig()) {
             listOfNotNull(
+                getUseKnownConfigOption(context, libraryItem),
                 getExportConfigOption(context, libraryItem),
                 getImportConfigOption(context, libraryItem),
             )
@@ -447,6 +472,66 @@ abstract class BaseAppScreen {
         ContainerUtils.applyToContainer(context, libraryItem.appId, defaults)
 
         SnackbarManager.show("Container reset to defaults")
+    }
+
+    /**
+     * Shared helper to fetch and apply a "known config" for a given game/library item.
+     * This is a generic implementation used by all non-Custom sources by default.
+     */
+    protected open suspend fun applyKnownConfigForLibraryItem(
+        context: Context,
+        libraryItem: LibraryItem,
+    ) {
+        try {
+            val gameName = libraryItem.name.ifBlank { libraryItem.appId }
+            val gpuName = GPUInformation.getRenderer(context)
+
+            val bestConfig = BestConfigService.fetchBestConfig(gameName, gpuName)
+            if (bestConfig == null) {
+                SnackbarManager.show(context.getString(R.string.best_config_fetch_failed))
+                return
+            }
+            if (bestConfig.matchType == "no_match") {
+                SnackbarManager.show(context.getString(R.string.best_config_no_config_available))
+                return
+            }
+
+            val parsedConfig = BestConfigService.parseConfigToContainerData(
+                context = context,
+                configJson = bestConfig.bestConfig,
+                matchType = bestConfig.matchType,
+                applyKnownConfig = true,
+            )
+            val missingContentDescription = BestConfigService.consumeLastMissingContentDescription()
+
+            if (parsedConfig != null && parsedConfig.isNotEmpty()) {
+                val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
+                val currentData = ContainerUtils.toContainerData(container)
+                val updatedData = ContainerUtils.applyBestConfigMapToContainerData(
+                    currentData,
+                    parsedConfig,
+                )
+                ContainerUtils.applyToContainer(context, container, updatedData)
+                SnackbarManager.show(context.getString(R.string.best_config_applied_successfully))
+            } else {
+                val message = if (missingContentDescription != null) {
+                    context.getString(R.string.best_config_missing_content, missingContentDescription)
+                } else {
+                    context.getString(R.string.best_config_known_config_invalid)
+                }
+                SnackbarManager.show(message)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to apply known config for ${libraryItem.appId}: ${e.message}")
+            SnackbarManager.show(
+                context.getString(
+                    R.string.best_config_apply_failed,
+                    e.message ?: "Unknown error",
+                ),
+            )
+        }
     }
 
     /**

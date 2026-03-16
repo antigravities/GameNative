@@ -52,6 +52,7 @@ import com.winlator.xenvironment.ImageFsInstaller
 import java.nio.file.Paths
 import kotlin.io.path.pathString
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -880,39 +881,6 @@ class SteamAppScreen : BaseAppScreen() {
                     }
                 },
             ),
-            AppMenuOption(
-                AppOptionMenuType.UseKnownConfig,
-                onClick = {
-                    scope.launch(Dispatchers.IO) {
-                        try {
-                            val gameName = appInfo.name
-                            val gpuName = GPUInformation.getRenderer(context)
-
-                            val bestConfig = BestConfigService.fetchBestConfig(gameName, gpuName)
-                            if (bestConfig == null) {
-                                SnackbarManager.show(context.getString(R.string.best_config_fetch_failed))
-                            } else if (bestConfig.matchType == "no_match") {
-                                SnackbarManager.show(context.getString(R.string.best_config_no_config_available))
-                            } else {
-                                applyConfigForContainer(
-                                    context,
-                                    gameId,
-                                    appId,
-                                    bestConfig.bestConfig,
-                                    bestConfig.matchType,
-                                    scope,
-                                )
-                            }
-                        } catch (e: Exception) {
-                            Timber.w(e, "Failed to apply known config: ${e.message}")
-                            withContext(Dispatchers.Main) {
-                                hideKnownConfigInstallState(gameId)
-                            }
-                            SnackbarManager.show(context.getString(R.string.best_config_apply_failed, e.message ?: "Unknown error"))
-                        }
-                    }
-                }
-            ),
         )
 
         return options
@@ -935,6 +903,57 @@ class SteamAppScreen : BaseAppScreen() {
     }
 
     override fun supportsContainerConfig(): Boolean = true
+    override suspend fun applyKnownConfigForLibraryItem(
+        context: Context,
+        libraryItem: LibraryItem,
+    ) {
+        val gameId = libraryItem.gameId
+        val appId = libraryItem.appId
+        val appInfo = SteamService.getAppInfoOf(gameId)
+
+        if (appInfo == null) {
+            SnackbarManager.show(context.getString(R.string.best_config_fetch_failed))
+            return
+        }
+
+        try {
+            val gameName = appInfo.name
+            val gpuName = GPUInformation.getRenderer(context)
+            val uiScope = CoroutineScope(Dispatchers.Main.immediate)
+
+            val bestConfig = BestConfigService.fetchBestConfig(gameName, gpuName)
+            if (bestConfig == null) {
+                SnackbarManager.show(context.getString(R.string.best_config_fetch_failed))
+                return
+            }
+            if (bestConfig.matchType == "no_match") {
+                SnackbarManager.show(context.getString(R.string.best_config_no_config_available))
+                return
+            }
+
+            applyConfigForContainer(
+                context = context,
+                gameId = gameId,
+                appId = appId,
+                configJson = bestConfig.bestConfig,
+                matchType = bestConfig.matchType,
+                uiScope = uiScope,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to apply known config: ${e.message}")
+            withContext(Dispatchers.Main) {
+                hideKnownConfigInstallState(gameId)
+            }
+            SnackbarManager.show(
+                context.getString(
+                    R.string.best_config_apply_failed,
+                    e.message ?: "Unknown error",
+                ),
+            )
+        }
+    }
 
     override fun getExportFileExtension(): String = ".steam"
 
