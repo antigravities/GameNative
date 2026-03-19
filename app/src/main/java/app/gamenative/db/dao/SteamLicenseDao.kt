@@ -38,6 +38,12 @@ interface SteamLicenseDao {
 
     @Query(
         "SELECT * FROM steam_license " +
+                "WHERE packageId IN (:packageIds)"
+    )
+    suspend fun _findLicenses(packageIds: List<Int>): List<SteamLicense>
+
+    @Query(
+        "SELECT * FROM steam_license " +
                 "WHERE packageId NOT IN (:packageIds)"
     )
     suspend fun _findStaleLicences(packageIds: List<Int>): List<SteamLicense>
@@ -53,6 +59,17 @@ interface SteamLicenseDao {
        SQLite’s 999-parameter ceiling.  These replace the old
        direct queries at call-sites.
        ---------------------------------------------------------- */
+
+    @Transaction
+    suspend fun findLicenses(packageIds: List<Int>): List<SteamLicense> {
+        if (packageIds.isEmpty()) return emptyList()
+        val out = mutableListOf<SteamLicense>()
+        for (i in packageIds.indices step SQLITE_MAX_VARS) {
+            val end = min(i + SQLITE_MAX_VARS, packageIds.size)
+            out += _findLicenses(packageIds.subList(i, end))
+        }
+        return out
+    }
 
     @Transaction
     suspend fun findStaleLicences(packageIds: List<Int>): List<SteamLicense> {

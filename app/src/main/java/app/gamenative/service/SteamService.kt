@@ -543,6 +543,22 @@ class SteamService : Service(), IChallengeUrlChanged {
             return ids.takeIf { it.isNotEmpty() }?.toSet()
         }
 
+        /**
+         * Batch-load licensed depot IDs for many apps in a single DB query.
+         * Returns appId → depotIds; missing entries mean license unknown (fall back to unfiltered).
+         */
+        fun buildLicensedDepotMap(apps: List<SteamApp>): Map<Int, Set<Int>> {
+            val pkgIds = apps.map { it.packageId }.filter { it != INVALID_PKG_ID }.distinct()
+            val licenses = runBlocking(Dispatchers.IO) {
+                instance?.licenseDao?.findLicenses(pkgIds) ?: emptyList()
+            }
+            val pkgToDepots = licenses.associate { it.packageId to it.depotIds.toSet() }
+            return apps.mapNotNull { app ->
+                val depots = pkgToDepots[app.packageId]?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                app.id to depots
+            }.toMap()
+        }
+
         fun getAppInfoOf(appId: Int): SteamApp? {
             return runBlocking(Dispatchers.IO) { instance?.appDao?.findApp(appId) }
         }

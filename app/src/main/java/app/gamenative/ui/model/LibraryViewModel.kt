@@ -428,10 +428,11 @@ class LibraryViewModel @Inject constructor(
 
             // Map Steam apps to UI items
             data class LibraryEntry(val item: LibraryItem, val isInstalled: Boolean)
+            val licensedDepotMap = SteamService.buildLicensedDepotMap(filteredSteamApps)
             val steamEntries: List<LibraryEntry> = filteredSteamApps.map { item ->
                 val isInstalled = downloadDirectorySet.contains(SteamService.getAppDirName(item))
                 // mirror SteamService depot filtering: license, OS, arch, deck, base-game only
-                val licensedDepots = SteamService.getLicensedDepotIds(item.id)
+                val licensedDepots = licensedDepotMap[item.id]
                 val eligible = item.depots.values.filter { d ->
                     d.isWindowsCompatible &&
                         d.dlcAppId == SteamService.INVALID_APP_ID &&
