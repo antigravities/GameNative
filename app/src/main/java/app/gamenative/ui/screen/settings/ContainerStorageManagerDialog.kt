@@ -216,7 +216,7 @@ class ContainerStorageManagerUiState internal constructor(
     ) {
         if (isMoving) return
 
-        if (!ContainerStorageManager.isExternalStorageConfigured()) {
+        if (target == ContainerStorageManager.MoveTarget.EXTERNAL && !ContainerStorageManager.isExternalStorageConfigured()) {
             SnackbarManager.show(appContext.getString(R.string.container_storage_move_external_disabled))
             return
         }

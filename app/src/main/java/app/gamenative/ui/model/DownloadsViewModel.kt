@@ -204,15 +204,16 @@ class DownloadsViewModel @Inject constructor(
             }
 
             GameSource.AMAZON -> {
-                val numericAppId = appId.toIntOrNull() ?: return null
-                amazonGameDao.getByAppId(numericAppId)?.let { game ->
+                val game = amazonGameDao.getByProductId(appId)
+                    ?: appId.toIntOrNull()?.let { amazonGameDao.getByAppId(it) }
+                game?.let {
                     LibraryItem(
-                        appId = libraryAppId,
-                        name = game.title,
-                        iconHash = game.artUrl,
-                        capsuleImageUrl = game.artUrl,
-                        headerImageUrl = game.heroUrl.ifEmpty { game.artUrl },
-                        heroImageUrl = game.heroUrl.ifEmpty { game.artUrl },
+                        appId = "${GameSource.AMAZON.name}_${it.appId}",
+                        name = it.title,
+                        iconHash = it.artUrl,
+                        capsuleImageUrl = it.artUrl,
+                        headerImageUrl = it.heroUrl.ifEmpty { it.artUrl },
+                        heroImageUrl = it.heroUrl.ifEmpty { it.artUrl },
                         gameSource = GameSource.AMAZON,
                     )
                 }

@@ -168,7 +168,6 @@ object ContainerStorageManager {
 
     fun canMoveToInternal(context: Context, entry: Entry): Boolean {
         return canMoveGame(entry) &&
-            isExternalStorageConfigured() &&
             getStorageLocation(context, entry) == StorageLocation.EXTERNAL
     }
 
@@ -185,7 +184,7 @@ object ContainerStorageManager {
         if (!canMoveGame(entry)) {
             return@withContext Result.failure(IllegalArgumentException("This game cannot be moved"))
         }
-        if (!isExternalStorageConfigured()) {
+        if (target == MoveTarget.EXTERNAL && !isExternalStorageConfigured()) {
             return@withContext Result.failure(IllegalStateException("External storage is not enabled"))
         }
 
@@ -702,22 +701,26 @@ object ContainerStorageManager {
             return StorageLocation.INTERNAL
         }
 
-        val externalRoots = when (gameSource) {
-            GameSource.STEAM -> buildList {
-                if (PrefManager.externalStoragePath.isNotBlank()) {
-                    add(SteamService.externalAppInstallPath)
+        val externalRoots = buildList {
+            when (gameSource) {
+                GameSource.STEAM -> {
+                    if (PrefManager.externalStoragePath.isNotBlank()) {
+                        add(SteamService.externalAppInstallPath)
+                    }
+                    addAll(
+                        DownloadService.externalVolumePaths.map { volumePath ->
+                            Paths.get(volumePath, "Steam", "steamapps", "common").toString()
+                        },
+                    )
                 }
-                addAll(
-                    DownloadService.externalVolumePaths.map { volumePath ->
-                        Paths.get(volumePath, "Steam", "steamapps", "common").toString()
-                    },
-                )
+
+                GameSource.GOG -> if (PrefManager.externalStoragePath.isNotBlank()) add(GOGConstants.externalGOGGamesPath)
+                GameSource.EPIC -> if (PrefManager.externalStoragePath.isNotBlank()) add(EpicConstants.externalEpicGamesPath())
+                GameSource.AMAZON -> if (PrefManager.externalStoragePath.isNotBlank()) add(AmazonConstants.externalAmazonGamesPath())
+                GameSource.CUSTOM_GAME -> Unit
             }
 
-            GameSource.GOG -> if (PrefManager.externalStoragePath.isNotBlank()) listOf(GOGConstants.externalGOGGamesPath) else emptyList()
-            GameSource.EPIC -> if (PrefManager.externalStoragePath.isNotBlank()) listOf(EpicConstants.externalEpicGamesPath()) else emptyList()
-            GameSource.AMAZON -> if (PrefManager.externalStoragePath.isNotBlank()) listOf(AmazonConstants.externalAmazonGamesPath()) else emptyList()
-            GameSource.CUSTOM_GAME -> emptyList()
+            inferExternalInstallRoot(gameSource, normalizedPath)?.let(::add)
         }
             .filter { it.isNotBlank() }
             .distinct()
@@ -727,6 +730,29 @@ object ContainerStorageManager {
         }
 
         return StorageLocation.UNKNOWN
+    }
+
+    private fun inferExternalInstallRoot(gameSource: GameSource, installPath: String): String? {
+        val expectedRootSegments = when (gameSource) {
+            GameSource.STEAM -> listOf("Steam", "steamapps", "common")
+            GameSource.GOG -> listOf("GOG", "games", "common")
+            GameSource.EPIC -> listOf("Epic", "games")
+            GameSource.AMAZON -> listOf("Amazon", "games")
+            GameSource.CUSTOM_GAME -> emptyList()
+        }
+        if (expectedRootSegments.isEmpty()) return null
+
+        val candidateRoot = File(installPath).parentFile?.path?.let(::normalizePath) ?: return null
+        return candidateRoot.takeIf { pathEndsWithSegments(it, expectedRootSegments) }
+    }
+
+    private fun pathEndsWithSegments(path: String, expectedSegments: List<String>): Boolean {
+        val normalizedPath = runCatching { Paths.get(path) }.getOrNull() ?: return false
+        if (normalizedPath.nameCount < expectedSegments.size) return false
+
+        return expectedSegments.indices.all { index ->
+            normalizedPath.getName(normalizedPath.nameCount - expectedSegments.size + index).toString() == expectedSegments[index]
+        }
     }
 
     private fun samePath(first: File, second: File): Boolean {
