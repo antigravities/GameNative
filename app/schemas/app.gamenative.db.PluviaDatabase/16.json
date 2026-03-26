@@ -6,7 +6,7 @@
     "entities": [
       {
         "tableName": "app_info",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `is_downloaded` INTEGER NOT NULL, `downloaded_depots` TEXT NOT NULL, `dlc_depots` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `is_downloaded` INTEGER NOT NULL, `downloaded_depots` TEXT NOT NULL, `dlc_depots` TEXT NOT NULL, `branch` TEXT NOT NULL DEFAULT 'public', PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -31,6 +31,13 @@
             "columnName": "dlc_depots",
             "affinity": "TEXT",
             "notNull": true
+          },
+          {
+            "fieldPath": "branch",
+            "columnName": "branch",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'public'"
           }
         ],
         "primaryKey": {
@@ -1156,7 +1163,7 @@
       },
       {
         "tableName": "downloading_app_info",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`appId` INTEGER NOT NULL, `dlcAppIds` TEXT NOT NULL, PRIMARY KEY(`appId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`appId` INTEGER NOT NULL, `dlcAppIds` TEXT NOT NULL, `branch` TEXT NOT NULL DEFAULT 'public', PRIMARY KEY(`appId`))",
         "fields": [
           {
             "fieldPath": "appId",
@@ -1169,12 +1176,50 @@
             "columnName": "dlcAppIds",
             "affinity": "TEXT",
             "notNull": true
+          },
+          {
+            "fieldPath": "branch",
+            "columnName": "branch",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'public'"
           }
         ],
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
             "appId"
+          ]
+        }
+      },
+      {
+        "tableName": "unlocked_branch",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`appId` INTEGER NOT NULL, `branchName` TEXT NOT NULL, `password` TEXT NOT NULL, PRIMARY KEY(`appId`, `branchName`))",
+        "fields": [
+          {
+            "fieldPath": "appId",
+            "columnName": "appId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "branchName",
+            "columnName": "branchName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "password",
+            "columnName": "password",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "appId",
+            "branchName"
           ]
         }
       }
