@@ -136,7 +136,7 @@ class ContainerStorageManagerUiState internal constructor(
                 entries = it
                 hasLoaded = true
             }.onFailure { error ->
-                hasLoaded = true
+                hasLoaded = false
                 Timber.e(error, "Failed to load storage inventory")
                 SnackbarManager.show(
                     error.message ?: appContext.getString(R.string.container_storage_unknown_error),
@@ -232,19 +232,23 @@ class ContainerStorageManagerUiState internal constructor(
         moveTotalFiles = 1
 
         scope.launch {
-            val result = ContainerStorageManager.moveGame(
-                context = appContext,
-                entry = entry,
-                target = target,
-                onProgressUpdate = { currentFile, fileProgress, movedFiles, totalFiles ->
-                    moveCurrentFile = currentFile
-                    moveProgress = fileProgress
-                    moveMovedFiles = movedFiles
-                    moveTotalFiles = totalFiles
-                },
-            )
-
-            movingEntryName = null
+            val result = try {
+                ContainerStorageManager.moveGame(
+                    context = appContext,
+                    entry = entry,
+                    target = target,
+                    onProgressUpdate = { currentFile, fileProgress, movedFiles, totalFiles ->
+                        moveCurrentFile = currentFile
+                        moveProgress = fileProgress
+                        moveMovedFiles = movedFiles
+                        moveTotalFiles = totalFiles
+                    },
+                )
+            } catch (error: Exception) {
+                Result.failure(error)
+            } finally {
+                movingEntryName = null
+            }
 
             if (result.isSuccess) {
                 SnackbarManager.show(
@@ -839,14 +843,23 @@ private fun inventorySummaryBytes(entries: List<ContainerStorageManager.Entry>):
 }
 
 private fun sizeBreakdown(entry: ContainerStorageManager.Entry): String {
-    val container = if (entry.hasContainer) {
-        "Container ${StorageUtils.formatBinarySize(entry.containerSizeBytes)}"
-    } else {
-        null
+    val parts = mutableListOf<String>()
+
+    entry.gameInstallSizeBytes?.let {
+        parts += "Game ${StorageUtils.formatBinarySize(it)}"
     }
-    val game = entry.gameInstallSizeBytes?.let { "Game ${StorageUtils.formatBinarySize(it)}" }
-    val total = entry.combinedSizeBytes?.let { "Total ${StorageUtils.formatBinarySize(it)}" }
-    return listOfNotNull(game, container, total).joinToString(" • ")
+
+    if (entry.hasContainer) {
+        parts += "Container ${StorageUtils.formatBinarySize(entry.containerSizeBytes)}"
+    }
+
+    if (entry.hasContainer && entry.gameInstallSizeBytes != null) {
+        entry.combinedSizeBytes?.let {
+            parts += "Total ${StorageUtils.formatBinarySize(it)}"
+        }
+    }
+
+    return parts.joinToString(" • ")
 }
 
 @Composable

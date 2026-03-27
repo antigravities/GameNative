@@ -100,6 +100,7 @@ object ContainerStorageManager {
         val gameSource: GameSource,
         val installPath: String,
         val iconUrl: String = "",
+        val installSizeBytes: Long? = null,
     )
 
     suspend fun loadEntries(context: Context): List<Entry> = withContext(Dispatchers.IO) {
@@ -444,6 +445,7 @@ object ContainerStorageManager {
                         gameSource = GameSource.GOG,
                         installPath = installDir.absolutePath,
                         iconUrl = game.iconUrl.ifEmpty { game.imageUrl },
+                        installSizeBytes = game.installSize.takeIf { it > 0L },
                     )
                 }
                 .toList()
@@ -466,6 +468,7 @@ object ContainerStorageManager {
                         gameSource = GameSource.EPIC,
                         installPath = installDir.absolutePath,
                         iconUrl = game.iconUrl,
+                        installSizeBytes = game.installSize.takeIf { it > 0L },
                     )
                 }
                 .toList()
@@ -488,6 +491,7 @@ object ContainerStorageManager {
                         gameSource = GameSource.AMAZON,
                         installPath = installDir.absolutePath,
                         iconUrl = game.artUrl,
+                        installSizeBytes = game.installSize.takeIf { it > 0L },
                     )
                 }
                 .toList()
@@ -584,7 +588,7 @@ object ContainerStorageManager {
                 appId = installedGame?.appId ?: normalizedContainerId.takeIf { gameSource != null },
                 iconUrl = installedGame?.iconUrl.orEmpty(),
                 containerSizeBytes = containerSizeBytes,
-                gameInstallSizeBytes = installedGame?.installPath?.let { getPathSize(it, pathSizeCache) },
+                gameInstallSizeBytes = installedGame?.installSizeBytes,
                 status = Status.UNREADABLE,
                 installPath = installedGame?.installPath,
                 canUninstallGame = installedGame != null && installedGame.gameSource != GameSource.CUSTOM_GAME,
@@ -615,9 +619,11 @@ object ContainerStorageManager {
             else -> Status.READY
         }
 
-        val gameInstallSizeBytes = installPath
-            ?.takeIf { status == Status.READY }
-            ?.let { path -> getPathSize(path, pathSizeCache) }
+        val gameInstallSizeBytes = when {
+            status != Status.READY -> null
+            installedGame?.installSizeBytes != null -> installedGame.installSizeBytes
+            else -> null
+        }
 
         return Entry(
             containerId = containerId,
@@ -645,7 +651,7 @@ object ContainerStorageManager {
             appId = installedGame.appId,
             iconUrl = installedGame.iconUrl,
             containerSizeBytes = 0L,
-            gameInstallSizeBytes = getPathSize(installedGame.installPath, pathSizeCache),
+            gameInstallSizeBytes = installedGame.installSizeBytes,
             status = Status.NO_CONTAINER,
             installPath = installedGame.installPath,
             canUninstallGame = installedGame.gameSource != GameSource.CUSTOM_GAME,

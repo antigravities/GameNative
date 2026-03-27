@@ -125,6 +125,7 @@ fun HomeDownloadsScreen(
     val sections = remember { DownloadsSection.values().toList() }
     val selectedSection = sections.getOrElse(selectedSectionIndex) { DownloadsSection.Downloads }
     var selectedLibraryItem by remember { mutableStateOf<LibraryItem?>(null) }
+    var openGameRequestId by rememberSaveable { mutableIntStateOf(0) }
 
     fun fallbackLibraryItem(gameSource: GameSource, appId: String, name: String, iconUrl: String): LibraryItem {
         return LibraryItem(
@@ -138,15 +139,25 @@ fun HomeDownloadsScreen(
         )
     }
 
+    fun clearSelectedLibraryItem() {
+        openGameRequestId += 1
+        selectedLibraryItem = null
+    }
+
     fun openGame(gameSource: GameSource, appId: String, name: String, iconUrl: String) {
+        val requestId = openGameRequestId + 1
+        openGameRequestId = requestId
         scope.launch {
-            selectedLibraryItem = viewModel.resolveLibraryItem(gameSource, appId)
+            val resolvedItem = viewModel.resolveLibraryItem(gameSource, appId)
                 ?: fallbackLibraryItem(gameSource, appId, name, iconUrl)
+            if (requestId == openGameRequestId) {
+                selectedLibraryItem = resolvedItem
+            }
         }
     }
 
     BackHandler(enabled = selectedLibraryItem != null) {
-        selectedLibraryItem = null
+        clearSelectedLibraryItem()
     }
 
     Column(
@@ -157,9 +168,10 @@ fun HomeDownloadsScreen(
             .displayCutoutPadding(),
     ) {
         DownloadsHeader(
+            title = stringResource(selectedSection.titleResId),
             onBack = {
                 if (selectedLibraryItem != null) {
-                    selectedLibraryItem = null
+                    clearSelectedLibraryItem()
                 } else {
                     onBack()
                 }
@@ -196,7 +208,7 @@ fun HomeDownloadsScreen(
                 if (selectedLibraryItem != null) {
                     LibraryDetailPane(
                         libraryItem = selectedLibraryItem,
-                        onBack = { selectedLibraryItem = null },
+                        onBack = ::clearSelectedLibraryItem,
                         onClickPlay = { useBoxArt ->
                             selectedLibraryItem?.let { libraryItem ->
                                 onClickPlay(libraryItem.appId, useBoxArt)
@@ -261,6 +273,7 @@ fun HomeDownloadsScreen(
 
 @Composable
 private fun DownloadsHeader(
+    title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -272,7 +285,7 @@ private fun DownloadsHeader(
         BackButton(onClick = onBack)
 
         Text(
-            text = stringResource(R.string.settings_downloads_title),
+            text = title,
             style = MaterialTheme.typography.headlineSmall.copy(
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp,
