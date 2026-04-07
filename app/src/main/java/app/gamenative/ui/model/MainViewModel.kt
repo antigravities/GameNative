@@ -374,6 +374,10 @@ class MainViewModel @Inject constructor(
         _state.update { it.copy(bootingSplashText = value) }
     }
 
+    fun setBootingSplashHeroImageUrl(url: String) {
+        _state.update { it.copy(bootingSplashHeroImageUrl = url) }
+    }
+
     // Connection state management
 
     /**
@@ -525,6 +529,16 @@ class MainViewModel @Inject constructor(
                 )
             }
 
+            // Resolve hero image URL for the booting splash background
+            val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
+            val heroUrl = if (gameSource == GameSource.STEAM) {
+                val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
+                val steamApp = SteamService.getAppInfoOf(gameId)
+                steamApp?.getHeroUrl()?.ifEmpty { steamApp.headerUrl } ?: ""
+            } else {
+                ""
+            }
+            setBootingSplashHeroImageUrl(heroUrl)
             setShowBootingSplash(true)
             PluviaApp.events.emit(AndroidEvent.SetAllowedOrientation(PrefManager.allowedOrientation))
 

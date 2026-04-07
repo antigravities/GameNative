@@ -1661,6 +1661,7 @@ fun PluviaMain(
                     visible = state.showBootingSplash,
                     text = state.bootingSplashText,
                     onAbort = { viewModel.abortBoot() },
+                    heroImageUrl = state.bootingSplashHeroImageUrl,
                 )
             }
 
