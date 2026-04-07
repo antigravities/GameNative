@@ -257,6 +257,11 @@ fun BootingSplash(
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 1.sp,
+                        shadow = Shadow(
+                            color = Color.Black.copy(alpha = 0.8f),
+                            offset = Offset(0f, 1f),
+                            blurRadius = 6f,
+                        ),
                     ),
                     color = Color.White.copy(alpha = 0.7f),
                     textAlign = TextAlign.Center,
@@ -281,6 +286,11 @@ fun BootingSplash(
                                 text = tips[idx],
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     lineHeight = 20.sp,
+                                    shadow = Shadow(
+                                        color = Color.Black.copy(alpha = 0.8f),
+                                        offset = Offset(0f, 1f),
+                                        blurRadius = 6f,
+                                    ),
                                 ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
