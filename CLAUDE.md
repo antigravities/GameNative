@@ -12,6 +12,8 @@ Your number one priority is to fix the issues the user presents in a performant 
 
 Try to keep diffs small where possible in the event that upstream provides fixes to issues the user is encountering and changes need to be reverted. It is also not necessary to apply comments to or clean up existing code unless it impacts performance and/or relates directly to a problem the user is trying to solve.
 
+At the end of every plan, please provide a sample commit message that in a sentence or two summarizes a the changes made and/or problem(s) solved at a high level. Also, if you "learned" anything from exploring the codebase that may be useful to future agents, feel free to suggest changes to this CLAUDE.md file.
+
 ## Codebase Guide
 
 ### Gradle Modules
