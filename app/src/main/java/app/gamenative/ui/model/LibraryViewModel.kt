@@ -44,6 +44,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.util.EnumSet
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.min
@@ -96,6 +97,13 @@ class LibraryViewModel @Inject constructor(
     private var epicGameList: List<EpicGame> = emptyList()
     private var amazonGameList: List<AmazonGame> = emptyList()
 
+    // Caches the LibraryItem built for each Steam app ID.
+    // Key: Steam appId (Int). Value: the SteamAppSummary instance that produced the item,
+    // paired with the resulting LibraryItem. Validated by reference equality (===) because
+    // appList is only replaced when the owned-app count changes, so the same
+    // SteamAppSummary objects are reused across onFilterApps() calls between DAO emissions.
+    private val steamItemCache = ConcurrentHashMap<Int, Pair<SteamAppSummary, LibraryItem>>()
+
     // Track if this is the first load to apply minimum load time
     private var isFirstLoad = true
 
@@ -122,6 +130,9 @@ class LibraryViewModel @Inject constructor(
             "Unknown GPU"
         }
     }
+
+    // Pairs a LibraryItem with its installed state for sorting and final list assembly.
+    private data class LibraryEntry(val item: LibraryItem, val isInstalled: Boolean)
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -444,33 +455,39 @@ class LibraryViewModel @Inject constructor(
                 )
                 .toList()
 
-            // Map Steam apps to UI items
-            data class LibraryEntry(val item: LibraryItem, val isInstalled: Boolean)
-            val licensedDepotMap = SteamService.buildLicensedDepotMap(filteredSteamApps)
+            // Map Steam apps to UI items.
+            // licensedDepotMap is only needed on a cache miss, so defer its construction.
+            val licensedDepotMap by lazy { SteamService.buildLicensedDepotMap(filteredSteamApps) }
 
-            // Added this to avoid duplicate from custom imported steam game
+            // Track appIds to filter out custom-game entries that duplicate an imported Steam game.
             val steamEntriesAppIds = mutableSetOf<String>()
-
             val steamEntries: List<LibraryEntry> = filteredSteamApps.map { item ->
                 val isInstalled = downloadDirectorySet.contains(SteamService.getAppDirName(item))
-                val installedBranch = if (isInstalled) {
-                    SteamService.getInstalledApp(item.id)?.branch ?: "public"
-                } else {
-                    "public"
-                }
-                // base-game size: ownedDlc=emptyMap excludes DLC depots
-                val licensedDepots = licensedDepotMap[item.id]
-                val resolved = SteamService.resolveDownloadableDepots(item.depots, "", emptyMap(), licensedDepots)
-                val totalSizeBytes = resolved.values.sumOf { depot ->
-                    depot.manifests[installedBranch]?.size ?: depot.manifests.values.firstOrNull()?.size ?: 0L
-                }
-
-                // Move appId here
+                // Compute appId once so it is accessible in both the cache-hit and cache-miss
+                // paths below, and so every Steam item is tracked for custom-game deduplication.
                 val appId = "${GameSource.STEAM.name}_${item.id}"
                 steamEntriesAppIds.add(appId)
 
-                LibraryEntry(
-                    item = LibraryItem(
+                // Cache check: if the same SteamAppSummary *instance* is stored (===), the
+                // underlying DB row hasn't changed and we can skip the depot size calculation.
+        // appList is only replaced when the owned-app count changes, so the same
+                // SteamAppSummary objects are reused between onFilterApps() calls.
+                val cached = steamItemCache[item.id]
+                val libraryItem = if (cached != null && cached.first === item) {
+                    cached.second // cache hit: skip expensive resolveDownloadableDepots
+                } else {
+                    // Cache miss: compute sizeBytes (base-game only; ownedDlc=emptyMap excludes DLC depots)
+                    val installedBranch = if (isInstalled) {
+                        SteamService.getInstalledApp(item.id)?.branch ?: "public"
+                    } else {
+                        "public"
+                    }
+                    val licensedDepots = licensedDepotMap[item.id]
+                    val resolved = SteamService.resolveDownloadableDepots(item.depots, "", emptyMap(), licensedDepots)
+                    val totalSizeBytes = resolved.values.sumOf { depot ->
+                        depot.manifests[installedBranch]?.size ?: depot.manifests.values.firstOrNull()?.size ?: 0L
+                    }
+                    LibraryItem(
                         index = 0, // temporary, will be re-indexed after combining and paginating
                         appId = appId,
                         name = item.name,
@@ -480,9 +497,10 @@ class LibraryViewModel @Inject constructor(
                         heroImageUrl = item.getHeroUrl(),
                         isShared = (PrefManager.steamUserAccountId != 0 && !item.ownerAccountId.contains(PrefManager.steamUserAccountId)),
                         sizeBytes = totalSizeBytes,
-                    ),
-                    isInstalled = isInstalled,
-                )
+                    ).also { newItem -> steamItemCache[item.id] = item to newItem }
+                }
+
+                LibraryEntry(item = libraryItem, isInstalled = isInstalled)
             }
 
             // Scan Custom Games roots and create UI items (filtered by search query inside scanner)
