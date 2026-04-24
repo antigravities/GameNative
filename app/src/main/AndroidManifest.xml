@@ -60,6 +60,10 @@
                 <action android:name="app.gamenative.LAUNCH_GAME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="app.gamenative.OPEN_GAME_PAGE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
 
             <!--Allows app window to be resized on Oculus Quest VR headsets-->
             <meta-data
