@@ -17,8 +17,8 @@ data class SteamAppSummary(
     val libraryAssets: LibraryAssetsInfo = LibraryAssetsInfo(),
     @ColumnInfo("owner_account_id")
     val ownerAccountId: List<Int> = emptyList(),
-    val depots: Map<Int, DepotInfo> = emptyMap(),
-    val config: ConfigInfo = ConfigInfo(),
+    @ColumnInfo("install_dir")
+    val installDir: String = "",
     // Same columns as SteamApp; selected by the DAO summary queries for the VR library filter.
     @ColumnInfo("is_vr_only")
     val isVrOnly: Boolean = false,
