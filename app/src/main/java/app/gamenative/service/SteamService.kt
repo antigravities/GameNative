@@ -969,7 +969,9 @@ class SteamService : Service(), IChallengeUrlChanged {
         }
 
         fun getAppDirName(app: SteamAppSummary?): String {
-            var appName = app?.config?.installDir.orEmpty()
+            // Use the flat install_dir column rather than config.installDir (config was removed
+            // from SteamAppSummary to avoid JSON blob deserialization on the library load path).
+            var appName = app?.installDir.orEmpty()
             if (appName.isEmpty()) {
                 appName = app?.name.orEmpty()
             }

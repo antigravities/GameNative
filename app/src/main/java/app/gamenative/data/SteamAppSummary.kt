@@ -17,8 +17,8 @@ data class SteamAppSummary(
     val libraryAssets: LibraryAssetsInfo = LibraryAssetsInfo(),
     @ColumnInfo("owner_account_id")
     val ownerAccountId: List<Int> = emptyList(),
-    val depots: Map<Int, DepotInfo> = emptyMap(),
-    val config: ConfigInfo = ConfigInfo(),
+    @ColumnInfo("install_dir")
+    val installDir: String = "",
 ) {
     val headerUrl: String
         get() = "https://shared.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg"
