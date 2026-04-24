@@ -266,6 +266,17 @@ class MainActivity : ComponentActivity() {
                 Timber.w("[IntentLaunch]: parseLaunchIntent returned null for LAUNCH_GAME intent")
                 SnackbarManager.show(getString(R.string.intent_launch_failed))
             }
+
+            val openPageAppId = IntentLaunchManager.parseOpenPageIntent(intent)
+            if (openPageAppId != null) {
+                Timber.d("[IntentLaunch]: Received OPEN_GAME_PAGE for $openPageAppId (isNewIntent=$isNewIntent)")
+                lifecycleScope.launch {
+                    PluviaApp.events.emit(AndroidEvent.ExternalOpenGamePage(openPageAppId))
+                }
+            } else if (intent.action == "${BuildConfig.APPLICATION_ID}.OPEN_GAME_PAGE") {
+                Timber.w("[IntentLaunch]: parseOpenPageIntent returned null for OPEN_GAME_PAGE intent")
+                SnackbarManager.show(getString(R.string.intent_launch_failed))
+            }
         } catch (e: Exception) {
             Timber.e(e, "[IntentLaunch]: Failed to handle launch intent")
         }
