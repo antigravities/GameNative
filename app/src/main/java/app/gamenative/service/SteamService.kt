@@ -28,6 +28,7 @@ import app.gamenative.data.LaunchInfo
 import app.gamenative.data.OwnedGames
 import app.gamenative.data.PostSyncInfo
 import app.gamenative.data.SteamApp
+import app.gamenative.data.SteamAppSummary
 import app.gamenative.data.SteamControllerConfigDetail
 import app.gamenative.data.SteamFriend
 import app.gamenative.data.SteamLicense
@@ -596,6 +597,19 @@ class SteamService : Service(), IChallengeUrlChanged {
             }.toMap()
         }
 
+        @JvmName("buildLicensedDepotMapSummaries")
+        fun buildLicensedDepotMap(apps: List<SteamAppSummary>): Map<Int, Set<Int>> {
+            val pkgIds = apps.map { it.packageId }.filter { it != INVALID_PKG_ID }.distinct()
+            val licenses = runBlocking(Dispatchers.IO) {
+                instance?.licenseDao?.findLicenses(pkgIds) ?: emptyList()
+            }
+            val pkgToDepots = licenses.associate { it.packageId to it.depotIds.toSet() }
+            return apps.mapNotNull { app ->
+                val depots = pkgToDepots[app.packageId]?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                app.id to depots
+            }.toMap()
+        }
+
         fun getAppInfoOf(appId: Int): SteamApp? {
             return runBlocking(Dispatchers.IO) { instance?.appDao?.findApp(appId) }
         }
@@ -947,6 +961,14 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         fun getAppDirName(app: SteamApp?): String {
             // The folder name, if it got made
+            var appName = app?.config?.installDir.orEmpty()
+            if (appName.isEmpty()) {
+                appName = app?.name.orEmpty()
+            }
+            return appName
+        }
+
+        fun getAppDirName(app: SteamAppSummary?): String {
             var appName = app?.config?.installDir.orEmpty()
             if (appName.isEmpty()) {
                 appName = app?.name.orEmpty()
