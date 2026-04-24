@@ -114,6 +114,15 @@ class LibraryViewModel @Inject constructor(
     private var searchDebounceJob: Job? = null
     private val SEARCH_DEBOUNCE_MS = 500L // 500ms debounce
 
+    // Background job that computes sizeBytes for all owned apps after the initial display.
+    // Cancelled and restarted whenever appList is replaced (owned-app count changes).
+    private var sizeComputationJob: Job? = null
+
+    // Stores computed sizeBytes keyed by Steam appId. Populated progressively by the background
+    // size job. onFilterApps() reads this on cache miss so items show a size as soon as it is
+    // known, without waiting for the full computation to finish.
+    private val sizeBytesCache = ConcurrentHashMap<Int, Long>()
+
     // Cache GPU name to avoid repeated calls
     private val gpuName: String by lazy {
         try {
@@ -143,7 +152,11 @@ class LibraryViewModel @Inject constructor(
                 // Check if the list has actually changed before triggering a re-filter
                 if (appList.size != apps.size) {
                     appList = apps
+                    // Show the library immediately (sizeBytes = 0 until background job finishes).
                     onFilterApps(paginationCurrentPage)
+                    // Kick off background sizeBytes computation. Cancels any prior run so a rapid
+                    // count change (e.g. PICS sync bursts) doesn't pile up duplicate jobs.
+                    launchSizeComputation()
                 }
             }
         }
@@ -198,10 +211,72 @@ class LibraryViewModel @Inject constructor(
 
     override fun onCleared() {
         searchDebounceJob?.cancel()
+        sizeComputationJob?.cancel()
         PluviaApp.events.off<AndroidEvent.LibraryInstallStatusChanged, Unit>(onInstallStatusChanged)
         PluviaApp.events.off<AndroidEvent.CustomGameImagesFetched, Unit>(onCustomGameImagesFetched)
         PluviaApp.events.off<AndroidEvent.RecommendationToggleChanged, Unit>(onRecommendationToggleChanged)
         super.onCleared()
+    }
+
+    // Fetches depots for all owned apps on a background thread and populates sizeBytesCache.
+    // Called once after the initial appList load, and again whenever appList is replaced
+    // (i.e., the owned-app count changes during a PICS sync burst). Any prior run is cancelled
+    // first so duplicate jobs don't pile up.
+    //
+    // Why not compute sizes in onFilterApps()? resolveDownloadableDepots() is expensive (it walks
+    // depot maps and license tables), and calling it for 45k apps on the main filter path blocks
+    // the library from appearing for ~15 minutes. This job runs after the library is already
+    // visible, then calls onFilterApps() once more at the end with accurate sizes in the cache.
+    private fun launchSizeComputation() {
+        sizeComputationJob?.cancel()
+        sizeComputationJob = viewModelScope.launch(Dispatchers.IO) {
+            // Build the depot-license map from the in-memory appList (already loaded, no extra DB
+            // hit). buildLicensedDepotMap has a SteamAppSummary overload (see SteamService.kt ~586)
+            // annotated @JvmName("buildLicensedDepotMapSummaries") so the compiler picks it up.
+            val licensedDepotMap = SteamService.buildLicensedDepotMap(appList)
+
+            // Fetch only id + depots for each owned app (the two columns we need for size math).
+            // This is still subject to CursorWindow overflow for very large libraries, so it uses
+            // the same adaptive-paging pattern as the summary query and runs in the background
+            // while the library is already visible.
+            val allDepots = steamAppDao.getAllOwnedAppDepotsPaged()
+
+            for (depotEntry in allDepots) {
+                val licensedDepots = licensedDepotMap[depotEntry.id]
+
+                // resolveDownloadableDepots filters the depot map down to depots the user
+                // is actually licensed to download. The empty-string branch arg means "use
+                // public branch"; we avoid the per-app getInstalledApp() DB call here because
+                // that would be 45k extra queries. The size will be slightly wrong for apps
+                // currently on a beta branch, but that's an acceptable trade-off.
+                val resolved = SteamService.resolveDownloadableDepots(
+                    depotEntry.depots, "", emptyMap(), licensedDepots,
+                )
+
+                // Sum manifest sizes across all downloadable depots for this app.
+                // "public" is the stable branch name; fall back to whichever manifest is first
+                // for apps that only publish non-public branches.
+                val totalSizeBytes = resolved.values.sumOf { depot ->
+                    depot.manifests["public"]?.size
+                        ?: depot.manifests.values.firstOrNull()?.size
+                        ?: 0L
+                }
+
+                // Write to the flat size cache so future onFilterApps() cache misses see the
+                // correct value without rebuilding the LibraryItem from scratch.
+                sizeBytesCache[depotEntry.id] = totalSizeBytes
+
+                // Also update the existing steamItemCache entry so that a cache *hit* (===
+                // reference match) also returns the correct sizeBytes on the next filter pass,
+                // without having to evict and rebuild the whole LibraryItem.
+                val cached = steamItemCache[depotEntry.id] ?: continue
+                steamItemCache[depotEntry.id] = cached.first to cached.second.copy(sizeBytes = totalSizeBytes)
+            }
+
+            // Re-run the filter with a fully warm cache so SIZE_SMALLEST / SIZE_LARGEST sort
+            // reflects accurate values. steamItemCache hits are O(1) so this is fast.
+            onFilterApps(paginationCurrentPage)
+        }
     }
 
     fun onModalBottomSheet(value: Boolean) {
@@ -463,9 +538,9 @@ class LibraryViewModel @Inject constructor(
                 .toList()
 
             // Map Steam apps to UI items.
-            // licensedDepotMap is only needed on a cache miss, so defer its construction.
-            val licensedDepotMap by lazy { SteamService.buildLicensedDepotMap(filteredSteamApps) }
-
+            // sizeBytes comes from sizeBytesCache (populated by the background size job).
+            // On cache miss the LibraryItem is built immediately with whatever size is known so
+            // far (0 until the background job has processed that app).
             // Track appIds to filter out custom-game entries that duplicate an imported Steam game.
             val steamEntriesAppIds = mutableSetOf<String>()
             val steamEntries: List<LibraryEntry> = filteredSteamApps.map { item ->
@@ -476,24 +551,15 @@ class LibraryViewModel @Inject constructor(
                 steamEntriesAppIds.add(appId)
 
                 // Cache check: if the same SteamAppSummary *instance* is stored (===), the
-                // underlying DB row hasn't changed and we can skip the depot size calculation.
-        // appList is only replaced when the owned-app count changes, so the same
+                // underlying DB row hasn't changed and we can reuse the LibraryItem as-is.
+                // appList is only replaced when the owned-app count changes, so the same
                 // SteamAppSummary objects are reused between onFilterApps() calls.
                 val cached = steamItemCache[item.id]
                 val libraryItem = if (cached != null && cached.first === item) {
-                    cached.second // cache hit: skip expensive resolveDownloadableDepots
+                    cached.second // cache hit: no work needed
                 } else {
-                    // Cache miss: compute sizeBytes (base-game only; ownedDlc=emptyMap excludes DLC depots)
-                    val installedBranch = if (isInstalled) {
-                        SteamService.getInstalledApp(item.id)?.branch ?: "public"
-                    } else {
-                        "public"
-                    }
-                    val licensedDepots = licensedDepotMap[item.id]
-                    val resolved = SteamService.resolveDownloadableDepots(item.depots, "", emptyMap(), licensedDepots)
-                    val totalSizeBytes = resolved.values.sumOf { depot ->
-                        depot.manifests[installedBranch]?.size ?: depot.manifests.values.firstOrNull()?.size ?: 0L
-                    }
+                    // Cache miss: build the item. sizeBytes is read from sizeBytesCache, which the
+                    // background size job populates. Returns 0 until that job reaches this app.
                     LibraryItem(
                         index = 0, // temporary, will be re-indexed after combining and paginating
                         appId = appId,
@@ -503,7 +569,7 @@ class LibraryViewModel @Inject constructor(
                         headerImageUrl = item.headerUrl,
                         heroImageUrl = item.getHeroUrl(),
                         isShared = (PrefManager.steamUserAccountId != 0 && !item.ownerAccountId.contains(PrefManager.steamUserAccountId)),
-                        sizeBytes = totalSizeBytes,
+                        sizeBytes = sizeBytesCache[item.id] ?: 0L,
                     ).also { newItem -> steamItemCache[item.id] = item to newItem }
                 }
 
