@@ -128,7 +128,7 @@ interface SteamAppDao {
 
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, depots, config " +
+            "owner_account_id, depots, config, is_vr_only, is_vr_supported " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "ORDER BY LOWER(app.name), app.id LIMIT :limit OFFSET :offset",
     )
@@ -176,6 +176,29 @@ interface SteamAppDao {
                 flow { emit(_getAllOwnedAppSummariesPaged(invalidPkgId, includeExpiredFlag)) }
             }
     }
+
+    // Called on the search path only; returns summaries matching both type and name.
+    // [types] must be non-empty — Room does not generate valid SQL for an empty IN list.
+    // Known limitation: SQLite LIKE is ASCII case-insensitive only, so diacritic variants
+    // (e.g. searching "Cafe" will NOT match "Café") are silently excluded on this path.
+    // An FTS5 virtual table (proposal #4) would fix this properly.
+    @Query(
+        "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
+            "owner_account_id, depots, config, is_vr_only, is_vr_supported " +
+            "FROM steam_app AS app " + OWNED_APPS_WHERE +
+            // Mirrors LibraryViewModel.typeMatches(): VR-only apps only appear via the VR filter.
+            "AND ((app.is_vr_only = 0 AND app.type IN (:types)) " +
+            "OR (:includeVr AND (app.is_vr_only = 1 OR app.is_vr_supported = 1))) " +
+            "AND LOWER(app.name) LIKE '%' || LOWER(:searchQuery) || '%' " +
+            "ORDER BY LOWER(app.name) ASC",
+    )
+    suspend fun searchOwnedAppSummaries(
+        searchQuery: String,
+        types: List<Int>,               // AppType.code values: game=1, application=2, tool=4, demo=8
+        includeVr: Boolean = false,     // true when the VR app filter is selected
+        invalidPkgId: Int = INVALID_PKG_ID,
+        includeExpired: Boolean = false,
+    ): List<SteamAppSummary>
 
     @Query(
         "SELECT * FROM steam_app " +

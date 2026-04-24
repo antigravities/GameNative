@@ -756,51 +756,68 @@ class LibraryViewModel @Inject constructor(
                 return status == GameCompatibilityStatus.COMPATIBLE || status == GameCompatibilityStatus.GPU_COMPATIBLE
             }
 
-            val steamOwnerTypeFiltered: List<SteamAppSummary> = appList
-                .asSequence()
-                .filter { item ->
-                    SteamService.familyMembers.ifEmpty {
-                        // Handle the case where userSteamId might be null
-                        SteamService.userSteamId?.let { steamId ->
-                            listOf(steamId.accountID.toInt())
-                        } ?: emptyList()
-                    }.let { owners ->
-                        if (owners.isEmpty()) {
-                            true // no owner info ⇒ don’t filter the item out
-                        } else {
-                            owners.any { item.ownerAccountId.contains(it) }
-                        }
-                    }
+            // Reusable owner / family-sharing / installed predicates used by both paths below.
+            // owner_account_id is a JSON array stored as a string, so these checks stay in Kotlin.
+            fun ownerMatches(item: SteamAppSummary): Boolean {
+                val owners = SteamService.familyMembers.ifEmpty {
+                    SteamService.userSteamId?.let { listOf(it.accountID.toInt()) } ?: emptyList()
                 }
-                .filter { item ->
-                    val inTypeBucket = !item.isVrOnly && currentFilter.any { item.type == it }
-                    val inVrBucket = item.isVrGame && currentState.appInfoSortType.contains(AppFilter.VR)
-                    inTypeBucket || inVrBucket
-                }
-                .filter { item ->
-                    if (currentState.appInfoSortType.contains(AppFilter.SHARED)) {
-                        true
+                return owners.isEmpty() || owners.any { item.ownerAccountId.contains(it) }
+            }
+            // Type filter incl. upstream's VR bucket: VR-only titles are hidden from the normal type
+            // buckets and shown only when the VR filter is selected; VR-capable titles show in both.
+            fun typeMatches(item: SteamAppSummary): Boolean {
+                val inTypeBucket = !item.isVrOnly && currentFilter.any { item.type == it }
+                val inVrBucket = item.isVrGame && currentState.appInfoSortType.contains(AppFilter.VR)
+                return inTypeBucket || inVrBucket
+            }
+            fun sharedMatches(item: SteamAppSummary): Boolean =
+                currentState.appInfoSortType.contains(AppFilter.SHARED) ||
+                    item.ownerAccountId.contains(PrefManager.steamUserAccountId) ||
+                    PrefManager.steamUserAccountId == 0
+            fun installedMatches(item: SteamAppSummary): Boolean {
+                val installedOnly = currentState.currentTab.installedOnly ||
+                    currentState.appInfoSortType.contains(AppFilter.INSTALLED)
+                return !installedOnly || downloadDirectorySet.contains(SteamService.getAppDirName(item))
+            }
+
+            val steamOwnerTypeFiltered: List<SteamAppSummary> =
+                if (currentState.searchQuery.isNotBlank()) {
+                    // --- SQL search path ---
+                    // SQLite applies type IN (...) and LOWER(name) LIKE ‘%%’ so we only
+                    // deserialize the rows that actually match, instead of all 45k summaries.
+                    // The === steamItemCache is bypassed here (fresh DB objects won’t match), but
+                    // the result set is small so depot recalculation on cache miss is cheap.
+                    // The SQL applies the same type/VR rule as typeMatches() above (see the DAO query).
+                    val typeCodes = currentFilter.map { it.code }
+                    val includeVr = currentState.appInfoSortType.contains(AppFilter.VR)
+                    if (typeCodes.isEmpty() && !includeVr) {
+                        emptyList()
                     } else {
-                        item.ownerAccountId.contains(PrefManager.steamUserAccountId) || PrefManager.steamUserAccountId == 0
+                        steamAppDao.searchOwnedAppSummaries(
+                            searchQuery = currentState.searchQuery,
+                            // Room can't bind an empty IN list, so use a code no AppType has.
+                            types = typeCodes.ifEmpty { listOf(-1) },
+                            includeVr = includeVr,
+                            includeExpired = currentState.appInfoSortType.contains(AppFilter.EXPIRED),
+                        )
+                            .asSequence()
+                            .filter { ownerMatches(it) }
+                            .filter { sharedMatches(it) }
+                            .filter { installedMatches(it) }
+                            .toList()
                     }
+                } else {
+                    // --- Existing Kotlin path (unchanged) ---
+                    // appList holds stable SteamAppSummary references; === cache remains valid.
+                    appList
+                        .asSequence()
+                        .filter { ownerMatches(it) }
+                        .filter { typeMatches(it) }
+                        .filter { sharedMatches(it) }
+                        .filter { installedMatches(it) }
+                        .toList()
                 }
-                .filter { item ->
-                    if (currentState.searchQuery.isNotEmpty()) {
-                        matches(item.name, currentState.searchQuery)
-                    } else {
-                        true
-                    }
-                }
-                .filter { item ->
-                    val installedOnly = currentState.currentTab.installedOnly ||
-                        currentState.appInfoSortType.contains(AppFilter.INSTALLED)
-                    if (installedOnly) {
-                        downloadDirectorySet.contains(SteamService.getAppDirName(item))
-                    } else {
-                        true
-                    }
-                }
-                .toList()
 
             // Apply the Steam collection filter — union/OR, fail-open (see SteamCollectionFilter).
             // Curated-list selections use the same rules, then passesAll intersects the sections.

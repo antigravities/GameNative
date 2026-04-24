@@ -19,7 +19,16 @@ data class SteamAppSummary(
     val ownerAccountId: List<Int> = emptyList(),
     val depots: Map<Int, DepotInfo> = emptyMap(),
     val config: ConfigInfo = ConfigInfo(),
+    // Same columns as SteamApp; selected by the DAO summary queries for the VR library filter.
+    @ColumnInfo("is_vr_only")
+    val isVrOnly: Boolean = false,
+    @ColumnInfo("is_vr_supported")
+    val isVrSupported: Boolean = false,
 ) {
+    val isVrGame: Boolean
+        get() = isVrOnly || isVrSupported
+
+
     val headerUrl: String
         get() = "https://shared.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg"
 
