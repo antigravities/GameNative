@@ -83,6 +83,7 @@ import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.model.MainViewModel
 import app.gamenative.ui.screen.HomeScreen
 import app.gamenative.ui.screen.PluviaScreen
+import app.gamenative.ui.screen.library.GamePageScreen
 import app.gamenative.ui.screen.login.UserLoginScreen
 import app.gamenative.ui.screen.settings.SettingsScreen
 import app.gamenative.ui.screen.xserver.XServerScreen
@@ -1299,6 +1300,16 @@ fun PluviaMain(
                 ) { backStackEntry ->
                     val isOffline = backStackEntry.arguments?.getBoolean("offline") ?: false
 
+                    // Navigate to GamePage when an OPEN_GAME_PAGE intent arrives.
+                    // Placed here (inside the Home composable) so it only fires after login.
+                    val pendingOpenAppId by viewModel.pendingOpenAppId.collectAsStateWithLifecycle()
+                    LaunchedEffect(pendingOpenAppId) {
+                        val appId = pendingOpenAppId ?: return@LaunchedEffect
+                        Timber.i("[PluviaMain]: Navigating to GamePage for $appId")
+                        navController.navigate(PluviaScreen.GamePage.route(appId))
+                        viewModel.clearPendingOpenAppId()
+                    }
+
                     // Show update/crash/support dialogs when Home is first displayed
                     // Skip when offline with Steam credentials (avoid flash when Steam reconnects)
                     LaunchedEffect(Unit) {
@@ -1478,6 +1489,50 @@ fun PluviaMain(
                         onAppTheme = viewModel::setTheme,
                         onPaletteStyle = viewModel::setPalette,
                         onBack = { navController.navigateUp() },
+                    )
+                }
+
+                /** Game Page — opened via OPEN_GAME_PAGE intent, bypasses full library load **/
+                composable(
+                    route = PluviaScreen.GamePage.route,
+                    arguments = listOf(
+                        navArgument(PluviaScreen.GamePage.ARG_APP_ID) {
+                            type = NavType.StringType
+                        },
+                    ),
+                ) {
+                    val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
+                    GamePageScreen(
+                        onClickPlay = { appId, asContainer ->
+                            trackGameLaunched(appId)
+                            viewModel.setLaunchedAppId(appId)
+                            viewModel.setBootToContainer(asContainer)
+                            viewModel.setTestGraphics(false)
+                            viewModel.setOffline(isOffline)
+                            preLaunchApp(
+                                context = context,
+                                appId = appId,
+                                setLoadingDialogVisible = viewModel::setLoadingDialogVisible,
+                                setLoadingProgress = viewModel::setLoadingDialogProgress,
+                                setLoadingMessage = viewModel::setLoadingDialogMessage,
+                                setMessageDialogState = setMessageDialogState,
+                                onSuccess = viewModel::launchApp,
+                            )
+                        },
+                        onTestGraphics = { appId ->
+                            viewModel.setLaunchedAppId(appId)
+                            viewModel.setTestGraphics(true)
+                            preLaunchApp(
+                                context = context,
+                                appId = appId,
+                                setLoadingDialogVisible = viewModel::setLoadingDialogVisible,
+                                setLoadingProgress = viewModel::setLoadingDialogProgress,
+                                setLoadingMessage = viewModel::setLoadingDialogMessage,
+                                setMessageDialogState = setMessageDialogState,
+                                onSuccess = viewModel::launchApp,
+                            )
+                        },
+                        onBack = { navController.popBackStack() },
                     )
                 }
             }
