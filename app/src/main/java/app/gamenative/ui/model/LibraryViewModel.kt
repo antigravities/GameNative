@@ -12,7 +12,7 @@ import app.gamenative.PrefManager
 import app.gamenative.data.GameCompatibilityStatus
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
-import app.gamenative.data.SteamApp
+import app.gamenative.data.SteamAppSummary
 import app.gamenative.events.AndroidEvent
 import app.gamenative.data.GOGGame
 import app.gamenative.data.EpicGame
@@ -95,7 +95,7 @@ class LibraryViewModel @Inject constructor(
     @Volatile private var lastPageInCurrentFilter: Int = 0
 
     // Complete and unfiltered app list
-    private var appList: List<SteamApp> = emptyList()
+    private var appList: List<SteamAppSummary> = emptyList()
     private var gogGameList: List<GOGGame> = emptyList()
     private var epicGameList: List<EpicGame> = emptyList()
     private var amazonGameList: List<AmazonGame> = emptyList()
@@ -136,7 +136,7 @@ class LibraryViewModel @Inject constructor(
                 .map { it.appInfoSortType.contains(AppFilter.EXPIRED) }
                 .distinctUntilChanged()
                 .flatMapLatest { includeExpired ->
-                    steamAppDao.getAllOwnedApps(includeExpired = includeExpired)
+                    steamAppDao.getAllOwnedAppSummaries(includeExpired = includeExpired)
                 }
                 .collect { apps ->
                     Timber.tag("LibraryViewModel").d("Collecting ${apps.size} apps")
@@ -399,7 +399,7 @@ class LibraryViewModel @Inject constructor(
                 return status == GameCompatibilityStatus.COMPATIBLE || status == GameCompatibilityStatus.GPU_COMPATIBLE
             }
 
-            val steamFilteredBeforeCompatibility: List<SteamApp> = appList
+            val steamFilteredBeforeCompatibility: List<SteamAppSummary> = appList
                 .asSequence()
                 .filter { item ->
                     SteamService.familyMembers.ifEmpty {
@@ -445,11 +445,11 @@ class LibraryViewModel @Inject constructor(
 
             // Filter Steam apps first (no pagination yet)
             // Note: Don't sort individual lists - we'll sort the combined list for consistent ordering
-            val filteredSteamApps: List<SteamApp> = steamFilteredBeforeCompatibility
+            val filteredSteamApps: List<SteamAppSummary> = steamFilteredBeforeCompatibility
                 .asSequence()
                 .filter { item -> passesCompatibleFilter(item.name) }
                 .sortedWith(
-                    compareByDescending<SteamApp> {
+                    compareByDescending<SteamAppSummary> {
                         downloadDirectorySet.contains(SteamService.getAppDirName(it))
                     }.thenBy { it.name.lowercase() },
                 )
