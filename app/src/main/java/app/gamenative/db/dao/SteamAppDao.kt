@@ -135,6 +135,25 @@ interface SteamAppDao {
             flow { emit(_getAllOwnedAppSummariesPaged(invalidPkgId)) }
         }
 
+    // Called on the search path only; returns summaries matching both type and name.
+    // [types] must be non-empty — Room does not generate valid SQL for an empty IN list.
+    // Known limitation: SQLite LIKE is ASCII case-insensitive only, so diacritic variants
+    // (e.g. searching "Cafe" will NOT match "Café") are silently excluded on this path.
+    // An FTS5 virtual table (proposal #4) would fix this properly.
+    @Query(
+        "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
+            "owner_account_id, depots, config " +
+            "FROM steam_app AS app " + OWNED_APPS_WHERE +
+            "AND app.type IN (:types) " +
+            "AND LOWER(app.name) LIKE '%' || LOWER(:searchQuery) || '%' " +
+            "ORDER BY LOWER(app.name) ASC",
+    )
+    suspend fun searchOwnedAppSummaries(
+        searchQuery: String,
+        types: List<Int>,               // AppType.code values: game=1, application=2, tool=4, demo=8
+        invalidPkgId: Int = INVALID_PKG_ID,
+    ): List<SteamAppSummary>
+
     @Query(
         "SELECT * FROM steam_app " +
             "WHERE id != 480 " +
