@@ -399,49 +399,56 @@ class LibraryViewModel @Inject constructor(
                 return status == GameCompatibilityStatus.COMPATIBLE || status == GameCompatibilityStatus.GPU_COMPATIBLE
             }
 
-            val steamFilteredBeforeCompatibility: List<SteamAppSummary> = appList
-                .asSequence()
-                .filter { item ->
-                    SteamService.familyMembers.ifEmpty {
-                        // Handle the case where userSteamId might be null
-                        SteamService.userSteamId?.let { steamId ->
-                            listOf(steamId.accountID.toInt())
-                        } ?: emptyList()
-                    }.let { owners ->
-                        if (owners.isEmpty()) {
-                            true // no owner info ⇒ don’t filter the item out
-                        } else {
-                            owners.any { item.ownerAccountId.contains(it) }
-                        }
-                    }
+            // Reusable owner / family-sharing / installed predicates used by both paths below.
+            // owner_account_id is a JSON array stored as a string, so these checks stay in Kotlin.
+            fun ownerMatches(item: SteamAppSummary): Boolean {
+                val owners = SteamService.familyMembers.ifEmpty {
+                    SteamService.userSteamId?.let { listOf(it.accountID.toInt()) } ?: emptyList()
                 }
-                .filter { item ->
-                    currentFilter.any { item.type == it }
-                }
-                .filter { item ->
-                    if (currentState.appInfoSortType.contains(AppFilter.SHARED)) {
-                        true
+                return owners.isEmpty() || owners.any { item.ownerAccountId.contains(it) }
+            }
+            fun sharedMatches(item: SteamAppSummary): Boolean =
+                currentState.appInfoSortType.contains(AppFilter.SHARED) ||
+                    item.ownerAccountId.contains(PrefManager.steamUserAccountId) ||
+                    PrefManager.steamUserAccountId == 0
+            fun installedMatches(item: SteamAppSummary): Boolean {
+                val installedOnly = currentState.currentTab.installedOnly ||
+                    currentState.appInfoSortType.contains(AppFilter.INSTALLED)
+                return !installedOnly || downloadDirectorySet.contains(SteamService.getAppDirName(item))
+            }
+
+            val steamFilteredBeforeCompatibility: List<SteamAppSummary> =
+                if (currentState.searchQuery.isNotBlank()) {
+                    // --- SQL search path ---
+                    // SQLite applies type IN (...) and LOWER(name) LIKE ‘%%’ so we only
+                    // deserialize the rows that actually match, instead of all 45k summaries.
+                    // The === steamItemCache is bypassed here (fresh DB objects won’t match), but
+                    // the result set is small so depot recalculation on cache miss is cheap.
+                    val typeCodes = currentFilter.map { it.code }
+                    if (typeCodes.isEmpty()) {
+                        emptyList()
                     } else {
-                        item.ownerAccountId.contains(PrefManager.steamUserAccountId) || PrefManager.steamUserAccountId == 0
+                        steamAppDao.searchOwnedAppSummaries(
+                            searchQuery = currentState.searchQuery,
+                            types = typeCodes,
+                        )
+                            .asSequence()
+                            .filter { ownerMatches(it) }
+                            .filter { sharedMatches(it) }
+                            .filter { installedMatches(it) }
+                            .toList()
                     }
+                } else {
+                    // --- Existing Kotlin path (unchanged) ---
+                    // appList holds stable SteamAppSummary references; === cache remains valid.
+                    appList
+                        .asSequence()
+                        .filter { ownerMatches(it) }
+                        .filter { item -> currentFilter.any { item.type == it } }
+                        .filter { sharedMatches(it) }
+                        .filter { installedMatches(it) }
+                        .toList()
                 }
-                .filter { item ->
-                    if (currentState.searchQuery.isNotEmpty()) {
-                        matches(item.name, currentState.searchQuery)
-                    } else {
-                        true
-                    }
-                }
-                .filter { item ->
-                    val installedOnly = currentState.currentTab.installedOnly ||
-                        currentState.appInfoSortType.contains(AppFilter.INSTALLED)
-                    if (installedOnly) {
-                        downloadDirectorySet.contains(SteamService.getAppDirName(item))
-                    } else {
-                        true
-                    }
-                }
-                .toList()
 
             // Filter Steam apps first (no pagination yet)
             // Note: Don't sort individual lists - we'll sort the combined list for consistent ordering
