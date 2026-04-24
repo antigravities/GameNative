@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import app.gamenative.data.SteamApp
+import app.gamenative.data.SteamAppDepots
 import app.gamenative.data.SteamAppSummary
 import app.gamenative.service.SteamService.Companion.INVALID_PKG_ID
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -128,7 +129,7 @@ interface SteamAppDao {
 
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, depots, config " +
+            "owner_account_id, install_dir " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "ORDER BY LOWER(app.name), app.id LIMIT :limit OFFSET :offset",
     )
@@ -184,7 +185,7 @@ interface SteamAppDao {
     // An FTS5 virtual table (proposal #4) would fix this properly.
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, depots, config " +
+            "owner_account_id, install_dir " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.type IN (:types) " +
             "AND LOWER(app.name) LIKE '%' || LOWER(:searchQuery) || '%' " +
@@ -194,7 +195,44 @@ interface SteamAppDao {
         searchQuery: String,
         types: List<Int>,               // AppType.code values: game=1, application=2, tool=4, demo=8
         invalidPkgId: Int = INVALID_PKG_ID,
+        includeExpired: Int = 0,
     ): List<SteamAppSummary>
+
+    // Fetches only id + depots for owned apps. Used by the background sizeBytes computation job
+    // so that the full depot map does not block the initial library display.
+    // Same adaptive-paging pattern as _getAllOwnedAppSummariesPaged to handle CursorWindow limits.
+    @Query(
+        "SELECT id, depots FROM steam_app AS app " + OWNED_APPS_WHERE +
+            "ORDER BY app.id LIMIT :limit OFFSET :offset",
+    )
+    suspend fun _getOwnedAppDepotsPage(
+        limit: Int,
+        offset: Int,
+        invalidPkgId: Int = INVALID_PKG_ID,
+        includeExpired: Int = 0,
+    ): List<SteamAppDepots>
+
+    @Transaction
+    suspend fun getAllOwnedAppDepotsPaged(invalidPkgId: Int = INVALID_PKG_ID): List<SteamAppDepots> {
+        val result = mutableListOf<SteamAppDepots>()
+        var offset = 0
+        while (true) {
+            var pageSize = if (offset == 0) Int.MAX_VALUE else PAGE_SIZE
+            while (true) {
+                try {
+                    val page = _getOwnedAppDepotsPage(pageSize, offset, invalidPkgId)
+                    if (page.isEmpty()) return result
+                    result += page
+                    if (pageSize == Int.MAX_VALUE) return result
+                    offset += page.size
+                    break
+                } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
+                    if (pageSize <= 1) throw e
+                    pageSize = if (pageSize == Int.MAX_VALUE) PAGE_SIZE else (pageSize / 2).coerceAtLeast(1)
+                }
+            }
+        }
+    }
 
     @Query(
         "SELECT * FROM steam_app " +
