@@ -20,6 +20,7 @@ object IntentLaunchManager {
     private const val EXTRA_GAME_SOURCE = "game_source"
     private const val EXTRA_CONTAINER_CONFIG = "container_config"
     private const val ACTION_LAUNCH_GAME = "app.gamenative.LAUNCH_GAME"
+    const val ACTION_OPEN_GAME_PAGE = "app.gamenative.OPEN_GAME_PAGE"
     private const val MAX_CONFIG_JSON_SIZE = 50000 // 50KB limit to prevent memory exhaustion
 
     data class LaunchRequest(
@@ -66,6 +67,23 @@ object IntentLaunchManager {
         }
 
         return LaunchRequest(appId, containerConfig)
+    }
+
+    fun parseOpenPageIntent(intent: Intent): String? {
+        if (intent.action != ACTION_OPEN_GAME_PAGE) return null
+
+        val gameId = intent.getIntExtra(EXTRA_APP_ID, -1)
+        if (gameId <= 0) {
+            Timber.w("[IntentLaunchManager]: OPEN_GAME_PAGE intent missing valid app_id: $gameId")
+            return null
+        }
+
+        var gameSource = intent.getStringExtra(EXTRA_GAME_SOURCE)?.uppercase(java.util.Locale.ROOT)
+        if (GameSource.entries.none { it.name == gameSource }) {
+            gameSource = GameSource.STEAM.name
+        }
+
+        return "${gameSource}_$gameId"
     }
 
     fun applyTemporaryConfigOverride(context: Context, appId: String, configOverride: ContainerData) {
