@@ -99,6 +99,15 @@ When making a schema change, increment the schema version in `PluviaDatabase` an
 - **Supporting**: `virglrenderer`, `patchelf`, `adrenotools`
 - **Prebuilt `.so`**: `app/src/main/jniLibs/` — uses legacy JNI packaging (`useLegacyPackaging = true`)
 
+### Library Screen Hot Path
+
+`LibraryViewModel.onFilterApps()` is called on every user interaction with the library (search, sort, tab switch, install/uninstall events). Key facts for anyone working on this code:
+
+- **`SteamAppDao.getAllOwnedAppSummaries()`** only re-emits when the owned-app *count* changes (driven by `_observeOwnedAppCount()`). Individual field updates from PICS sync — e.g., depot size changes — do **not** trigger a re-emission. This means `appList` in `LibraryViewModel` is stable between count changes, and the `SteamAppSummary` object instances inside it are reused across `onFilterApps()` calls. Reference equality (`===`) is therefore sufficient to detect whether a summary has changed.
+- **`SteamAppSummary` is not lightweight** despite being a projection. It still includes `depots: Map<Int, DepotInfo>` and `config: ConfigInfo` blobs. Only `branches` and `ufs` are excluded relative to the full `SteamApp` entity. Do not assume it is cheap to compare structurally.
+- **`SteamApp.lastChangeNumber`** is the authoritative PICS change marker; it increments whenever Steam updates an app's metadata. It is not currently projected into `SteamAppSummary` but is useful for invalidation logic if finer-grained change detection is ever needed.
+- **Per-item bottleneck**: `SteamService.resolveDownloadableDepots()` + `sumOf()` walks depot manifests for every filtered Steam app on every `onFilterApps()` invocation. As of this writing, `LibraryViewModel.steamItemCache` memoizes this result keyed by Steam app ID, using `SteamAppSummary` reference equality to validate cache entries.
+
 ## Application Entry Points
 
 ```
