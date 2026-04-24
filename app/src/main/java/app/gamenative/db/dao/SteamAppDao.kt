@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import app.gamenative.data.SteamApp
+import app.gamenative.data.SteamAppSummary
 import app.gamenative.service.SteamService.Companion.INVALID_PKG_ID
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -89,6 +90,49 @@ interface SteamAppDao {
         .distinctUntilChanged() // skip reload when count unchanged
         .flatMapLatest { // cancel stale reloads during rapid PICS inserts
             flow { emit(_getAllOwnedAppsPaged(invalidPkgId)) }
+        }
+
+    @Query(
+        "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
+            "owner_account_id, depots, config " +
+            "FROM steam_app AS app " + OWNED_APPS_WHERE +
+            "ORDER BY LOWER(app.name), app.id LIMIT :limit OFFSET :offset",
+    )
+    suspend fun _getOwnedAppSummariesPage(
+        limit: Int,
+        offset: Int,
+        invalidPkgId: Int = INVALID_PKG_ID,
+    ): List<SteamAppSummary>
+
+    @Transaction
+    suspend fun _getAllOwnedAppSummariesPaged(invalidPkgId: Int = INVALID_PKG_ID): List<SteamAppSummary> {
+        val result = mutableListOf<SteamAppSummary>()
+        var offset = 0
+        while (true) {
+            var pageSize = if (offset == 0) Int.MAX_VALUE else PAGE_SIZE
+            while (true) {
+                try {
+                    val page = _getOwnedAppSummariesPage(pageSize, offset, invalidPkgId)
+                    if (page.isEmpty()) return result
+                    result += page
+                    if (pageSize == Int.MAX_VALUE) return result
+                    offset += page.size
+                    break
+                } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
+                    if (pageSize <= 1) throw e
+                    pageSize = if (pageSize == Int.MAX_VALUE) PAGE_SIZE else (pageSize / 2).coerceAtLeast(1)
+                }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun getAllOwnedAppSummaries(
+        invalidPkgId: Int = INVALID_PKG_ID,
+    ): Flow<List<SteamAppSummary>> = _observeOwnedAppCount(invalidPkgId)
+        .distinctUntilChanged()
+        .flatMapLatest {
+            flow { emit(_getAllOwnedAppSummariesPaged(invalidPkgId)) }
         }
 
     @Query(
