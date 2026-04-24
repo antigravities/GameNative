@@ -16,11 +16,6 @@ At the end of every plan, please provide a sample commit message that in a sente
 
 ## Codebase Guide
 
-### Gradle Modules
-
-- `:app` — main application module
-- `:ubuntufs` — dynamic feature module (Play Dynamic Delivery, downloads Ubuntu filesystem on demand)
-
 ### Two Core Namespaces
 
 The Java/Kotlin source has two distinct namespaces with different ownership:
@@ -137,25 +132,3 @@ PluviaApp (Application, @HiltAndroidApp)
 | Navigation Compose | 2.8.6 | Screen navigation |
 | DataStore | 1.1.2 | Preferences (`PrefManager.kt`) |
 | Media3 | 1.9.1 | Video playback |
-
-## Build Variants
-
-- `debug` — local development
-- `release` — production (ProGuard enabled)
-- `release-signed` — signed with Pluvia keystore
-- `release-gold` — Gold tier release
-
-**SDK**: minSdk 26 / targetSdk 28 / compileSdk 35  
-**Version**: 0.9.0 (versionCode 14)
-
-Secrets (PostHog key, SteamGridDB key, cloud project number) are injected at build time via Secrets Gradle Plugin — never hardcode them.
-
-## Testing
-
-- **Unit tests**: `app/src/test/` (~47 files) — service managers, DAOs, gamefixes registry, manifest parsing, crypto
-- **Instrumented tests**: `app/src/androidTest/` (~5 files) — manifest parsing, crypto
-- **Frameworks**: JUnit 4, Robolectric 4.14, Mockito 5.14.2, MockK 1.13.5, MockWebServer
-
-## Localization
-
-13 languages via `utils/LocaleHelper.kt`. Add new strings to all locale `strings.xml` files under `app/src/main/res/`.
