@@ -201,6 +201,18 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    private val _pendingOpenAppId = MutableStateFlow<String?>(null)
+    val pendingOpenAppId: StateFlow<String?> = _pendingOpenAppId.asStateFlow()
+
+    fun clearPendingOpenAppId() {
+        _pendingOpenAppId.value = null
+    }
+
+    private val onExternalOpenGamePage: (AndroidEvent.ExternalOpenGamePage) -> Unit = { event ->
+        Timber.tag("MainViewModel").i("Received ExternalOpenGamePage for app ${event.appId}")
+        _pendingOpenAppId.value = event.appId
+    }
+
     private val onServiceReady: (AndroidEvent.ServiceReady) -> Unit = {
         viewModelScope.launch {
             _uiEvent.send(MainUiEvent.ServiceReady)
@@ -245,6 +257,7 @@ class MainViewModel @Inject constructor(
         // Register event handlers
         PluviaApp.events.on<AndroidEvent.BackPressed, Unit>(onBackPressed)
         PluviaApp.events.on<AndroidEvent.ExternalGameLaunch, Unit>(onExternalGameLaunch)
+        PluviaApp.events.on<AndroidEvent.ExternalOpenGamePage, Unit>(onExternalOpenGamePage)
         PluviaApp.events.on<AndroidEvent.SetBootingSplashText, Unit>(onSetBootingSplashText)
         PluviaApp.events.on<SteamEvent.Connected, Unit>(onSteamConnected)
         PluviaApp.events.on<SteamEvent.Disconnected, Unit>(onSteamDisconnected)
@@ -271,6 +284,7 @@ class MainViewModel @Inject constructor(
     override fun onCleared() {
         PluviaApp.events.off<AndroidEvent.BackPressed, Unit>(onBackPressed)
         PluviaApp.events.off<AndroidEvent.ExternalGameLaunch, Unit>(onExternalGameLaunch)
+        PluviaApp.events.off<AndroidEvent.ExternalOpenGamePage, Unit>(onExternalOpenGamePage)
         PluviaApp.events.off<AndroidEvent.SetBootingSplashText, Unit>(onSetBootingSplashText)
         PluviaApp.events.off<SteamEvent.Connected, Unit>(onSteamConnected)
         PluviaApp.events.off<SteamEvent.Disconnected, Unit>(onSteamDisconnected)
