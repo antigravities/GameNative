@@ -3724,7 +3724,8 @@ class SteamService : Service(), IChallengeUrlChanged {
         scope.launch {
             db.withTransaction {
                 // Send off an event if we change states.
-                if (callback.friendId == steamClient!!.steamID) {
+                // steamClient may be null if clearValues() raced with this coroutine.
+                if (callback.friendId == steamClient?.steamID) {
                     Timber.d("Local persona state received: ${callback.playerName}")
 
                     val avatarHash = callback.avatarHash.toHexString()
