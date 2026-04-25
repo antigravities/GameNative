@@ -292,6 +292,12 @@ abstract class BaseAppScreen {
      */
     abstract fun isValidToDownload(context: Context, libraryItem: LibraryItem): Boolean
 
+    // Async variant called from performStateRefresh (already a suspend context). The default
+    // delegates to the synchronous version so non-Steam sources require no changes. Steam
+    // overrides this to re-check after an on-demand PICS fetch has updated the DB.
+    open suspend fun isValidToDownloadAsync(context: Context, libraryItem: LibraryItem): Boolean =
+        isValidToDownload(context, libraryItem)
+
     /**
      * Check if the game is currently downloading
      */
@@ -924,7 +930,7 @@ abstract class BaseAppScreen {
 
         suspend fun performStateRefresh(includeUpdatePending: Boolean) {
             isInstalledState = isInstalled(context, libraryItem)
-            isValidToDownloadState = isValidToDownload(context, libraryItem)
+            isValidToDownloadState = isValidToDownloadAsync(context, libraryItem)
             val currentlyDownloading = isDownloading(context, libraryItem)
             isDownloadingState = currentlyDownloading
             downloadProgressState = getDownloadProgress(context, libraryItem)
