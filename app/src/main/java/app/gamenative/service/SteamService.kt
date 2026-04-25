@@ -1641,8 +1641,10 @@ class SteamService : Service(), IChallengeUrlChanged {
 
             if (!checkWifiOrNotify()) return null
             if (downloadJobs.contains(appId)) return getAppDownloadInfo(appId)
-            Timber.d("depots is empty? " + downloadableDepots.isEmpty())
-            if (downloadableDepots.isEmpty()) return null
+            if (downloadableDepots.isEmpty()) {
+                Timber.w("downloadApp($appId): downloadableDepots is empty — no depots passed filters")
+                return null
+            }
 
             val indirectDlcAppIds = getDownloadableDlcAppsOf(appId).orEmpty().map { it.id }
 
@@ -1664,9 +1666,11 @@ class SteamService : Service(), IChallengeUrlChanged {
                 userSelectedDlcAppIds.contains(depot.dlcAppId) && indirectDlcAppIds.contains(depot.dlcAppId) && hasDepotContent(depot)
             }
 
-            // Remove depots that are already downloaded (not for update/verify)
+            // Remove depots that are already downloaded (not for update/verify).
+            // Guard with isAppInstalled: a stale AppInfo record from a previous install
+            // (game files deleted) must not suppress all depots and cause a silent failure.
             val appInfo = getInstalledApp(appId)
-            if (appInfo != null && !isUpdateOrVerify) {
+            if (appInfo != null && !isUpdateOrVerify && isAppInstalled(appId)) {
                 mainAppDepots = mainAppDepots.filter { it.key !in appInfo.downloadedDepots }
             }
 
@@ -1702,9 +1706,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                 downloadingAppIds.add(appId)
             }
 
-            Timber.i("selectedDepots is empty? " + selectedDepots.isEmpty())
-
-            if (selectedDepots.isEmpty()) return null
+            if (selectedDepots.isEmpty()) {
+                Timber.w("downloadApp($appId): selectedDepots is empty after filtering (mainApp=${mainAppDepots.size}, dlc=${dlcAppDepots.size}) — install aborted")
+                return null
+            }
 
             Timber.i("Starting download for $appId")
             Timber.i("App contains ${mainAppDepots.size} depot(s): ${mainAppDepots.keys}")
