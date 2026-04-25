@@ -2888,6 +2888,51 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         }
 
+        // Fetches full product info for a single app directly from PICS and writes it to the
+        // database. Called from the game page when the stored row is missing manifest data
+        // (depot GIDs), which prevents the install flow from working.
+        //
+        // Writes unconditionally — unlike the bulk sync which checks lastChangeNumber, we
+        // specifically want to overwrite stub rows written by license processing before
+        // the full PICS product info had been synced.
+        suspend fun requestAppInfoNow(appId: Int): Unit = withContext(Dispatchers.IO) {
+            val service = instance ?: return@withContext
+            val steamApps = service._steamApps ?: return@withContext
+            if (!isConnected) return@withContext
+
+            try {
+                val pics = steamApps.picsGetProductInfo(
+                    apps = listOf(PICSRequest(id = appId)),
+                    packages = emptyList(),
+                ).await()
+
+                val remoteAppInfo = pics.results
+                    .firstOrNull()
+                    ?.apps
+                    ?.values
+                    ?.firstOrNull()
+                    ?: return@withContext
+
+                // Preserve license-derived fields from the existing DB row, if any.
+                val appFromDb = service.appDao.findApp(appId)
+                val packageId = appFromDb?.packageId ?: INVALID_PKG_ID
+                val packageFromDb = if (packageId != INVALID_PKG_ID) service.licenseDao.findLicense(packageId) else null
+
+                val newApp = remoteAppInfo.keyValues.generateSteamApp().copy(
+                    packageId = packageId,
+                    ownerAccountId = packageFromDb?.ownerAccountId ?: emptyList(),
+                    receivedPICS = true,
+                    lastChangeNumber = remoteAppInfo.changeNumber,
+                    licenseFlags = packageFromDb?.licenseFlags ?: EnumSet.noneOf(ELicenseFlags::class.java),
+                )
+
+                service.appDao.insert(newApp)
+                Timber.i("On-demand PICS completed for appId=$appId (depots=${newApp.depots.size})")
+            } catch (e: Exception) {
+                Timber.e(e, "On-demand PICS request failed for appId=$appId")
+            }
+        }
+
         suspend fun checkPrivateBranchPassword(appId: Int, password: String): Map<String, ByteArray> =
             withContext(Dispatchers.IO) {
                 val steamApps = instance?._steamApps ?: return@withContext emptyMap()
