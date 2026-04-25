@@ -361,6 +361,15 @@ class SteamAppScreen : BaseAppScreen() {
         return appInfo.branches.isNotEmpty() && appInfo.depots.isNotEmpty()
     }
 
+    // After requestAppInfoNow has written fresh PICS data to the DB, re-check via
+    // getDownloadableDepots() which reads from DB directly (not from any in-memory cache).
+    override suspend fun isValidToDownloadAsync(context: Context, libraryItem: LibraryItem): Boolean {
+        if (isValidToDownload(context, libraryItem)) return true
+        return withContext(Dispatchers.IO) {
+            SteamService.getDownloadableDepots(libraryItem.gameId).isNotEmpty()
+        }
+    }
+
     override fun isDownloading(context: Context, libraryItem: LibraryItem): Boolean {
         val downloadInfo = SteamService.getAppDownloadInfo(libraryItem.gameId) ?: return false
         val progress = downloadInfo.getProgress() ?: 0f
