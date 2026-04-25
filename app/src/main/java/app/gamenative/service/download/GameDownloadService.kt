@@ -15,6 +15,7 @@ import `in`.dragonbra.javasteam.steam.handlers.steamapps.SteamApps
 import `in`.dragonbra.javasteam.steam.handlers.steamcontent.SteamContent
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CoroutineScope
@@ -198,6 +199,12 @@ object GameDownloadService {
         // progress. Verified bytes intentionally don't move the byte counter (see onProgress).
         val verifyStatusActive = AtomicBoolean(false)
 
+        // Throttle timestamps for UI/persistence writes. AtomicLong ensures cross-thread
+        // visibility; the occasional double-fire when two threads race is harmless.
+        val lastUiUpdateMs = AtomicLong(0L)
+        val lastPersistMs = AtomicLong(0L)
+        val lastSpeedSampleMs = AtomicLong(0L)
+
         val listener = object : NativeSteamDownloadListener {
             override fun onVerifying(path: String, current: Int, total: Int) {
                 verifyStatusActive.set(true)
@@ -222,6 +229,10 @@ object GameDownloadService {
                     // Verify sweep finished, real chunks are flowing — drop the verify status.
                     downloadInfo.updateStatusMessage(null)
                 }
+
+                val nowMs = System.currentTimeMillis()
+                val depotFinished = depotTotal > 0L && depotDone >= depotTotal
+
                 if (verifying) {
                     // Verified-existing bytes: these were already counted in the persisted
                     // snapshot this run resumed from. Crediting them again double-counts and
@@ -240,10 +251,21 @@ object GameDownloadService {
                         newHigh - previous
                     }
                     if (delta > 0L) {
-                        downloadInfo.updateBytesDownloaded(delta, System.currentTimeMillis())
+                        // Always accumulate bytes for accurate progress; only record a speed
+                        // sample at most every 100 ms to avoid ArrayDeque churn from the
+                        // native engine's high chunk-callback rate.
+                        val trackSpeed = nowMs - lastSpeedSampleMs.get() >= 100L
+                        if (trackSpeed) lastSpeedSampleMs.set(nowMs)
+                        downloadInfo.updateBytesDownloaded(delta, nowMs, trackSpeed = trackSpeed)
                     }
                 }
-                if (depotTotal > 0L) {
+
+                // Throttle UI updates to at most once per 300 ms, but always let a depot's
+                // final update through so the bar reaches exactly 100%. setProgress launches
+                // a coroutine in DownloadsViewModel; at the native engine's callback rate this
+                // otherwise causes a coroutine storm that exhausts the Java heap.
+                if (depotTotal > 0L && (depotFinished || nowMs - lastUiUpdateMs.get() >= 300L)) {
+                    lastUiUpdateMs.set(nowMs)
                     depotIdToIndex[depotId]?.let { index ->
                         downloadInfo.setProgress(
                             (depotDone.toFloat() / depotTotal.toFloat()).coerceIn(0f, 1f),
@@ -251,7 +273,14 @@ object GameDownloadService {
                         )
                     }
                 }
-                downloadInfo.persistProgressSnapshot()
+
+                // Throttle persistence to at most once per 5 s, but always flush on a depot's
+                // completion. Writing a file on every progress callback creates heavy I/O that
+                // outpaces GC on high-speed downloads.
+                if (depotFinished || nowMs - lastPersistMs.get() >= 5_000L) {
+                    lastPersistMs.set(nowMs)
+                    downloadInfo.persistProgressSnapshot()
+                }
             }
 
             override fun refreshManifestRequestCode(depotId: Int, manifestId: Long): Long {
