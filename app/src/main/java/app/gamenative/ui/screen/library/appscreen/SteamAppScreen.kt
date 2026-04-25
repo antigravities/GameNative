@@ -82,6 +82,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import app.gamenative.ui.component.dialog.GameManagerDialog
 import app.gamenative.ui.component.dialog.WorkshopManagerDialog
 import app.gamenative.ui.theme.PluviaTheme
@@ -376,6 +377,17 @@ class SteamAppScreen : BaseAppScreen() {
     override fun isValidToDownload(context: Context, libraryItem: LibraryItem): Boolean {
         val appInfo = SteamService.getAppInfoOf(libraryItem.gameId) ?: return false
         return appInfo.depots.isNotEmpty()
+    }
+
+    // Stub row or missing app data — fire the on-demand PICS fetch and give it a bounded
+    // window to land before re-checking via getDownloadableDepots() (reads from DB directly,
+    // not from any in-memory cache) so a slow/failed request doesn't stall the page indefinitely.
+    override suspend fun isValidToDownloadAsync(context: Context, libraryItem: LibraryItem): Boolean {
+        if (isValidToDownload(context, libraryItem)) return true
+        return withContext(Dispatchers.IO) {
+            withTimeoutOrNull(10_000L) { SteamService.requestAppInfoNow(libraryItem.gameId) }
+            SteamService.getDownloadableDepots(libraryItem.gameId).isNotEmpty()
+        }
     }
 
     override fun isDownloading(context: Context, libraryItem: LibraryItem): Boolean {
