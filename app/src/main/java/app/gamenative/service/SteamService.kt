@@ -2950,7 +2950,6 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         }
 
-
         fun getWindowsLaunchInfos(appId: Int): List<LaunchInfo> {
             return getAppInfoOf(appId)?.let { appInfo ->
                 appInfo.config.launch.filter { launchInfo ->
