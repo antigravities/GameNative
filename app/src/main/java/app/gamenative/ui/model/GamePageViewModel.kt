@@ -10,6 +10,7 @@ import app.gamenative.db.dao.AmazonGameDao
 import app.gamenative.db.dao.EpicGameDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.SteamAppDao
+import app.gamenative.service.SteamService
 import app.gamenative.ui.screen.PluviaScreen
 import app.gamenative.utils.CustomGameScanner
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -70,19 +71,38 @@ class GamePageViewModel @Inject constructor(
                     _isLoaded.value = true
                     return@launch
                 }
+                // Fire an on-demand PICS fetch in parallel. This handles two cases:
+                //   1. Stub row in DB (depot IDs present but manifests empty) — observeApp
+                //      emits immediately with the stub, but PICS will overwrite it with
+                //      complete manifest GIDs so the install flow works.
+                //   2. App not in DB yet — observeApp blocks; PICS writes the row and
+                //      unblocks it.
+                val picsJob = launch {
+                    SteamService.requestAppInfoNow(id)
+                }
+
                 val app = withTimeoutOrNull(30_000L) {
                     steamAppDao.observeApp(id)
                         .filter { it != null && it.name.isNotEmpty() }
                         .first()
                 }
-                if (app != null) {
+
+                // Wait for PICS to finish, but cap the extra wait so a slow/failed network
+                // request doesn't stall the page indefinitely.
+                withTimeoutOrNull(10_000L) { picsJob.join() }
+
+                // Re-fetch from DB so the LibraryItem is built from the PICS-updated row
+                // (which has valid manifest GIDs) rather than the stub row that observeApp saw.
+                val freshApp = steamAppDao.findApp(id) ?: app
+
+                if (freshApp != null) {
                     _libraryItem.value = LibraryItem(
                         appId = appId,
-                        name = app.name,
-                        iconHash = app.clientIconHash,
-                        capsuleImageUrl = app.getCapsuleUrl(),
-                        headerImageUrl = app.getHeaderImageUrl().orEmpty().ifEmpty { app.headerUrl },
-                        heroImageUrl = app.getHeroUrl().ifEmpty { app.headerUrl },
+                        name = freshApp.name,
+                        iconHash = freshApp.clientIconHash,
+                        capsuleImageUrl = freshApp.getCapsuleUrl(),
+                        headerImageUrl = freshApp.getHeaderImageUrl().orEmpty().ifEmpty { freshApp.headerUrl },
+                        heroImageUrl = freshApp.getHeroUrl().ifEmpty { freshApp.headerUrl },
                         gameSource = GameSource.STEAM,
                     )
                 } else {
