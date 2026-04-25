@@ -21,6 +21,7 @@ import app.gamenative.db.dao.SteamAppDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.EpicGameDao
 import app.gamenative.db.dao.AmazonGameDao
+import app.gamenative.db.dao.DownloadingAppInfoDao
 import app.gamenative.service.DownloadService
 import app.gamenative.service.SteamService
 import app.gamenative.service.amazon.AmazonArtwork
@@ -64,6 +65,7 @@ class LibraryViewModel @Inject constructor(
     private val gogGameDao: GOGGameDao,
     private val epicGameDao: EpicGameDao,
     private val amazonGameDao: AmazonGameDao,
+    private val downloadingAppInfoDao: DownloadingAppInfoDao,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -75,6 +77,10 @@ class LibraryViewModel @Inject constructor(
 
     private val onInstallStatusChanged: (AndroidEvent.LibraryInstallStatusChanged) -> Unit = {
         onFilterApps(paginationCurrentPage)
+        // Re-trigger size computation after an install/uninstall: the download
+        // gate inside launchSizeComputation will pass immediately now that the
+        // download is done, so sizes populate promptly after completion.
+        launchSizeComputation()
     }
 
     private val onCustomGameImagesFetched: (AndroidEvent.CustomGameImagesFetched) -> Unit = {
@@ -230,6 +236,16 @@ class LibraryViewModel @Inject constructor(
     private fun launchSizeComputation() {
         sizeComputationJob?.cancel()
         sizeComputationJob = viewModelScope.launch(Dispatchers.IO) {
+            // Wait for any active downloads to finish before loading all depot JSON.
+            // Running this concurrently with DepotDownloader workers exhausts the 512 MB
+            // heap on high-core-count devices: each download/decompress worker holds large
+            // buffers while this job simultaneously deserializes the full owned-app depot
+            // manifest for ~45k games. The poll interval is intentionally coarse because
+            // the cost of a small delay here is negligible vs. an OOM crash.
+            while (downloadingAppInfoDao.getAll().isNotEmpty()) {
+                delay(2_000L)
+            }
+
             // Build the depot-license map from the in-memory appList (already loaded, no extra DB
             // hit). buildLicensedDepotMap has a SteamAppSummary overload (see SteamService.kt ~586)
             // annotated @JvmName("buildLicensedDepotMapSummaries") so the compiler picks it up.

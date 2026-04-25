@@ -28,7 +28,9 @@ data class DownloadInfo(
 
     private data class SpeedSample(val timeMs: Long, val bytes: Long)
 
-    private val speedSamples = CopyOnWriteArrayList<SpeedSample>()
+    // ArrayDeque is not thread-safe, but is O(1) at both ends (unlike ArrayList).
+    // All access is guarded by synchronized(speedSamples) below.
+    private val speedSamples = ArrayDeque<SpeedSample>()
     private var emaSpeedBytesPerSec: Double = 0.0
     private var hasEmaSpeed: Boolean = false
     private var isActive: Boolean = true
@@ -151,19 +153,22 @@ data class DownloadInfo(
     fun getPostInstallSyncingFlow(): StateFlow<Boolean> = postInstallSyncing
 
     private fun addSpeedSample(timestampMs: Long) {
-        speedSamples.add(SpeedSample(timestampMs, bytesDownloaded))
-        trimOldSamples(timestampMs)
+        synchronized(speedSamples) {
+            speedSamples.addLast(SpeedSample(timestampMs, bytesDownloaded))
+            trimOldSamples(timestampMs)
+        }
     }
 
+    // Must be called while holding synchronized(speedSamples).
     private fun trimOldSamples(nowMs: Long, windowMs: Long = 30_000L) {
         val cutoff = nowMs - windowMs
         while (speedSamples.isNotEmpty() && speedSamples.first().timeMs < cutoff) {
-            speedSamples.removeAt(0)
+            speedSamples.removeFirst()
         }
     }
 
     fun resetSpeedTracking() {
-        speedSamples.clear()
+        synchronized(speedSamples) { speedSamples.clear() }
         emaSpeedBytesPerSec = 0.0
         hasEmaSpeed = false
     }
@@ -210,11 +215,10 @@ data class DownloadInfo(
 
         val now = System.currentTimeMillis()
 
-        // Snapshot via toTypedArray().toList() so we never call toList() on the COWAL
-        // when it's empty (which can crash), and we get a consistent view so another
-        // thread can't shrink the list between our size check and first()/last().
+        // Snapshot under lock so another thread can't mutate the deque between our
+        // size check and first()/last() access.
         val cutoff = now - windowSeconds * 1000L
-        val samples = speedSamples.toTypedArray().filter { it.timeMs >= cutoff }.toList()
+        val samples = synchronized(speedSamples) { speedSamples.filter { it.timeMs >= cutoff } }
         if (samples.size < 2) return null
 
         val first = samples.first()
