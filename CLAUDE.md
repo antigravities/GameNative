@@ -105,6 +105,14 @@ When making a schema change, increment the schema version in `PluviaDatabase` an
 - **`SteamApp.lastChangeNumber`** is the authoritative PICS change marker; it increments whenever Steam updates an app's metadata. It is not currently projected into `SteamAppSummary` but is useful for invalidation logic if finer-grained change detection is ever needed.
 - **Per-item bottleneck**: `SteamService.resolveDownloadableDepots()` + `sumOf()` walks depot manifests for every filtered Steam app on every `onFilterApps()` invocation. As of this writing, `LibraryViewModel.steamItemCache` memoizes this result keyed by Steam app ID, using `SteamAppSummary` reference equality to validate cache entries.
 
+### Game Page Install Flow
+
+getAppInfoOf(appId) (SteamService companion, line 598) is NOT an in-memory cache — it's a DB query via appDao.findApp(appId). All install-path functions (getDownloadableDepots, isValidToDownload) read from the steam_app table.
+
+Stub rows: License processing can write a steam_app row with depot IDs but empty manifests maps before the full PICS product info has been synced. These cause 0 KB install sizes and silent install failures (no manifest GID for the downloader). GamePageViewModel fires SteamService.requestAppInfoNow() on page open to fix this proactively.
+
+On-demand PICS: SteamService.requestAppInfoNow(appId) calls picsGetProductInfo for a single app and writes the result to DB. Pattern mirrors isUpdatePending (line 2727) + the write-back from continuousPICSGetProductInfo (lines 3836–3874).
+
 ## Application Entry Points
 
 ```
