@@ -2138,6 +2138,12 @@ class SteamService : Service(), IChallengeUrlChanged {
             // Track cumulative uncompressed bytes per depot to calculate deltas
             // (uncompressedBytes from onChunkCompleted is cumulative per depot)
             private val depotCumulativeUncompressedBytes = mutableMapOf<Int, Long>()
+
+            // Throttle timestamps. @Volatile ensures cross-thread visibility; the
+            // occasional double-fire when two threads race is harmless.
+            @Volatile private var lastUiUpdateMs = 0L
+            @Volatile private var lastPersistMs = 0L
+            @Volatile private var lastSpeedSampleMs = 0L
             override fun onItemAdded(item: DownloadItem) {
                 Timber.d("Item ${item.appId} added to queue")
             }
@@ -2176,24 +2182,39 @@ class SteamService : Service(), IChallengeUrlChanged {
                 compressedBytes: Long,
                 uncompressedBytes: Long,
             ) {
-                val isFirstCallForDepot = !depotCumulativeUncompressedBytes.containsKey(depotId)
-
                 // uncompressedBytes is cumulative per depot, so calculate delta
                 val previousBytes = depotCumulativeUncompressedBytes[depotId] ?: 0L
                 val deltaBytes = uncompressedBytes - previousBytes
                 depotCumulativeUncompressedBytes[depotId] = uncompressedBytes
 
+                val nowMs = System.currentTimeMillis()
+
                 if (deltaBytes > 0L) {
-                    // Normal case: add the delta
-                    downloadInfo.updateBytesDownloaded(deltaBytes, System.currentTimeMillis())
+                    // Always accumulate bytes for accurate progress; only record a speed
+                    // sample at most every 100 ms to avoid ArrayDeque churn from fast paths.
+                    val trackSpeed = nowMs - lastSpeedSampleMs >= 100L
+                    if (trackSpeed) lastSpeedSampleMs = nowMs
+                    downloadInfo.updateBytesDownloaded(deltaBytes, nowMs, trackSpeed = trackSpeed)
                 }
 
-                depotIdToIndex[depotId]?.let { index ->
-                    downloadInfo.setProgress(depotPercentComplete, index)
+                // Throttle UI updates to at most once per 300 ms. Firing the progress
+                // listener launches a coroutine in DownloadsViewModel; at high chunk rates
+                // (19 parallel threads × many chunks/sec) this causes a coroutine storm
+                // that exhausts the Java heap.
+                if (nowMs - lastUiUpdateMs >= 300L) {
+                    lastUiUpdateMs = nowMs
+                    depotIdToIndex[depotId]?.let { index ->
+                        downloadInfo.setProgress(depotPercentComplete, index)
+                    }
                 }
 
-                // Persist progress snapshot
-                downloadInfo.persistProgressSnapshot()
+                // Throttle persistence to at most once per 5 s. Writing a file on every
+                // chunk callback creates heavy I/O and allocates File/String objects at a
+                // rate that outpaces GC on high-speed downloads.
+                if (nowMs - lastPersistMs >= 5_000L) {
+                    lastPersistMs = nowMs
+                    downloadInfo.persistProgressSnapshot()
+                }
             }
 
             override fun onDepotCompleted(depotId: Int, compressedBytes: Long, uncompressedBytes: Long) {
