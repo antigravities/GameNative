@@ -273,7 +273,10 @@ fun GameManagerDialog(
             return false
         }
 
-        if (installedApp != null) {
+        // Only apply the DLC-delta logic when the game is actually installed on disk.
+        // A stale AppInfo DB record from a previous install (game files deleted) must not
+        // block a fresh reinstall by making the delta evaluate to 0.
+        if (installedApp != null && SteamService.isAppInstalled(gameId)) {
             val installed = installedDlcIds.toSet() - mainAppDlcIdsWithoutProperDepotDlcIds.toSet()
             val realSelectedAppIds = selectedAppIds.filter { it.value }.keys - installed
             return (realSelectedAppIds.size - 1) > 0 // -1 for main app
