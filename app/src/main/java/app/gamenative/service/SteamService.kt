@@ -158,6 +158,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import timber.log.Timber
 import app.gamenative.data.DownloadingAppInfo
@@ -2318,6 +2319,24 @@ class SteamService : Service(), IChallengeUrlChanged {
             if (isOffline || !isConnected) {
                 return@async PostSyncInfo(SyncResult.UpToDate)
             }
+
+            // isConnected is set in onConnected(), which fires before onLoggedOn() completes.
+            // Issuing a Steam UFS API call before the session is authenticated causes an
+            // unbounded hang — Steam never responds to unauthenticated requests. Wait here
+            // for the logon to finish before proceeding.
+            if (!isLoggedIn) {
+                try {
+                    withTimeout(30_000L) {
+                        while (!isLoggedIn) {
+                            delay(250L)
+                        }
+                    }
+                } catch (_: TimeoutCancellationException) {
+                    Timber.w("beginLaunchApp: timed out waiting for Steam logon for appId=$appId, skipping sync")
+                    return@async PostSyncInfo(SyncResult.UpToDate)
+                }
+            }
+
             if (!tryAcquireSync(appId)) {
                 Timber.w("Cannot launch app when sync already in progress for appId=$appId")
                 return@async PostSyncInfo(SyncResult.InProgress)
@@ -2359,13 +2378,22 @@ class SteamService : Service(), IChallengeUrlChanged {
                                                     EOSType.AndroidUnknown,
                                                 )
 
-                                                val pendingRemoteOperations = steamCloud.signalAppLaunchIntent(
-                                                    appId = appId,
-                                                    clientId = clientId,
-                                                    machineName = SteamUtils.getMachineName(steamInstance),
-                                                    ignorePendingOperations = ignorePendingOperations,
-                                                    osType = EOSType.AndroidUnknown,
-                                                ).await()
+                                                // Bound the signal call so a non-responsive Steam
+                                                // session can't cause a secondary indefinite hang.
+                                                val pendingRemoteOperations = try {
+                                                    withTimeout(30_000L) {
+                                                        steamCloud.signalAppLaunchIntent(
+                                                            appId = appId,
+                                                            clientId = clientId,
+                                                            machineName = SteamUtils.getMachineName(steamInstance),
+                                                            ignorePendingOperations = ignorePendingOperations,
+                                                            osType = EOSType.AndroidUnknown,
+                                                        ).await()
+                                                    }
+                                                } catch (_: TimeoutCancellationException) {
+                                                    Timber.w("beginLaunchApp: signalAppLaunchIntent timed out for appId=$appId, treating as no pending ops")
+                                                    emptyList()
+                                                }
 
                                                 if (pendingRemoteOperations.isNotEmpty() && !ignorePendingOperations) {
                                                     syncResult = PostSyncInfo(
