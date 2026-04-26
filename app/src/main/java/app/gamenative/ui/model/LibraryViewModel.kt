@@ -56,7 +56,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import timber.log.Timber
 
 @HiltViewModel
@@ -251,42 +253,53 @@ class LibraryViewModel @Inject constructor(
             // annotated @JvmName("buildLicensedDepotMapSummaries") so the compiler picks it up.
             val licensedDepotMap = SteamService.buildLicensedDepotMap(appList)
 
-            // Fetch only id + depots for each owned app (the two columns we need for size math).
-            // This is still subject to CursorWindow overflow for very large libraries, so it uses
-            // the same adaptive-paging pattern as the summary query and runs in the background
-            // while the library is already visible.
-            val allDepots = steamAppDao.getAllOwnedAppDepotsPaged()
+            // Stream depots 500 apps at a time instead of loading all 45k at once.
+            // Loading everything simultaneously forces the JVM to hold hundreds of MB of
+            // deserialized Map<Int,DepotInfo> objects in one allocation burst, causing GC
+            // thrashing severe enough to starve the Compose render thread. Processing in
+            // fixed-size chunks lets GC reclaim each page before the next one is loaded.
+            val chunkSize = 500
+            var offset = 0
+            while (isActive) {
+                val page = steamAppDao._getOwnedAppDepotsPage(chunkSize, offset)
+                if (page.isEmpty()) break
 
-            for (depotEntry in allDepots) {
-                val licensedDepots = licensedDepotMap[depotEntry.id]
+                for (depotEntry in page) {
+                    val licensedDepots = licensedDepotMap[depotEntry.id]
 
-                // resolveDownloadableDepots filters the depot map down to depots the user
-                // is actually licensed to download. The empty-string branch arg means "use
-                // public branch"; we avoid the per-app getInstalledApp() DB call here because
-                // that would be 45k extra queries. The size will be slightly wrong for apps
-                // currently on a beta branch, but that's an acceptable trade-off.
-                val resolved = SteamService.resolveDownloadableDepots(
-                    depotEntry.depots, "", emptyMap(), licensedDepots,
-                )
+                    // resolveDownloadableDepots filters the depot map down to depots the user
+                    // is actually licensed to download. The empty-string branch arg means "use
+                    // public branch"; we avoid the per-app getInstalledApp() DB call here because
+                    // that would be 45k extra queries. The size will be slightly wrong for apps
+                    // currently on a beta branch, but that's an acceptable trade-off.
+                    val resolved = SteamService.resolveDownloadableDepots(
+                        depotEntry.depots, "", emptyMap(), licensedDepots,
+                    )
 
-                // Sum manifest sizes across all downloadable depots for this app.
-                // "public" is the stable branch name; fall back to whichever manifest is first
-                // for apps that only publish non-public branches.
-                val totalSizeBytes = resolved.values.sumOf { depot ->
-                    depot.manifests["public"]?.size
-                        ?: depot.manifests.values.firstOrNull()?.size
-                        ?: 0L
+                    // Sum manifest sizes across all downloadable depots for this app.
+                    // "public" is the stable branch name; fall back to whichever manifest is first
+                    // for apps that only publish non-public branches.
+                    val totalSizeBytes = resolved.values.sumOf { depot ->
+                        depot.manifests["public"]?.size
+                            ?: depot.manifests.values.firstOrNull()?.size
+                            ?: 0L
+                    }
+
+                    // Write to the flat size cache so future onFilterApps() cache misses see the
+                    // correct value without rebuilding the LibraryItem from scratch.
+                    sizeBytesCache[depotEntry.id] = totalSizeBytes
+
+                    // Also update the existing steamItemCache entry so that a cache *hit* (===
+                    // reference match) also returns the correct sizeBytes on the next filter pass,
+                    // without having to evict and rebuild the whole LibraryItem.
+                    val cached = steamItemCache[depotEntry.id] ?: continue
+                    steamItemCache[depotEntry.id] = cached.first to cached.second.copy(sizeBytes = totalSizeBytes)
                 }
 
-                // Write to the flat size cache so future onFilterApps() cache misses see the
-                // correct value without rebuilding the LibraryItem from scratch.
-                sizeBytesCache[depotEntry.id] = totalSizeBytes
-
-                // Also update the existing steamItemCache entry so that a cache *hit* (===
-                // reference match) also returns the correct sizeBytes on the next filter pass,
-                // without having to evict and rebuild the whole LibraryItem.
-                val cached = steamItemCache[depotEntry.id] ?: continue
-                steamItemCache[depotEntry.id] = cached.first to cached.second.copy(sizeBytes = totalSizeBytes)
+                offset += page.size
+                // Yield after each chunk: allows the GC to collect the now-unreferenced page
+                // and gives the Compose render thread a window to run between chunks.
+                yield()
             }
 
             // Re-run the filter with a fully warm cache so SIZE_SMALLEST / SIZE_LARGEST sort
