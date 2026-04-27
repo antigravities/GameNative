@@ -113,6 +113,10 @@ Stub rows: License processing can write a steam_app row with depot IDs but empty
 
 On-demand PICS: SteamService.requestAppInfoNow(appId) calls picsGetProductInfo for a single app and writes the result to DB. Pattern mirrors isUpdatePending (line 2727) + the write-back from continuousPICSGetProductInfo (lines 3836–3874).
 
+Install-click stacking: SteamAppScreen launches SteamService.downloadApp via fire-and-forget CoroutineScope(Dispatchers.IO).launch calls (not tied to any ViewModel). The second downloadApp overload guards against duplicate active downloads via downloadJobs.contains() and an atomic pendingDownloads set (ConcurrentHashMap.newKeySet()). The first overload retries with an on-demand PICS fetch (runBlocking { requestAppInfoNow(appId) }) when getDownloadableDepots() returns empty, to handle stub rows created during initial PICS sync; if still empty after the retry it posts a notificationHelper notification.
+
+`onLicenseList` write-lock contention: On large libraries (~59k licenses), `onLicenseList` previously held the Room write lock for minutes inside a single `db.withTransaction` because it serialized all licenses to JSON, ran 60 batched `NOT IN` queries via `findStaleLicences`, and called `packagePicsChannel.send()` — all while the lock was held. The package PICS processor's own `db.withTransaction` calls blocked on this lock, halting the entire PICS pipeline. Fix: do CPU work (groupBy/map) outside the transaction, replace `findStaleLicences`+`deleteStaleLicenses` with `deleteAll`+`insertAll`, commit T1 before queuing to the channel, and defer the `cachedLicenseDao` write (T2) until after queuing.
+
 ## Application Entry Points
 
 ```
