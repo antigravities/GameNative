@@ -569,7 +569,8 @@ object ContainerStorageManager {
             SteamService.getAppDirName(app),
             app.name,
         )
-            .filter { it.isNotBlank() }
+            // Exclude "." and ".." — they resolve to the install root or its parent rather than a game subdirectory
+            .filter { it.isNotBlank() && it != "." && it != ".." }
             .distinct()
 
         if (installNames.isEmpty()) return null
