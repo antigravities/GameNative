@@ -152,4 +152,58 @@ class DepotFilteringTest {
         val d = depot(manifests = mapOf("public" to manifest()), steamDeck = false)
         assertTrue(SteamService.filterForDownloadableDepots(d, true, true, "english", null))
     }
+
+    // -- language filter fallback (publisher-mistagged single-language DLCs) --
+
+    @Test
+    fun `non-matching language depot rejected when group has preferred-language alternative`() {
+        val d = depot(
+            manifests = mapOf("public" to manifest()),
+            dlcAppId = 42,
+            language = "english",
+        )
+        assertFalse(
+            SteamService.filterForDownloadableDepots(
+                d, true, false, "french", null, null, false,
+            ),
+        )
+    }
+
+    @Test
+    fun `non-matching language depot accepted when group has no preferred-language alternative`() {
+        val d = depot(
+            manifests = mapOf("public" to manifest()),
+            dlcAppId = 42,
+            language = "english",
+        )
+        assertTrue(
+            SteamService.filterForDownloadableDepots(
+                d, true, false, "french", null, null, false,
+            ),
+        )
+    }
+
+    @Test
+    fun `null dlcGroupsWithPreferredLanguage preserves strict legacy behavior`() {
+        val d = depot(
+            manifests = mapOf("public" to manifest()),
+            dlcAppId = 42,
+            language = "english",
+        )
+        assertFalse(SteamService.filterForDownloadableDepots(d, true, false, "french", null))
+    }
+
+    // -- oslist combinations --
+
+    @Test
+    fun `depot with windows and linux oslist passes filter`() {
+        // A depot marked oslist="windows,linux" must be treated as Windows-compatible.
+        // Regression guard: .orEmpty() on getLicensedDepotIds()'s null return would convert
+        // the null bypass signal into an empty set, causing this depot to be rejected.
+        val d = depot(
+            manifests = mapOf("public" to manifest()),
+            osList = EnumSet.of(OS.windows, OS.linux),
+        )
+        assertTrue(SteamService.filterForDownloadableDepots(d, true, false, "english", null))
+    }
 }
