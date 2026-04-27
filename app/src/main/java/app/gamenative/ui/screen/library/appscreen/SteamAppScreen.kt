@@ -637,8 +637,10 @@ class SteamAppScreen : BaseAppScreen() {
         } else if (SteamService.workshopPausedApps.remove(gameId)) {
             resumeWorkshopDownload(gameId, context)
         } else if (SteamService.hasPartialDownload(gameId)) {
-            CoroutineScope(Dispatchers.IO).launch {
-                SteamService.downloadApp(gameId)
+            if (SteamService.getAppDownloadInfo(gameId) == null) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    SteamService.downloadApp(gameId)
+                }
             }
         } else if (!isInstalled) {
             // Request storage permissions first, then show install dialog
@@ -663,8 +665,10 @@ class SteamAppScreen : BaseAppScreen() {
         } else if (SteamService.workshopPausedApps.remove(gameId)) {
             resumeWorkshopDownload(gameId, context)
         } else {
-            CoroutineScope(Dispatchers.IO).launch {
-                SteamService.downloadApp(gameId)
+            if (SteamService.getAppDownloadInfo(gameId) == null) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    SteamService.downloadApp(gameId)
+                }
             }
         }
     }
@@ -694,8 +698,10 @@ class SteamAppScreen : BaseAppScreen() {
     }
 
     override fun onUpdateClick(context: Context, libraryItem: LibraryItem) {
-        CoroutineScope(Dispatchers.IO).launch {
-            SteamService.downloadApp(libraryItem.gameId)
+        if (SteamService.getAppDownloadInfo(libraryItem.gameId) == null) {
+            CoroutineScope(Dispatchers.IO).launch {
+                SteamService.downloadApp(libraryItem.gameId)
+            }
         }
     }
 
@@ -1008,8 +1014,10 @@ class SteamAppScreen : BaseAppScreen() {
         ContainerUtils.applyToContainer(context, libraryItem.appId, config)
 
         if (container.language != config.language) {
-            CoroutineScope(Dispatchers.IO).launch {
-                SteamService.downloadApp(libraryItem.gameId)
+            if (SteamService.getAppDownloadInfo(libraryItem.gameId) == null) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    SteamService.downloadApp(libraryItem.gameId)
+                }
             }
         }
     }
@@ -1248,8 +1256,10 @@ class SteamAppScreen : BaseAppScreen() {
                             properties = mapOf("game_name" to (appInfo?.name ?: "")),
                         )
                         hideInstallDialog(gameId)
-                        CoroutineScope(Dispatchers.IO).launch {
-                            SteamService.downloadApp(gameId)
+                        if (SteamService.getAppDownloadInfo(gameId) == null) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                SteamService.downloadApp(gameId)
+                            }
                         }
                     }
                 }
@@ -1291,7 +1301,7 @@ class SteamAppScreen : BaseAppScreen() {
                         val operation = getPendingUpdateVerifyOperation(gameId)
                         setPendingUpdateVerifyOperation(gameId, null)
 
-                        if (operation != null) {
+                        if (operation != null && SteamService.getAppDownloadInfo(gameId) == null) {
                             CoroutineScope(Dispatchers.IO).launch {
                                 val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
                                 val downloadInfo = SteamService.downloadApp(gameId)
@@ -1499,8 +1509,11 @@ class SteamAppScreen : BaseAppScreen() {
                         event = "game_install_started",
                         properties = mapOf("game_name" to (appInfo?.name ?: ""))
                     )
-                    CoroutineScope(Dispatchers.IO).launch {
-                        SteamService.downloadApp(gameId, dlcAppIds, branch = branch, isUpdateOrVerify = false)
+
+                    if (SteamService.getAppDownloadInfo(gameId) == null) {
+                        CoroutineScope(Dispatchers.IO).launch {
+                            SteamService.downloadApp(gameId, dlcAppIds, branch = branch, isUpdateOrVerify = false)
+                        }
                     }
                 },
                 onDismissRequest = {
@@ -1651,18 +1664,20 @@ class SteamAppScreen : BaseAppScreen() {
                         MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_REPLACED)
                         MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_RESTORED)
                         MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_COLDCLIENT_USED)
-                        CoroutineScope(Dispatchers.IO).launch {
-                            val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
-                            val dlcAppIds = SteamService.getInstalledApp(gameId)
-                                ?.dlcDepots.orEmpty()
-                            SteamService.downloadApp(
-                                gameId,
-                                dlcAppIds,
-                                branch = selectedBranch,
-                                isUpdateOrVerify = true,
-                            )
-                            container.isNeedsUnpacking = true
-                            container.saveData()
+                        if (SteamService.getAppDownloadInfo(gameId) == null) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
+                                val dlcAppIds = SteamService.getInstalledApp(gameId)
+                                    ?.dlcDepots.orEmpty()
+                                SteamService.downloadApp(
+                                    gameId,
+                                    dlcAppIds,
+                                    branch = selectedBranch,
+                                    isUpdateOrVerify = true,
+                                )
+                                container.isNeedsUnpacking = true
+                                container.saveData()
+                            }
                         }
                     }
                 },
