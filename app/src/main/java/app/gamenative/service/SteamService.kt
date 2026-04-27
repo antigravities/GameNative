@@ -908,7 +908,11 @@ class SteamService : Service(), IChallengeUrlChanged {
             val appInfo = getAppInfoOf(appId) ?: return emptyMap()
             val ownedDlc = runBlocking { getOwnedAppDlc(appId) }
             val hasSteamUnlockedBranch = runBlocking { getSteamUnlockedBranches(appId).isNotEmpty() }
-            val licensedDepots = getLicensedDepotIds(appId).orEmpty().toMutableSet()
+            // null means "license unknown — bypass the license check entirely"
+            // (see filterForDownloadableDepots check #6: licensedDepotIds != null).
+            // .orEmpty() would convert null → empty set, activating the check and
+            // blocking every non-DLC base depot when the license cache is cold.
+            val licensedDepots: MutableSet<Int>? = getLicensedDepotIds(appId)?.toMutableSet()
 
             // Use the dlcAppID of the ownedDlc, to find the licensed depotIds from steam_license
             val mapDlcDepotIds = mutableMapOf<Int, List<Int>>()
@@ -917,7 +921,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                 mapDlcDepotIds[dlcAppId] = dlcDepotIds
 
                 // Make sure licensedDepots contains the dlc depots
-                licensedDepots.addAll(dlcDepotIds)
+                licensedDepots?.addAll(dlcDepotIds)
             }
 
             val baseDepots = resolveDownloadableDepots(appInfo.depots, containerLanguage, ownedDlc, licensedDepots, hasSteamUnlockedBranch)
@@ -954,7 +958,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             val appInfo = getAppInfoOf(appId) ?: return emptyMap()
             val ownedDlc = runBlocking { getOwnedAppDlc(appId) }
             val hasSteamUnlockedBranch = runBlocking { getSteamUnlockedBranches(appId).isNotEmpty() }
-            val licensedDepots = getLicensedDepotIds(appId).orEmpty().toMutableSet()
+            val licensedDepots: MutableSet<Int>? = getLicensedDepotIds(appId)?.toMutableSet()
 
             val map = getMainAppDepots(appId, preferredLanguage).toMutableMap()
 
