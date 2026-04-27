@@ -152,4 +152,18 @@ class DepotFilteringTest {
         val d = depot(manifests = mapOf("public" to manifest()), steamDeck = false)
         assertTrue(SteamService.filterForDownloadableDepots(d, true, true, "english", null))
     }
+
+    // -- oslist combinations --
+
+    @Test
+    fun `depot with windows and linux oslist passes filter`() {
+        // A depot marked oslist="windows,linux" must be treated as Windows-compatible.
+        // Regression guard: .orEmpty() on getLicensedDepotIds()'s null return would convert
+        // the null bypass signal into an empty set, causing this depot to be rejected.
+        val d = depot(
+            manifests = mapOf("public" to manifest()),
+            osList = EnumSet.of(OS.windows, OS.linux),
+        )
+        assertTrue(SteamService.filterForDownloadableDepots(d, true, false, "english", null))
+    }
 }
