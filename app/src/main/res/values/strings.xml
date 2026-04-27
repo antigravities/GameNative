@@ -1054,6 +1054,7 @@
     <!-- SteamService: Download Notifications -->
     <string name="download_no_wifi">Not connected to Wi-Fi/LAN</string>
     <string name="download_paused_wifi">Download paused – waiting for Wi-Fi/LAN</string>
+    <string name="download_metadata_not_ready">Game data not ready yet. Please wait for Steam to finish syncing and try again.</string>
 
     <!-- PluviaMain: Update & App Info -->
     <string name="main_update_available_title">Update Available</string>
