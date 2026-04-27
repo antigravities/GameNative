@@ -1021,7 +1021,8 @@ class SteamService : Service(), IChallengeUrlChanged {
             var firstExisting: String? = null
             for (basePath in installPaths) {
                 for (name in names) {
-                    if (name.isEmpty()) continue
+                    // "." and ".." would resolve to the install root or its parent — skip them
+                    if (name.isEmpty() || name == "." || name == "..") continue
                     val path = Paths.get(basePath, name)
                     if (Files.isDirectory(path)) {
                         if (MarkerUtils.hasMarker(path.pathString, Marker.DOWNLOAD_COMPLETE_MARKER)) {
@@ -1292,6 +1293,19 @@ class SteamService : Service(), IChallengeUrlChanged {
             } else {
                 val appDirPath = getAppDirPath(appId)
                 val appDir = File(appDirPath)
+
+                // Safety net: refuse to delete if the resolved path is an install root rather than a
+                // game subdirectory (e.g. when installDir is "." in Steam metadata).
+                val isInstallRoot = allInstallPaths.any { root ->
+                    try { appDir.canonicalPath == File(root).canonicalPath } catch (_: Exception) { false }
+                }
+                if (appDirPath.isEmpty() || isInstallRoot) {
+                    Timber.tag("SteamService").e(
+                        "deleteApp(%d) aborted: resolved path '%s' is an install root, not a game directory",
+                        appId, appDirPath,
+                    )
+                    return false
+                }
 
                 if (appDir.exists()) {
                     MarkerUtils.removeMarker(appDirPath, Marker.DOWNLOAD_COMPLETE_MARKER)
