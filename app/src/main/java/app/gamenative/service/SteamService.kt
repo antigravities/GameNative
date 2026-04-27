@@ -133,6 +133,7 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import kotlin.io.path.pathString
 import kotlin.time.Duration.Companion.seconds
@@ -346,6 +347,13 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         private val downloadJobs = ConcurrentHashMap<Int, DownloadInfo>()
 
+        // Tracks apps currently going through the download setup flow but not yet
+        // inserted into downloadJobs. Closes the TOCTOU gap between the
+        // downloadJobs.contains() check and the downloadJobs[appId] = info
+        // assignment, preventing multiple concurrent DepotDownloader instances
+        // when the install button is tapped repeatedly.
+        private val pendingDownloads: MutableSet<Int> = ConcurrentHashMap.newKeySet()
+
         /** Apps with a workshop download that was paused (cancelled) by the user. */
         val workshopPausedApps: MutableSet<Int> = ConcurrentHashMap.newKeySet()
 
@@ -414,6 +422,13 @@ class SteamService : Service(), IChallengeUrlChanged {
             private set
         var isConnected: Boolean = false
             private set
+
+        // Counts active on-demand PICS requests (e.g. from the game page or downloadApp).
+        // The bulk consumer yields between batches while this is non-zero, so interactive
+        // requests are not blocked behind large initial library syncs. AtomicInteger is used
+        // instead of a Boolean so concurrent on-demand calls are handled correctly — the
+        // counter only reaches 0 once ALL callers finish, not just the first one.
+        private val onDemandPicsCount = AtomicInteger(0)
         var isRunning: Boolean = false
             private set
         var isLoggingOut: Boolean = false
@@ -544,9 +559,17 @@ class SteamService : Service(), IChallengeUrlChanged {
          * Get licenses from database for use with DepotDownloader
          */
         suspend fun getLicensesFromDb(): List<License> = withContext(Dispatchers.IO) {
-            val cached = instance?.cachedLicenseDao?.getAll() ?: return@withContext emptyList()
-            cached.mapNotNull { cachedLicense ->
-                LicenseSerializer.deserializeLicense(cachedLicense.licenseJson)
+            val inst = instance ?: return@withContext emptyList()
+            val cached = inst.cachedLicenseDao.getAll()
+            if (cached.isNotEmpty()) {
+                // Normal path: T2 of onLicenseList has already committed the serialized licenses.
+                cached.mapNotNull { LicenseSerializer.deserializeLicense(it.licenseJson) }
+            } else {
+                // T2 hasn't committed yet (user tapped Install during the T1→T2 window in
+                // onLicenseList). inst.licenses is set before T1, so it's always populated
+                // for the current session and contains the same data T2 will eventually write.
+                Timber.w("getLicensesFromDb: cachedLicenseDao empty, using in-memory licenses")
+                inst.licenses
             }
         }
 
@@ -577,9 +600,14 @@ class SteamService : Service(), IChallengeUrlChanged {
          */
         fun getLicensedDepotIds(appId: Int): Set<Int>? {
             val ids = getPkgInfoOf(appId)?.depotIds ?: return null
-            val directDepotIds = ids.takeIf { it.isNotEmpty() }?.toSet() ?: emptySet()
+            // If the app's own package lists no explicit depot IDs, return null so the
+            // license filter in filterForDownloadableDepots is bypassed entirely.
+            // Using only the shared package's depots (package 0, which holds free redists
+            // like 229005/.NET and 229012/XNA) as the restriction set would incorrectly
+            // block the app's own content depots — they're not in the redist package.
+            val directDepotIds = ids.takeIf { it.isNotEmpty() } ?: return null
             val sharedDepotIds = getSharedPkg()?.depotIds?.takeIf { it.isNotEmpty() }?.toSet() ?: emptySet()
-            return (directDepotIds + sharedDepotIds).takeIf { it.isNotEmpty() }
+            return (directDepotIds.toSet() + sharedDepotIds).takeIf { it.isNotEmpty() }
         }
 
         /**
@@ -806,6 +834,12 @@ class SteamService : Service(), IChallengeUrlChanged {
             if (!hasContent)
                 return false
             if (depot.manifests.isNotEmpty() && depot.manifests.values.all { it.size == 0L && it.download == 0L })
+                return false
+            // Manifests all have gid=0 — PICS product-info was never fully synced for this app
+            // (stub row created by the package PICS processor before full info arrived). Reject so
+            // getDownloadableDepots() returns empty and the caller retries via requestAppInfoNow().
+            // sharedInstall depots don't carry a GID, so skip this check for them.
+            if (!depot.sharedInstall && depot.manifests.isNotEmpty() && depot.manifests.values.all { it.gid == 0L })
                 return false
             // 2. Supported OS
             if (!depot.isWindowsCompatible)
@@ -1330,7 +1364,37 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                 Timber.tag("SteamService").d("downloadApp: downloading app $appId with language $containerLanguage, branch $branch")
 
-                val depots = getDownloadableDepots(appId = appId, preferredLanguage = containerLanguage)
+                var depots = getDownloadableDepots(appId = appId, preferredLanguage = containerLanguage)
+
+                // Trigger on-demand PICS refresh if:
+                //   1. The depot map is empty (stub row with no manifest data at all), OR
+                //   2. Any of the app's own content depots have all-zero manifest GIDs.
+                //      This catches the case where common redist depots (e.g., 229005/229012)
+                //      pass the filter with valid GIDs, but the actual content depot
+                //      (e.g., 504231 for Celeste) was filtered out by the gid=0 check in
+                //      filterForDownloadableDepots — leaving depots non-empty but missing
+                //      the game content entirely.
+                // runBlocking is safe here because downloadApp is always called from a
+                // background coroutine (Dispatchers.IO launch in the UI layer).
+                val hasStubDepot = appInfo.depots.values.any { depot ->
+                    !depot.sharedInstall && depot.manifests.isNotEmpty() &&
+                        depot.manifests.values.all { it.gid == 0L }
+                }
+                if (depots.isEmpty() || hasStubDepot) {
+                    Timber.i("downloadApp($appId): depots empty or contain stub manifests — attempting on-demand PICS refresh")
+                    runBlocking { requestAppInfoNow(appId) }
+                    depots = getDownloadableDepots(appId = appId, preferredLanguage = containerLanguage)
+                }
+
+                if (depots.isEmpty()) {
+                    Timber.w("downloadApp($appId): depots still empty after PICS refresh — notifying user")
+                    instance?.notificationHelper?.notify(
+                        instance?.getString(R.string.download_metadata_not_ready)
+                            ?: "Game data not ready. Please wait for Steam to finish syncing.",
+                    )
+                    return@let null
+                }
+
                 downloadApp(
                     appId = appId,
                     downloadableDepots = depots,
@@ -1642,6 +1706,10 @@ class SteamService : Service(), IChallengeUrlChanged {
 
             if (!checkWifiOrNotify()) return null
             if (downloadJobs.contains(appId)) return getAppDownloadInfo(appId)
+            // .add() returns false when another coroutine already claimed this slot,
+            // meaning it is between this guard and the downloadJobs assignment below.
+            if (!pendingDownloads.add(appId)) return getAppDownloadInfo(appId)
+            try {
             if (downloadableDepots.isEmpty()) {
                 Timber.w("downloadApp($appId): downloadableDepots is empty — no depots passed filters")
                 return null
@@ -2028,6 +2096,12 @@ class SteamService : Service(), IChallengeUrlChanged {
             downloadJobs[appId] = info
             notifyDownloadStarted(appId)
             return info
+            } finally {
+                // Once downloadJobs is set, future callers hit the first guard.
+                // On any early return (empty depots, no wifi, etc.) the slot is
+                // freed so a subsequent attempt can succeed.
+                pendingDownloads.remove(appId)
+            }
         }
 
         // parentScope is intentionally the download job's own CoroutineScope: cancelling the
@@ -2954,6 +3028,11 @@ class SteamService : Service(), IChallengeUrlChanged {
             val steamApps = service._steamApps ?: return@withContext
             if (!isConnected) return@withContext
 
+            // Signal that an on-demand request is in flight. The bulk consumer checks this
+            // and yields between batches so this request isn't starved behind thousands of
+            // queued library apps. incrementAndGet/decrementAndGet are atomic, so multiple
+            // concurrent callers all register correctly.
+            onDemandPicsCount.incrementAndGet()
             try {
                 val pics = steamApps.picsGetProductInfo(
                     apps = listOf(PICSRequest(id = appId)),
@@ -2984,6 +3063,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                 Timber.i("On-demand PICS completed for appId=$appId (depots=${newApp.depots.size})")
             } catch (e: Exception) {
                 Timber.e(e, "On-demand PICS request failed for appId=$appId")
+            } finally {
+                // Always decrement — even if an exception was thrown or the coroutine
+                // was cancelled — so the bulk consumer is never permanently stalled.
+                onDemandPicsCount.decrementAndGet()
             }
         }
 
@@ -3871,71 +3954,112 @@ class SteamService : Service(), IChallengeUrlChanged {
         Timber.i("Received License List ${callback.result}, size: ${callback.licenseList.size}")
 
         scope.launch {
+            // Set in-memory field immediately — DepotDownloader uses this for auth
+            // during the current session; the DB write below is for persistence across restarts.
+            licenses = callback.licenseList
+
+            // --- CPU work BEFORE acquiring any write lock ---
+            // Previously this groupBy/map ran inside withTransaction, holding the write
+            // lock during expensive CPU work on 59k+ license entries.
+            val licensesToAdd = callback.licenseList
+                .groupBy { it.packageID }
+                .map { licensesEntry ->
+                    val preferred = licensesEntry.value.firstOrNull {
+                        it.ownerAccountID == userSteamId?.accountID?.toInt()
+                    } ?: licensesEntry.value.first()
+                    SteamLicense(
+                        packageId = licensesEntry.key,
+                        lastChangeNumber = preferred.lastChangeNumber,
+                        timeCreated = preferred.timeCreated,
+                        timeNextProcess = preferred.timeNextProcess,
+                        minuteLimit = preferred.minuteLimit,
+                        minutesUsed = preferred.minutesUsed,
+                        paymentMethod = preferred.paymentMethod,
+                        licenseFlags = licensesEntry.value
+                            .map { it.licenseFlags }
+                            .reduceOrNull { first, second ->
+                                val combined = EnumSet.copyOf(first)
+                                combined.addAll(second)
+                                combined
+                            } ?: EnumSet.noneOf(ELicenseFlags::class.java),
+                        purchaseCode = preferred.purchaseCode,
+                        licenseType = preferred.licenseType,
+                        territoryCode = preferred.territoryCode,
+                        accessToken = preferred.accessToken,
+                        ownerAccountId = licensesEntry.value.map { it.ownerAccountID },
+                        masterPackageID = preferred.masterPackageID,
+                    )
+                }
+
+            // --- Diff against DB before acquiring the write lock ---
+            // getLicenseStubs() fetches only packageId + lastChangeNumber + accessToken,
+            // avoiding deserialization of the large app_ids/depot_ids lists for all rows.
+            val existingStubs = licenseDao.getLicenseStubs().associateBy { it.packageId }
+            val incomingIds = licensesToAdd.mapTo(HashSet(licensesToAdd.size)) { it.packageId }
+
+            val newLicenses = licensesToAdd.filter { it.packageId !in existingStubs }
+            val changedLicenses = licensesToAdd.filter { pkg ->
+                val stub = existingStubs[pkg.packageId]
+                stub != null && stub.lastChangeNumber != pkg.lastChangeNumber
+            }
+            val staleIds = existingStubs.keys.filterNot { it in incomingIds }
+
+            Timber.i(
+                "onLicenseList diff: ${newLicenses.size} new, ${changedLicenses.size} changed, " +
+                    "${staleIds.size} stale, " +
+                    "${licensesToAdd.size - newLicenses.size - changedLicenses.size} unchanged",
+            )
+
+            // For changed licenses, read their existing PICS-derived columns (app_ids/depot_ids)
+            // so we can carry them forward. We only fetch full rows for the small changed subset,
+            // not all 59k. On a typical re-login this set is near zero.
+            val mergedChangedLicenses = if (changedLicenses.isNotEmpty()) {
+                val existingPics = licenseDao.findLicenses(changedLicenses.map { it.packageId })
+                    .associateBy { it.packageId }
+                changedLicenses.map { updated ->
+                    val pics = existingPics[updated.packageId]
+                    // Carry forward PICS lists; fall back to empty if the row didn't exist yet.
+                    updated.copy(
+                        appIds = pics?.appIds ?: emptyList(),
+                        depotIds = pics?.depotIds ?: emptyList(),
+                    )
+                }
+            } else emptyList()
+
+            // --- Transaction 1: targeted diff-based update ---
+            // Unchanged rows are never touched, so their app_ids/depot_ids stay intact.
+            // Changed rows are re-inserted with the preserved PICS columns merged back in.
             db.withTransaction {
-                // Note: I assume with every launch we do, in fact, update the licenses for app the apps if we join or get removed
-                //      from family sharing... We really can't test this as there is a 1-year cooldown.
-                //      Then 'findStaleLicences' will find these now invalid items to remove.
+                val toWrite = newLicenses + mergedChangedLicenses
+                if (toWrite.isNotEmpty()) licenseDao.insertAll(toWrite)
+                if (staleIds.isNotEmpty()) licenseDao.deleteStaleLicenses(staleIds)
+            }
 
-                // Store raw licenses for DepotDownloader - each license in its own row
-                licenses = callback.licenseList
-                cachedLicenseDao.deleteAll()
-                val cachedLicenses = callback.licenseList.map { license ->
-                    CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
-                }
-                cachedLicenseDao.insertAll(cachedLicenses)
-
-                val licensesToAdd = callback.licenseList
-                    .groupBy { it.packageID }
-                    .map { licensesEntry ->
-                        val preferred = licensesEntry.value.firstOrNull {
-                            it.ownerAccountID == userSteamId?.accountID?.toInt()
-                        } ?: licensesEntry.value.first()
-                        SteamLicense(
-                            packageId = licensesEntry.key,
-                            lastChangeNumber = preferred.lastChangeNumber,
-                            timeCreated = preferred.timeCreated,
-                            timeNextProcess = preferred.timeNextProcess,
-                            minuteLimit = preferred.minuteLimit,
-                            minutesUsed = preferred.minutesUsed,
-                            paymentMethod = preferred.paymentMethod,
-                            licenseFlags = licensesEntry.value
-                                .map { it.licenseFlags }
-                                .reduceOrNull { first, second ->
-                                    val combined = EnumSet.copyOf(first)
-                                    combined.addAll(second)
-                                    combined
-                                } ?: EnumSet.noneOf(ELicenseFlags::class.java),
-                            purchaseCode = preferred.purchaseCode,
-                            licenseType = preferred.licenseType,
-                            territoryCode = preferred.territoryCode,
-                            accessToken = preferred.accessToken,
-                            ownerAccountId = licensesEntry.value.map { it.ownerAccountID }, // Read note above
-                            masterPackageID = preferred.masterPackageID,
-                        )
-                    }
-
-                if (licensesToAdd.isNotEmpty()) {
-                    Timber.i("Adding ${licensesToAdd.size} licenses")
-                    licenseDao.insertAll(licensesToAdd)
-                }
-
-                val licensesToRemove = licenseDao.findStaleLicences(
-                    packageIds = callback.licenseList.map { it.packageID },
-                )
-                if (licensesToRemove.isNotEmpty()) {
-                    Timber.i("Removing ${licensesToRemove.size} (stale) licenses")
-                    val packageIds = licensesToRemove.map { it.packageId }
-                    licenseDao.deleteStaleLicenses(packageIds)
-                }
-
-                // Get PICS information with the current license database.
-                licenseDao.getAllLicenses()
+            // --- Queue only new + changed packages for PICS ---
+            // Unchanged packages already have valid app_ids/depot_ids — skipping them
+            // prevents packagePicsChannel from flooding on every re-login.
+            val toQueue = newLicenses + changedLicenses
+            if (toQueue.isNotEmpty()) {
+                toQueue
                     .map { PICSRequest(it.packageId, it.accessToken) }
                     .chunked(MAX_PICS_BUFFER)
                     .forEach { chunk ->
                         Timber.d("onLicenseList: Queueing ${chunk.size} package(s) for PICS")
                         packagePicsChannel.send(chunk)
                     }
+            } else {
+                Timber.i("onLicenseList: no packages need PICS sync, skipping queue")
+            }
+
+            // --- Transaction 2: raw license persistence for DepotDownloader ---
+            // JSON serialization of 59k License objects happens here (outside T1) so T1's
+            // lock window stays short. Runs after PICS is queued so it doesn't delay the pipeline.
+            val cachedLicenses = callback.licenseList.map { license ->
+                CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
+            }
+            db.withTransaction {
+                cachedLicenseDao.deleteAll()
+                cachedLicenseDao.insertAll(cachedLicenses)
             }
         }
     }
@@ -3958,10 +4082,13 @@ class SteamService : Service(), IChallengeUrlChanged {
      * Results are returned in a [PICSChangesCallback]
      */
     private fun continuousPICSChangesChecker(): Job = scope.launch {
+        // Fire immediately on login so apps that changed while the app was closed are
+        // picked up before the pre-filter in the package PICS processor has a chance to
+        // skip them. PrefManager.lastPICSChangeNumber persists across sessions, so
+        // picsGetChangesSince correctly covers any gap since the last session.
+        PICSChangesCheck()
         while (isActive && isLoggedIn) {
-            // Initial delay before each check
             delay(60.seconds)
-
             PICSChangesCheck()
         }
     }
@@ -3999,45 +4126,72 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                 // Process any app changes
                 launch {
-                    changesSince.appChanges.values
-                        .filter { changeData ->
-                            // only queue PICS requests for apps existing in the db that have changed
-                            val app = appDao.findApp(changeData.id) ?: return@filter false
-                            changeData.changeNumber != app.lastChangeNumber
-                        }
-                        .map { PICSRequest(id = it.id) }
-                        .chunked(MAX_PICS_BUFFER)
-                        .forEach { chunk ->
-                            ensureActive()
-                            Timber.d("onPicsChanges: Queueing ${chunk.size} app(s) for PICS")
-                            appPicsChannel.send(chunk)
-                        }
+                    if (changesSince.isRequiresFullUpdate || changesSince.isRequiresFullAppUpdate) {
+                        // Steam's changelist history has been exceeded — the incremental list is
+                        // incomplete and we can't know which apps changed. Re-queue every app in
+                        // the DB so nothing is left stale. This path sends directly to
+                        // appPicsChannel, bypassing the package-processor pre-filter (which only
+                        // guards that one send site and correctly does not apply here).
+                        Timber.w("picsGetChangesSince: full app update required — re-queuing all known apps")
+                        appDao.getAllAppIds()
+                            .chunked(MAX_PICS_BUFFER)
+                            .forEach { chunk ->
+                                ensureActive()
+                                appPicsChannel.send(chunk.map { PICSRequest(id = it) })
+                            }
+                    } else {
+                        changesSince.appChanges.values
+                            .filter { changeData ->
+                                // only queue PICS requests for apps existing in the db that have changed
+                                val app = appDao.findApp(changeData.id) ?: return@filter false
+                                changeData.changeNumber != app.lastChangeNumber
+                            }
+                            .map { PICSRequest(id = it.id) }
+                            .chunked(MAX_PICS_BUFFER)
+                            .forEach { chunk ->
+                                ensureActive()
+                                Timber.d("onPicsChanges: Queueing ${chunk.size} app(s) for PICS")
+                                appPicsChannel.send(chunk)
+                            }
+                    }
                 }
 
                 // Process any package changes
                 launch {
-                    val pkgsWithChanges = changesSince.packageChanges.values
-                        .filter { changeData ->
-                            // only queue PICS requests for pkgs existing in the db that have changed
-                            val pkg = licenseDao.findLicense(changeData.id) ?: return@filter false
-                            changeData.changeNumber != pkg.lastChangeNumber
-                        }
-
-                    if (pkgsWithChanges.isNotEmpty()) {
-                        val pkgsForAccessTokens = pkgsWithChanges.filter { it.isNeedsToken }.map { it.id }
-
-                        val accessTokens = _steamApps?.picsGetAccessTokens(emptyList(), pkgsForAccessTokens)
-                            ?.await()?.packageTokens ?: emptyMap()
-
-                        ensureActive()
-
-                        pkgsWithChanges
-                            .map { PICSRequest(it.id, accessTokens[it.id] ?: 0) }
+                    if (changesSince.isRequiresFullUpdate || changesSince.isRequiresFullPackageUpdate) {
+                        // Changelist overflowed — queue every known package so nothing stays stale.
+                        // getLicenseStubs() avoids loading the full SteamLicense rows with large list fields.
+                        Timber.w("picsGetChangesSince: full package update required — re-queuing all known packages")
+                        licenseDao.getLicenseStubs()
                             .chunked(MAX_PICS_BUFFER)
                             .forEach { chunk ->
-                                Timber.d("onPicsChanges: Queueing ${chunk.size} package(s) for PICS")
-                                packagePicsChannel.send(chunk)
+                                ensureActive()
+                                packagePicsChannel.send(chunk.map { PICSRequest(it.packageId, it.accessToken) })
                             }
+                    } else {
+                        val pkgsWithChanges = changesSince.packageChanges.values
+                            .filter { changeData ->
+                                // only queue PICS requests for pkgs existing in the db that have changed
+                                val pkg = licenseDao.findLicense(changeData.id) ?: return@filter false
+                                changeData.changeNumber != pkg.lastChangeNumber
+                            }
+
+                        if (pkgsWithChanges.isNotEmpty()) {
+                            val pkgsForAccessTokens = pkgsWithChanges.filter { it.isNeedsToken }.map { it.id }
+
+                            val accessTokens = _steamApps?.picsGetAccessTokens(emptyList(), pkgsForAccessTokens)
+                                ?.await()?.packageTokens ?: emptyMap()
+
+                            ensureActive()
+
+                            pkgsWithChanges
+                                .map { PICSRequest(it.id, accessTokens[it.id] ?: 0) }
+                                .chunked(MAX_PICS_BUFFER)
+                                .forEach { chunk ->
+                                    Timber.d("onPicsChanges: Queueing ${chunk.size} package(s) for PICS")
+                                    packagePicsChannel.send(chunk)
+                                }
+                        }
                     }
                 }
             } catch (e: NullPointerException) {
@@ -4063,6 +4217,11 @@ class SteamService : Service(), IChallengeUrlChanged {
                     ensureActive()
                     if (!isLoggedIn) return@collect
                     val steamApps = instance?._steamApps ?: return@collect
+
+                    // Yield between bulk batches while any on-demand PICS request is active
+                    // (e.g. game page open or downloadApp retry). delay() suspends the coroutine
+                    // without blocking the thread, letting requestAppInfoNow complete faster.
+                    while (onDemandPicsCount.get() > 0) { delay(50) }
 
                     val callback = steamApps.picsGetProductInfo(
                         apps = appRequests,
@@ -4176,13 +4335,28 @@ class SteamService : Service(), IChallengeUrlChanged {
                                 }
 
                             // Get PICS information with the app ids.
-                            queue
-                                .map { PICSRequest(id = it, accessToken = appTokens[it] ?: 0L) }
-                                .chunked(MAX_PICS_BUFFER)
-                                .forEach { chunk ->
-                                    Timber.d("bufferedPICSGetProductInfo: Queueing ${chunk.size} for PICS")
-                                    appPicsChannel.send(chunk)
+                            // Skip apps that are already fully synced — PICSChangesCheck handles
+                            // keeping those current via incremental changelists. A single batched
+                            // DB read is much cheaper than N individual findApp() calls.
+                            // NOTE: this filter only applies to THIS send site. PICSChangesCheck
+                            // and refreshOwnedGamesFromServer send to appPicsChannel independently
+                            // and are intentionally not filtered here.
+                            val syncedIds = appDao.findSyncedIds(queue).toHashSet()
+                            val needsSync = queue.filter { it !in syncedIds }
+                            if (needsSync.isEmpty()) {
+                                Timber.d("bufferedPICSGetProductInfo: all ${queue.size} apps already synced, skipping")
+                            } else {
+                                if (needsSync.size < queue.size) {
+                                    Timber.d("bufferedPICSGetProductInfo: skipping ${queue.size - needsSync.size} already-synced apps, queuing ${needsSync.size}")
                                 }
+                                needsSync
+                                    .map { PICSRequest(id = it, accessToken = appTokens[it] ?: 0L) }
+                                    .chunked(MAX_PICS_BUFFER)
+                                    .forEach { chunk ->
+                                        Timber.d("bufferedPICSGetProductInfo: Queueing ${chunk.size} for PICS")
+                                        appPicsChannel.send(chunk)
+                                    }
+                            }
                         } catch (e: AsyncJobFailedException) {
                             Timber.w("Could not get PICS product info $e")
                         }

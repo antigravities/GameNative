@@ -237,6 +237,13 @@ interface SteamAppDao {
     @Query("SELECT id FROM steam_app")
     suspend fun getAllAppIds(): List<Int>
 
+    // Returns the subset of `ids` that already have a full PICS sync recorded
+    // (received_pics = 1). Used by the package PICS processor to skip apps that
+    // PICSChangesCheck keeps current via incremental changelists. No schema change
+    // needed — received_pics already exists on the steam_app table.
+    @Query("SELECT id FROM steam_app WHERE id IN (:ids) AND received_pics = 1")
+    suspend fun findSyncedIds(ids: Collection<Int>): List<Int>
+
     @Query("UPDATE steam_app SET workshop_mods = :workshopMods, enabled_workshop_item_ids = :enabledIds WHERE id = :appId")
     suspend fun updateWorkshopState(appId: Int, workshopMods: Boolean, enabledIds: String)
 
