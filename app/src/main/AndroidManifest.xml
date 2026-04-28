@@ -57,6 +57,17 @@
                     android:scheme="home" />
             </intent-filter>
             <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <!-- steam://run/440, steam://rungameid/440, steam://launch/440 all deep-link into game launch -->
+                <data android:scheme="steam" android:host="run" />
+                <data android:scheme="steam" android:host="rungameid" />
+                <data android:scheme="steam" android:host="launch" />
+            </intent-filter>
+            <intent-filter>
                 <action android:name="app.gamenative.LAUNCH_GAME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
