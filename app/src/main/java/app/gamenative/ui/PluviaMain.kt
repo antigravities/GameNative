@@ -369,15 +369,8 @@ fun PluviaMain(
                 }
 
                 is GameResolutionResult.NotFound -> {
-                    val appName = ContainerUtils.resolveGameName(resolution.originalAppId)
-                    Timber.w("[PluviaMain]: Game not installed: $appName (${launchRequest.appId})")
-                    msgDialogState = MessageDialogState(
-                        visible = true,
-                        type = DialogType.SYNC_FAIL,
-                        title = context.getString(R.string.game_not_installed_title),
-                        message = context.getString(R.string.game_not_installed_message, appName),
-                        dismissBtnText = context.getString(R.string.ok),
-                    )
+                    Timber.w("[PluviaMain]: Game not installed, opening game page (${launchRequest.appId})")
+                    navController.navigate(PluviaScreen.GamePage.route(resolution.originalAppId))
                 }
             }
         }
@@ -404,15 +397,8 @@ fun PluviaMain(
                 .i("Processing pending launch for ${launchRequest.appId} ($reason)")
             when (val resolution = resolveGameAppId(context, launchRequest.appId)) {
                 is GameResolutionResult.NotFound -> {
-                    val appName = ContainerUtils.resolveGameName(resolution.originalAppId)
-                    Timber.tag("IntentLaunch").w("Game not installed: $appName (${launchRequest.appId})")
-                    msgDialogState = MessageDialogState(
-                        visible = true,
-                        type = DialogType.SYNC_FAIL,
-                        title = context.getString(R.string.game_not_installed_title),
-                        message = context.getString(R.string.game_not_installed_message, appName),
-                        dismissBtnText = context.getString(R.string.ok),
-                    )
+                    Timber.tag("IntentLaunch").w("Game not installed, opening game page (${launchRequest.appId})")
+                    navController.navigate(PluviaScreen.GamePage.route(resolution.originalAppId))
                 }
 
                 is GameResolutionResult.Success -> {
@@ -492,15 +478,8 @@ fun PluviaMain(
                         }
 
                         is GameResolutionResult.NotFound -> {
-                            val appName = ContainerUtils.resolveGameName(resolution.originalAppId)
-                            Timber.w("[PluviaMain]: Game not installed: $appName (${event.appId})")
-                            msgDialogState = MessageDialogState(
-                                visible = true,
-                                type = DialogType.SYNC_FAIL,
-                                title = context.getString(R.string.game_not_installed_title),
-                                message = context.getString(R.string.game_not_installed_message, appName),
-                                dismissBtnText = context.getString(R.string.ok),
-                            )
+                            Timber.w("[PluviaMain]: Game not installed, opening game page (${event.appId})")
+                            navController.navigate(PluviaScreen.GamePage.route(resolution.originalAppId))
                         }
                     }
                 }
