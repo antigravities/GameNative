@@ -31,6 +31,21 @@ object IntentLaunchManager {
     fun parseLaunchIntent(intent: Intent): LaunchRequest? {
         Timber.d("[IntentLaunchManager]: Parsing intent: action=${intent.action}")
 
+        // Handle steam://run/{appId}, steam://rungameid/{appId}, steam://launch/{appId} deep links.
+        // Android parses steam://run/440 as scheme=steam, host=run, pathSegments=["440"].
+        if (intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "steam") {
+            val host = intent.data?.host
+            if (host == "run" || host == "rungameid" || host == "launch") {
+                val appIdNum = intent.data?.pathSegments?.firstOrNull()?.toIntOrNull()
+                if (appIdNum != null && appIdNum > 0) {
+                    Timber.d("[IntentLaunchManager]: steam:// launch for appId: STEAM_$appIdNum")
+                    return LaunchRequest("STEAM_$appIdNum")
+                }
+                Timber.w("[IntentLaunchManager]: steam:// URL missing valid appId: ${intent.data}")
+                return null
+            }
+        }
+
         if (intent.action != ACTION_LAUNCH_GAME) {
             Timber.d("[IntentLaunchManager]: Intent action '${intent.action}' doesn't match expected action '$ACTION_LAUNCH_GAME'")
             return null
