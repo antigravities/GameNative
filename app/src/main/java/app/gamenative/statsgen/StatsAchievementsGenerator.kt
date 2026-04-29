@@ -3,9 +3,18 @@ package app.gamenative.statsgen
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 class StatsAchievementsGenerator {
     private val vdfParser = VdfParser()
+
+    private val sfd by lazy {
+        SimpleDateFormat("MMM d - h:mm a", Locale.getDefault()).apply {
+            timeZone = TimeZone.getDefault()
+        }
+    }
 
     private fun escapeUnicode(text: String): String {
         val sb = StringBuilder()
@@ -22,7 +31,11 @@ class StatsAchievementsGenerator {
         return sb.toString()
     }
 
-    fun generateStatsAchievements(schema: ByteArray, configDirectory: String): ProcessingResult {
+    fun generateStatsAchievements(
+        schema: ByteArray,
+        configDirectory: String,
+        unlockedStatus: Map<Pair<Int, Int>, Int>? = null
+    ): ProcessingResult {
         val parsedSchema = vdfParser.binaryLoads(schema)
         val achievementsOut = mutableListOf<Achievement>()
         val statsOut = mutableListOf<Stat>()
@@ -86,15 +99,22 @@ class StatsAchievementsGenerator {
                             }
                         }
 
-                        achievementBuilder["name"] = ach["name"] ?: ""
                         val achName = ach["name"]?.toString() ?: ""
-                        if (achName.isNotEmpty()) {
-                            val blockId = statKey.toIntOrNull()
-                            val bitIndex = achNumKey.toIntOrNull()
-                            if (blockId != null && bitIndex != null) {
-                                nameToBlockBit[achName] = Pair(blockId, bitIndex)
+                        achievementBuilder["name"] = achName
+
+                        val blockId = statKey.toIntOrNull()
+                        val bitIndex = achNumKey.toIntOrNull()
+                        var isUnlocked = false
+                        var unlockTime: Int? = null
+
+                        if (achName.isNotEmpty() && blockId != null && bitIndex != null) {
+                            nameToBlockBit[achName] = Pair(blockId, bitIndex)
+                            unlockTime = unlockedStatus?.get(Pair(blockId, bitIndex))
+                            if (unlockTime != null && unlockTime != 0) {
+                                isUnlocked = true
                             }
                         }
+
                         if (ach.containsKey("progress")) {
                             achievementBuilder["progress"] = ach["progress"] as Any
                         }
@@ -107,7 +127,10 @@ class StatsAchievementsGenerator {
                             icon = achievementBuilder["icon"]?.toString(),
                             iconGray = achievementBuilder["icon_gray"]?.toString(),
                             icongray = achievementBuilder["icongray"]?.toString(),
-                            progress = achievementBuilder["progress"] as? Map<String, Any>
+                            progress = achievementBuilder["progress"] as? Map<String, Any>,
+                            unlocked = if (isUnlocked) true else null,
+                            unlockTimestamp = if (isUnlocked) unlockTime else null,
+                            formattedUnlockTime = if (isUnlocked && unlockTime != null) sfd.format(unlockTime * 1000L) else null
                         )
                         achievementsOut.add(achievement)
                     }

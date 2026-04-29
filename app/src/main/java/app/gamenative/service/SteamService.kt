@@ -2207,6 +2207,13 @@ class SteamService : Service(), IChallengeUrlChanged {
                             if (postSyncInfo.syncResult !in setOf(SyncResult.Success, SyncResult.UpToDate)) {
                                 Timber.w("[PostInstallSync] Cloud save sync finished with ${postSyncInfo.syncResult} for app $appId")
                             }
+
+                            // Sync achievements so they're ready before first launch
+                            if (isLoggedIn) {
+                                val settingsDir = File(appDirPath, "steam_settings")
+                                if (!settingsDir.exists()) settingsDir.mkdirs()
+                                generateAchievements(appId, settingsDir.absolutePath)
+                            }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -3182,9 +3189,21 @@ class SteamService : Service(), IChallengeUrlChanged {
         suspend fun generateAchievements(appId: Int, configDirectory: String) {
             val steamUser = instance!!._steamUser!!
             val userStats = instance?._steamUserStats!!.getUserStats(appId, steamUser.steamID!!).await()
+
+            val unlockedStatus = mutableMapOf<Pair<Int, Int>, Int>()
+            userStats.achievementBlocks?.forEach { block ->
+                val blockId = (block.achievementId as? Number)?.toInt() ?: return@forEach
+                block.unlockTime?.forEachIndexed { index, time ->
+                    val t = (time as? Number)?.toInt() ?: 0
+                    if (t != 0) {
+                        unlockedStatus[Pair(blockId, index)] = t
+                    }
+                }
+            }
+
             val schemaArray = userStats.schema.toByteArray()
             val generator = StatsAchievementsGenerator()
-            val result = generator.generateStatsAchievements(schemaArray, configDirectory)
+            val result = generator.generateStatsAchievements(schemaArray, configDirectory, unlockedStatus)
             cachedAchievements = result.achievements
             cachedAchievementsAppId = appId
 

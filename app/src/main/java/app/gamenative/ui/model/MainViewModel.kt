@@ -469,6 +469,19 @@ class MainViewModel @Inject constructor(
                 val container = ContainerUtils.getOrCreateContainer(context, appId)
                 val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
                 if (gameSource == GameSource.STEAM) {
+                    val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
+                    val appDirPath = SteamService.getAppDirPath(steamAppId)
+                    val settingsDir = Paths.get(appDirPath).resolve("steam_settings")
+
+                    // Always refresh achievements before launch if online
+                    if (!_offline.value && SteamService.isLoggedIn) {
+                        try {
+                            SteamService.generateAchievements(steamAppId, settingsDir.toString())
+                        } catch (e: Exception) {
+                            Timber.e(e, "Failed to refresh achievements before launch for $appId")
+                        }
+                    }
+
                     if (container.isLaunchRealSteam()) {
                         SteamUtils.restoreSteamApi(context, appId)
                     } else {
