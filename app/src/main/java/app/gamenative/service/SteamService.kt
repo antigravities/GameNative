@@ -844,6 +844,9 @@ class SteamService : Service(), IChallengeUrlChanged {
             // 2. Supported OS
             if (!depot.isWindowsCompatible)
                 return false
+            // 2a. Realm filter: Use steamglobal to avoid depots from local realms (i.e., steamchina)
+            if (depot.realm != "steamglobal")
+                return false
             // 3. 64-bit or indeterminate
             // Arch selection: allow 64-bit and Unknown always.
             // Allow 32-bit only when no 64-bit depot exists.
