@@ -2049,6 +2049,18 @@ fun preLaunchApp(
             }
         }
 
+        // Download the current achievement unlock state from Steam into Goldberg's
+        // achievements.json before the game starts. This prevents already-earned achievements
+        // from being re-presented as new unlocks when playing on multiple devices.
+        if (!isOffline && SteamService.isConnected && SteamService.isLoggedIn) {
+            setLoadingMessage("Syncing achievements")
+            try {
+                SteamService.downloadAchievementsFromSteam(context, gameId)
+            } catch (e: Exception) {
+                Timber.tag("preLaunchApp").e(e, "Achievement download sync failed for $appId, continuing with launch")
+            }
+        }
+
         setLoadingMessage("Syncing cloud saves")
         setLoadingProgress(-1f)
         val postSyncInfo = SteamService.beginLaunchApp(

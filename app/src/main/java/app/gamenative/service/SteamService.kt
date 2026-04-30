@@ -2220,6 +2220,17 @@ class SteamService : Service(), IChallengeUrlChanged {
                             PluviaApp.events.emit(AndroidEvent.PostInstallSyncStatusChanged(appId, false))
                         }
                     }
+
+                    // Seed Goldberg achievement state from Steam so the first launch starts
+                    // with the correct unlock set (avoids re-unlocking on-device achievements
+                    // that were earned on another platform).
+                    try {
+                        downloadAchievementsFromSteam(svc.applicationContext, appId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Timber.e(e, "[PostInstallSync] Achievement download sync failed for app $appId")
+                    }
                 }
             }
         }
@@ -3406,6 +3417,124 @@ class SteamService : Service(), IChallengeUrlChanged {
                 Timber.w("${callback.statsFailedValidation.size} stats failed validation for appId=$appId")
                 callback.statsFailedValidation.forEach { f ->
                     Timber.w("  statId=${f.statId} reverted to ${f.revertedStatValue}")
+                }
+            }
+        }
+
+        /**
+         * Downloads the user's current achievement unlock state from Steam and writes it into
+         * Goldberg's achievements.json in all GSE save directories for this app. Existing local
+         * unlocks are preserved (merge, not overwrite) so any achievements earned this session
+         * that haven't uploaded yet are not lost.
+         *
+         * Call this before launching a game and after a download completes so the emulator
+         * always starts with an up-to-date unlock set from other devices.
+         */
+        suspend fun downloadAchievementsFromSteam(context: Context, appId: Int) {
+            if (!isLoggedIn || !isConnected) {
+                Timber.d("[AchDownload] Skipping for $appId — not connected/logged in")
+                return
+            }
+
+            val steamUser = instance?._steamUser ?: return
+            val steamID = steamUser.steamID ?: return
+            val statsHandler = instance?._steamUserStats ?: return
+
+            // Single network call gives us both the schema (for the name→block mapping)
+            // and the achievementBlocks (the actual per-user unlock bitmasks).
+            val userStats = statsHandler.getUserStats(appId, steamID).await()
+            if (userStats.result != EResult.OK) {
+                Timber.w("[AchDownload] getUserStats failed for $appId: ${userStats.result}")
+                return
+            }
+
+            // Locate the steam_settings config directory; create it for fresh installs.
+            var configDirectory = findSteamSettingsDir(context, appId)
+            if (configDirectory == null) {
+                val settingsDir = File(getAppDirPath(appId), "steam_settings")
+                settingsDir.mkdirs()
+                configDirectory = settingsDir.absolutePath
+            }
+
+            // Ensure achievement_name_to_block.json exists. On post-install sync this file
+            // hasn't been written yet (DLL setup that creates it runs on first launch), so we
+            // generate it from the schema we already have in the getUserStats response.
+            val mappingFile = File(configDirectory, "achievement_name_to_block.json")
+            if (!mappingFile.exists()) {
+                val result = StatsAchievementsGenerator()
+                    .generateStatsAchievements(userStats.schema.toByteArray(), configDirectory)
+                // Mirror generateAchievements() by caching metadata for AchievementWatcher.
+                cachedAchievements = result.achievements
+                cachedAchievementsAppId = appId
+                val nameToBlockBit = result.nameToBlockBit
+                if (nameToBlockBit.isEmpty()) {
+                    Timber.d("[AchDownload] No achievement definitions for appId=$appId")
+                    return
+                }
+                val json = JSONObject()
+                nameToBlockBit.forEach { (name, pair) ->
+                    json.put(name, JSONArray(listOf(pair.first, pair.second)))
+                }
+                mappingFile.writeText(json.toString(), Charsets.UTF_8)
+            }
+
+            // Build reverse mapping: (blockId, bitIndex) → achievement name.
+            val mappingJson = JSONObject(mappingFile.readText(Charsets.UTF_8))
+            val blockBitToName = mutableMapOf<Pair<Int, Int>, String>()
+            for (name in mappingJson.keys()) {
+                val arr = mappingJson.optJSONArray(name) ?: continue
+                if (arr.length() >= 2) {
+                    blockBitToName[Pair(arr.getInt(0), arr.getInt(1))] = name
+                }
+            }
+            if (blockBitToName.isEmpty()) {
+                Timber.d("[AchDownload] Empty mapping for appId=$appId")
+                return
+            }
+
+            // Decode server-side unlocked achievements from the achievementBlocks bitmasks.
+            // Each block has a list of unlock timestamps; a non-zero timestamp at index i
+            // means bit i of that block is set (= achievement unlocked).
+            val serverUnlocked = mutableMapOf<String, Long>() // name → unix seconds
+            for (block in userStats.achievementBlocks ?: emptyList()) {
+                val blockId = (block.achievementId as? Number)?.toInt() ?: continue
+                val unlockTimes = block.unlockTime ?: emptyList()
+                for (i in unlockTimes.indices) {
+                    val t = (unlockTimes[i] as? Number)?.toLong() ?: 0L
+                    if (t != 0L) {
+                        val name = blockBitToName[Pair(blockId, i)] ?: continue
+                        serverUnlocked[name] = t
+                    }
+                }
+            }
+            Timber.d("[AchDownload] Server has ${serverUnlocked.size} unlocked achievements for appId=$appId")
+            if (serverUnlocked.isEmpty()) return
+
+            // Merge server state into each GSE save directory. Directories are created here
+            // if the game has never been run on this device (fresh install path).
+            for (dir in getGseSaveDirs(context, appId)) {
+                dir.mkdirs()
+                val achFile = File(dir, "achievements.json")
+                val existing = if (achFile.exists()) {
+                    try { JSONObject(achFile.readText(Charsets.UTF_8)) }
+                    catch (e: Exception) { JSONObject() }
+                } else { JSONObject() }
+
+                var changed = false
+                for ((name, timestamp) in serverUnlocked) {
+                    // Only add — never remove a locally earned entry in case it hasn't
+                    // been uploaded to Steam yet (e.g. offline session still pending sync).
+                    if (existing.optJSONObject(name)?.optBoolean("earned", false) != true) {
+                        existing.put(name, JSONObject().apply {
+                            put("earned", true)
+                            put("earned_time", timestamp)
+                        })
+                        changed = true
+                    }
+                }
+                if (changed) {
+                    achFile.writeText(existing.toString(), Charsets.UTF_8)
+                    Timber.i("[AchDownload] Wrote ${serverUnlocked.size} server achievements to ${dir.absolutePath}")
                 }
             }
         }
