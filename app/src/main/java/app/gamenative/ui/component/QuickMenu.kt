@@ -45,6 +45,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
@@ -622,6 +623,8 @@ fun QuickMenu(
                                             winHandler = winHandler,
                                             processes = wineProcesses,
                                             isLoadingProcesses = isWineProcessesLoading,
+                                            onItemSelected = onItemSelected,
+                                            onDismiss = onDismiss,
                                             firstItemFocusRequester = toolsItemFocusRequester,
                                             modifier = Modifier.fillMaxSize(),
                                         )
@@ -691,6 +694,8 @@ private fun ToolsQuickMenuTab(
     winHandler: WinHandler?,
     processes: List<ProcessInfo>,
     isLoadingProcesses: Boolean,
+    onItemSelected: ((Int) -> Boolean)? = null,
+    onDismiss: (() -> Unit)? = null,
     firstItemFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -727,7 +732,8 @@ private fun ToolsQuickMenuTab(
                     onEndProcess = {
                         winHandler?.killProcess(process.name, process.pid)
                     },
-                    focusRequester = if (index == 0) firstItemFocusRequester else null,
+                    // Focus is claimed by the screenshot row above when it is shown.
+                    focusRequester = if (index == 0 && onItemSelected == null) firstItemFocusRequester else null,
                 )
             }
         }
