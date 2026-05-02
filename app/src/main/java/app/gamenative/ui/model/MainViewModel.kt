@@ -496,7 +496,7 @@ class MainViewModel @Inject constructor(
                     if (folderPath != null) {
                         val folder = java.io.File(folderPath)
                         val heroFile = folder.listFiles()?.firstOrNull { file ->
-                            file.isFile && 
+                            file.isFile &&
                                 file.name.startsWith("steamgriddb_hero", ignoreCase = true) &&
                                 !file.name.contains("grid_", ignoreCase = true) &&
                                 (file.name.endsWith(".png", ignoreCase = true) ||
@@ -549,8 +549,12 @@ class MainViewModel @Inject constructor(
 
                 val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
                 Timber.tag("Exit").i("Got game id: $gameId")
-                ActiveGameRegistry.clearIfMatches(gameId)
-                SteamService.notifyRunningProcesses()
+
+                if (ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.STEAM) {
+                    ActiveGameRegistry.clearIfMatches(gameId)
+                    SteamService.notifyRunningProcesses()
+                }
+
                 handleExitCloudSync(context, appId, gameId)
 
                 // Prompt user to save temporary container configuration if one was applied
