@@ -536,6 +536,34 @@ class SteamService : Service(), IChallengeUrlChanged {
             instance?._steamFriends?.setPersonaState(state)
         }
 
+        /**
+         * Called when the app goes to background (screen lock, home, task switch).
+         * Sets Away transiently without persisting to preferences, and clears the
+         * in-game status on Steam's side. Invisible is never overridden.
+         */
+        suspend fun notifyAppBackgrounded() = withContext(Dispatchers.IO) {
+            if (PrefManager.personaState != EPersonaState.Invisible) {
+                instance?._steamFriends?.setPersonaState(EPersonaState.Away)
+            }
+            // Calling notifyRunningProcesses() with no args sends an empty game list,
+            // which clears the in-game status on Steam's side.
+            if (ActiveGameRegistry.all().isNotEmpty()) {
+                notifyRunningProcesses()
+            }
+        }
+
+        /**
+         * Called when the app returns to foreground (unlock, task switch back).
+         * Restores the user's preferred persona state and re-sends any active game sessions.
+         */
+        suspend fun notifyAppForegrounded() = withContext(Dispatchers.IO) {
+            instance?._steamFriends?.setPersonaState(PrefManager.personaState)
+            val activeGames = ActiveGameRegistry.all()
+            if (activeGames.isNotEmpty()) {
+                notifyRunningProcesses(*activeGames.toTypedArray())
+            }
+        }
+
         suspend fun requestUserPersona() = withContext(Dispatchers.IO) {
             // in order to get user avatar url and other info
             userSteamId?.let { instance?._steamFriends?.requestFriendInfo(it) }
@@ -3975,7 +4003,13 @@ class SteamService : Service(), IChallengeUrlChanged {
                 picsGetProductInfoJob = continuousPICSGetProductInfo()
 
                 // Tell steam we're online, this allows friends to update.
-                _steamFriends?.setPersonaState(PrefManager.personaState)
+                // If the app is currently backgrounded, use Away instead of the user's preferred
+                // state so presence matches what we'd set in onPause.
+                if (PluviaApp.isActivityInForeground || PrefManager.personaState == EPersonaState.Invisible) {
+                    _steamFriends?.setPersonaState(PrefManager.personaState)
+                } else {
+                    _steamFriends?.setPersonaState(EPersonaState.Away)
+                }
 
                 // Read the registry inside the coroutine so any exitSteamApp() call that races
                 // with this reconnect handler sees a fresh snapshot, not a stale one captured
@@ -3983,8 +4017,14 @@ class SteamService : Service(), IChallengeUrlChanged {
                 scope.launch {
                     val activeGames = ActiveGameRegistry.all()
                     if (activeGames.isNotEmpty()) {
-                        Timber.i("Re-sending %d active game session(s) after Steam reconnect", activeGames.size)
-                        notifyRunningProcesses(*activeGames.toTypedArray())
+                        if (PluviaApp.isActivityInForeground) {
+                            Timber.i("Re-sending %d active game session(s) after Steam reconnect", activeGames.size)
+                            notifyRunningProcesses(*activeGames.toTypedArray())
+                        } else {
+                            // App is backgrounded; don't re-send in-game status. It will be
+                            // restored by notifyAppForegrounded() when the user returns.
+                            Timber.i("App is backgrounded; skipping game session re-send after reconnect")
+                        }
                     } else {
                         Timber.d("No active game sessions to re-send after Steam reconnect")
                     }
