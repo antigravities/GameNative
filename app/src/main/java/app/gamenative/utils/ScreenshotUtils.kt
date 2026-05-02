@@ -17,13 +17,15 @@ object ScreenshotUtils {
      * failure. Callers must dispatch any UI work (Toasts, etc.) back to the main
      * thread — e.g., via [kotlinx.coroutines.withContext] or a Handler.
      *
-     * Captures the game frame from the scene FBO (before post-processing effects),
-     * making it driver-agnostic: works with Turnip/DRI3 GPU hardware buffers as
-     * well as software fallback paths.
+     * Driver-agnostic: works with Turnip/DRI3 GPU hardware buffers and software paths.
+     *
+     * @param postEffects true = capture the composited frame shown on screen (with effects
+     *                    like CRT/FSR/FXAA applied); false = capture the raw game frame
+     *                    before any post-processing (default, preserves prior behavior).
      */
-    fun captureFromGL(renderer: GLRenderer, onCaptured: (Bitmap?) -> Unit) {
+    fun captureFromGL(renderer: GLRenderer, postEffects: Boolean = false, onCaptured: (Bitmap?) -> Unit) {
         try {
-            renderer.captureFrame { bitmap -> onCaptured(bitmap) }
+            renderer.captureFrame({ bitmap -> onCaptured(bitmap) }, postEffects)
         } catch (e: Exception) {
             onCaptured(null)
         }
