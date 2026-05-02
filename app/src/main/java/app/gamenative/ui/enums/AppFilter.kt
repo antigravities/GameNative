@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Diversity3
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.InstallMobile
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -44,6 +45,11 @@ enum class AppFilter(
         displayText = "Demo",
         icon = Icons.Default.AvTimer,
     ),
+    PLAYTEST(
+        code = 0x80,
+        displayText = "Playtest",
+        icon = Icons.Default.Science,
+    ),
     SHARED(
         code = 0x20,
         displayText = "Family Sharing",
@@ -80,6 +86,9 @@ enum class AppFilter(
             }
             if (appFilter.contains(DEMO)) {
                 output.add(AppType.demo)
+            }
+            if (appFilter.contains(PLAYTEST)) {
+                output.add(AppType.beta)
             }
             return output
         }
