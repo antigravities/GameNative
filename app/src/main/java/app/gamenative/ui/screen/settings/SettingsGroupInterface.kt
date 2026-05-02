@@ -532,6 +532,32 @@ fun SettingsGroupInterface(
                 PrefManager.screenshotPostEffects = it
             },
         )
+        // Privacy dropdown — only shown when upload is enabled, since it has no effect otherwise.
+        if (uploadScreenshotsToSteam) {
+            // Keys match EUCMFilePrivacyState enum names; labels are localized display strings.
+            val privacyKeys = listOf("Private", "FriendsOnly", "Public")
+            val privacyLabels = listOf(
+                stringResource(R.string.settings_screenshot_privacy_private),
+                stringResource(R.string.settings_screenshot_privacy_friends),
+                stringResource(R.string.settings_screenshot_privacy_public),
+            )
+            var privacyIndex by rememberSaveable {
+                mutableStateOf(
+                    privacyKeys.indexOf(PrefManager.screenshotPrivacy).takeIf { it >= 0 } ?: 0
+                )
+            }
+            SettingsListDropdown(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.settings_screenshot_privacy_title)) },
+                subtitle = { Text(text = stringResource(R.string.settings_screenshot_privacy_subtitle)) },
+                items = privacyLabels,
+                value = privacyIndex,
+                onItemSelected = { idx ->
+                    privacyIndex = idx
+                    PrefManager.screenshotPrivacy = privacyKeys[idx]
+                },
+            )
+        }
     }
 
     // Steam Download Server choice dialog

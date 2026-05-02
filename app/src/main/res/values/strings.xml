@@ -293,6 +293,11 @@
     <string name="settings_steam_upload_screenshots_subtitle">Automatically upload in-game screenshots to your Steam profile</string>
     <string name="settings_screenshot_post_effects_title">Screenshot mode</string>
     <string name="settings_screenshot_post_effects_subtitle">Off: raw game frame (no effects). On: capture screen as shown (CRT, FSR, FXAA applied)</string>
+    <string name="settings_screenshot_privacy_title">Screenshot Privacy</string>
+    <string name="settings_screenshot_privacy_subtitle">Visibility when uploaded to Steam</string>
+    <string name="settings_screenshot_privacy_private">Private</string>
+    <string name="settings_screenshot_privacy_friends">Friends Only</string>
+    <string name="settings_screenshot_privacy_public">Public</string>
     <string name="performance_hud">Performance HUD</string>
     <string name="performance_hud_description">Show or hide the in-game overlay.</string>
     <string name="performance_hud_fps_limiter">FPS limiter</string>

@@ -331,6 +331,14 @@ object PrefManager {
             setPref(SCREENSHOT_POST_EFFECTS, value)
         }
 
+    private val SCREENSHOT_PRIVACY = stringPreferencesKey("screenshot_privacy")
+    // Stores the EUCMFilePrivacyState enum name. Default "Private" matches prior hardcoded behavior.
+    var screenshotPrivacy: String
+        get() = getPref(SCREENSHOT_PRIVACY, "Private")
+        set(value) {
+            setPref(SCREENSHOT_PRIVACY, value)
+        }
+
     private val PERFORMANCE_HUD_COMPACT_MODE = booleanPreferencesKey("performance_hud_compact_mode")
     var performanceHudCompactMode: Boolean
         get() = getPref(PERFORMANCE_HUD_COMPACT_MODE, false)
