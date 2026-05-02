@@ -321,6 +321,14 @@ object PrefManager {
             setPref(SHOW_FPS, value)
         }
 
+    private val UPLOAD_SCREENSHOTS_TO_STEAM = booleanPreferencesKey("upload_screenshots_to_steam")
+    // Default false — upload is opt-in; screenshots never leave the device unless the user enables this.
+    var uploadScreenshotsToSteam: Boolean
+        get() = getPref(UPLOAD_SCREENSHOTS_TO_STEAM, false)
+        set(value) {
+            setPref(UPLOAD_SCREENSHOTS_TO_STEAM, value)
+        }
+
     private val PERFORMANCE_HUD_COMPACT_MODE = booleanPreferencesKey("performance_hud_compact_mode")
     var performanceHudCompactMode: Boolean
         get() = getPref(PERFORMANCE_HUD_COMPACT_MODE, false)
