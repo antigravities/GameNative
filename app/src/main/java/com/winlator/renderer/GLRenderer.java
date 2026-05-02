@@ -27,7 +27,10 @@ import com.winlator.xserver.WindowManager;
 import com.winlator.xserver.XLock;
 import com.winlator.xserver.XServer;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.function.Consumer;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -36,6 +39,8 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     public final XServerView xServerView;
     private final XServer xServer;
     private Runnable onFrameRenderedListener;
+    // Set from any thread; consumed once on the next GL frame via doCapture().
+    private volatile Consumer<Bitmap> pendingCaptureCallback;
     private final VertexAttribute quadVertices = new VertexAttribute("position", 2);
     private final float[] tmpXForm1 = XForm.getInstance();
     private final float[] tmpXForm2 = XForm.getInstance();
@@ -143,6 +148,13 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         }
         if (onFrameRenderedListener != null) {
             onFrameRenderedListener.run();
+        }
+
+        // Consume a one-shot screenshot request if one was queued via captureFrame().
+        Consumer<Bitmap> captureCallback = pendingCaptureCallback;
+        if (captureCallback != null) {
+            pendingCaptureCallback = null;
+            doCapture(captureCallback);
         }
     }
 
@@ -509,6 +521,67 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
 
     public EffectComposer getEffectComposer() {
         return effectComposer;
+    }
+
+    /**
+     * Schedules a one-shot frame capture on the GL thread. The callback receives the
+     * bitmap on the GL thread — marshal to Main/IO via a Handler or coroutine if needed.
+     * Captures from the scene FBO (before post-processing effects) when effects are
+     * active; falls back to the default framebuffer when no effects are enabled.
+     * Calling this triggers a render if the surface is in dirty-render mode.
+     */
+    public void captureFrame(Consumer<Bitmap> callback) {
+        pendingCaptureCallback = callback;
+        // Wake up the GL thread in case the surface is in RENDERMODE_WHEN_DIRTY.
+        xServerView.requestRender();
+    }
+
+    /**
+     * Executed on the GL thread at the end of onDrawFrame(). Reads pixels from the
+     * appropriate FBO, flips the image vertically (GL origin is bottom-left), and
+     * hands the resulting Bitmap to the callback.
+     */
+    private void doCapture(Consumer<Bitmap> callback) {
+        int fboId;
+        int w, h;
+
+        // Choose the pre-effects scene buffer when effects are active so the screenshot
+        // shows the raw game frame without CRT/FSR/etc. overlaid on it.
+        if (effectComposer.hasEffects()) {
+            RenderTarget sceneBuffer = effectComposer.getSceneBuffer();
+            fboId = sceneBuffer.getFramebuffer();
+            w = sceneBuffer.getWidth();
+            h = sceneBuffer.getHeight();
+        } else {
+            // No effects — read directly from the screen framebuffer.
+            fboId = 0;
+            w = surfaceWidth;
+            h = surfaceHeight;
+        }
+
+        if (w <= 0 || h <= 0) {
+            callback.accept(null);
+            return;
+        }
+
+        // Allocate a native (direct) buffer; glReadPixels writes RGBA bytes per pixel.
+        ByteBuffer buf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.LITTLE_ENDIAN);
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboId);
+        GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+
+        // Copy into a Bitmap. GL_RGBA bytes on little-endian ARM map correctly to ARGB_8888.
+        Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        buf.rewind();
+        bitmap.copyPixelsFromBuffer(buf);
+
+        // GL origin is bottom-left; Android/Bitmap origin is top-left — flip vertically.
+        android.graphics.Matrix matrix = new android.graphics.Matrix();
+        matrix.postScale(1f, -1f, w / 2f, h / 2f);
+        Bitmap flipped = Bitmap.createBitmap(bitmap, 0, 0, w, h, matrix, false);
+        bitmap.recycle();
+
+        callback.accept(flipped);
     }
 
     public void setFrameRating(FrameRating frameRating) {
