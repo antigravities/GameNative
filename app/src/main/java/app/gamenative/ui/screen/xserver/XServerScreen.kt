@@ -2098,20 +2098,46 @@ fun XServerScreen(
                 if (renderer != null) {
                     ScreenshotUtils.captureFromGL(renderer) { bitmap ->
                         scope.launch(Dispatchers.IO) {
-                            val uri = bitmap?.let {
-                                ScreenshotUtils.saveBitmapToGallery(
-                                    context = context,
-                                    bitmap = it,
-                                    label = container?.name ?: "screenshot",
-                                )
+                            if (bitmap == null) {
+                                withContext(Dispatchers.Main) {
+                                    SnackbarManager.show(context.getString(R.string.screenshot_failed))
+                                }
+                                return@launch
                             }
-                            withContext(Dispatchers.Main) {
-                                val msg = context.getString(
-                                    if (uri != null) R.string.screenshot_saved
-                                    else R.string.screenshot_failed,
-                                )
-                                SnackbarManager.show(msg)
+
+                            val uri = ScreenshotUtils.saveBitmapToGallery(
+                                context = context,
+                                bitmap = bitmap,
+                                label = container?.name ?: "screenshot",
+                            )
+
+                            // Determine the snackbar message only after all work is done so
+                            // we show one notification that reflects the full outcome.
+                            val message = when {
+                                uri == null -> context.getString(R.string.screenshot_failed)
+                                PrefManager.uploadScreenshotsToSteam
+                                        && gameId > 0
+                                        && ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.STEAM -> {
+                                    // Compress in this IO coroutine so we don't block the render thread.
+                                    val imageBytes = ScreenshotUtils.compressBitmapToJpeg(bitmap)
+                                    val thumbBytes = ScreenshotUtils.generateThumbnailBytes(bitmap)
+                                    val uploaded = SteamService.instance?.uploadScreenshotToCloud(
+                                        appId = gameId,
+                                        imageBytes = imageBytes,
+                                        thumbBytes = thumbBytes,
+                                        width = bitmap.width,
+                                        height = bitmap.height,
+                                    ) ?: false
+                                    if (uploaded) context.getString(R.string.screenshot_saved_and_uploaded)
+                                    else context.getString(R.string.screenshot_saved_upload_failed)
+                                }
+                                else -> context.getString(R.string.screenshot_saved)
                             }
+
+                            // Bitmap must be recycled after all reads are done (gallery save + compression).
+                            bitmap.recycle()
+
+                            withContext(Dispatchers.Main) { SnackbarManager.show(message) }
                         }
                     }
                 }
