@@ -18,6 +18,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.hardware.display.DisplayManager
 import android.hardware.input.InputManager
+import android.media.MediaActionSound
 import android.view.InputDevice
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -411,6 +412,14 @@ fun XServerScreen(
     var physicalControllerHandler: PhysicalControllerHandler? by remember { mutableStateOf(null) }
     var exitWatchJob: Job? by remember { mutableStateOf(null) }
     val keyboardEscMenuHandler = remember(scope) { KeyboardEscMenuHandler(scope) }
+
+    // MediaActionSound is the standard Android API for camera-style feedback sounds.
+    // We create it once and pre-load the shutter sample so play() has no latency.
+    val shutterSound = remember { MediaActionSound() }
+    DisposableEffect(Unit) {
+        shutterSound.load(MediaActionSound.SHUTTER_CLICK)
+        onDispose { shutterSound.release() }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -2168,6 +2177,12 @@ fun XServerScreen(
                                 bitmap = bitmap,
                                 label = container?.name ?: "screenshot",
                             )
+
+                            // Confirmed saved — give the user immediate audio feedback before
+                            // the (potentially slow) Steam upload begins.
+                            if (uri != null) {
+                                shutterSound.play(MediaActionSound.SHUTTER_CLICK)
+                            }
 
                             // Determine the snackbar message only after all work is done so
                             // we show one notification that reflects the full outcome.
