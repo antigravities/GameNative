@@ -337,6 +337,15 @@ object PrefManager {
             setPref(UPLOAD_SCREENSHOTS_TO_STEAM, value)
         }
 
+    private val SCREENSHOT_POST_EFFECTS = booleanPreferencesKey("screenshot_post_effects")
+    // Default true = capture the composited frame shown on screen (with CRT/FSR/FXAA applied).
+    // False = capture the raw game frame before any post-processing.
+    var screenshotPostEffects: Boolean
+        get() = getPref(SCREENSHOT_POST_EFFECTS, true)
+        set(value) {
+            setPref(SCREENSHOT_POST_EFFECTS, value)
+        }
+
     private val PERFORMANCE_HUD_COMPACT_MODE = booleanPreferencesKey("performance_hud_compact_mode")
     var performanceHudCompactMode: Boolean
         get() = getPref(PERFORMANCE_HUD_COMPACT_MODE, false)
