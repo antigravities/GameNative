@@ -29,7 +29,7 @@ public class ControlElement {
     public static final byte TRACKPAD_ACCELERATION_THRESHOLD = 4;
     public static final short BUTTON_MIN_TIME_TO_KEEP_PRESSED = 300;
     public enum Type {
-        BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, SHOOTER_MODE;
+        BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, SHOOTER_MODE, SCREENSHOT;
 
         public static String[] names() {
             Type[] types = values();
@@ -127,8 +127,13 @@ public class ControlElement {
             shooterLookSensitivity = 1.0f;
             shooterJoystickSize = 1.0f;
         }
+        else if (type == Type.SCREENSHOT) {
+            shape = Shape.CIRCLE;
+        }
 
         text = "";
+        // Screenshot button uses "SS" as its label; assigned after the blanket clear above.
+        if (type == Type.SCREENSHOT) text = "SS";
         if (type != Type.SHOOTER_MODE) iconId = 0;
         range = null;
         boundingBoxNeedsUpdate = true;
@@ -356,7 +361,8 @@ public class ControlElement {
                 }
                 break;
             }
-            case SHOOTER_MODE: {
+            case SHOOTER_MODE:
+            case SCREENSHOT: {
                 halfWidth = snappingSize * 3;
                 halfHeight = snappingSize * 3;
                 break;
@@ -639,6 +645,31 @@ public class ControlElement {
                 }
                 break;
             }
+            case SCREENSHOT: {
+                float cx = boundingBox.centerX();
+                float cy = boundingBox.centerY();
+                float halfW = boundingBox.width() * 0.5f;
+                String displayText = (text != null && !text.isEmpty()) ? text : "SS";
+
+                // Dim fill while finger is held down for press feedback
+                if (currentPointerId >= 0) {
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(ColorUtils.setAlphaComponent(primaryColor, 80));
+                    canvas.drawCircle(cx, cy, halfW, paint);
+                }
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(primaryColor);
+                paint.setStrokeWidth(strokeWidth);
+                canvas.drawCircle(cx, cy, halfW, paint);
+                paint.setTextSize(Math.min(
+                    getTextSizeForWidth(paint, displayText, boundingBox.width() - strokeWidth * 2),
+                    snappingSize * 2 * scale));
+                paint.setTextAlign(Paint.Align.CENTER);
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(primaryColor);
+                canvas.drawText(displayText, cx, cy - ((paint.descent() + paint.ascent()) * 0.5f), paint);
+                break;
+            }
         }
     }
 
@@ -714,6 +745,11 @@ public class ControlElement {
             }
             else if (type == Type.SHOOTER_MODE) {
                 // Toggle handled on touch up
+                return true;
+            }
+            else if (type == Type.SCREENSHOT) {
+                // Action fires on touch up; repaint now for press-down visual feedback.
+                inputControlsView.invalidate();
                 return true;
             }
             else if (type == Type.RANGE_BUTTON) {
@@ -880,6 +916,10 @@ public class ControlElement {
                 selected = !selected;
                 inputControlsView.setShooterModeActive(selected);
                 inputControlsView.invalidate();
+            }
+            else if (type == Type.SCREENSHOT) {
+                inputControlsView.triggerScreenshot();
+                inputControlsView.invalidate(); // clear press highlight
             }
             currentPointerId = -1;
             return true;
