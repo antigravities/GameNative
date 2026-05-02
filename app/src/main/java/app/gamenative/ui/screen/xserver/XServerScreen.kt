@@ -18,7 +18,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.hardware.display.DisplayManager
 import android.hardware.input.InputManager
-import android.media.MediaActionSound
+import android.media.AudioAttributes
+import android.media.SoundPool
 import android.view.InputDevice
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
@@ -399,12 +400,34 @@ fun XServerScreen(
     var physicalControllerHandler: PhysicalControllerHandler? by remember { mutableStateOf(null) }
     var exitWatchJob: Job? by remember { mutableStateOf(null) }
 
-    // MediaActionSound is the standard Android API for camera-style feedback sounds.
-    // We create it once and pre-load the shutter sample so play() has no latency.
-    val shutterSound = remember { MediaActionSound() }
+    // SoundPool with USAGE_MEDIA routes audio through STREAM_MUSIC (media volume),
+    // bypassing OEM overrides (e.g. Samsung) that force MediaActionSound to max volume
+    // regardless of user settings.
+    val shutterPool = remember {
+        SoundPool.Builder()
+            .setMaxStreams(1)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .build()
+    }
+    val shutterSoundId = remember { mutableIntStateOf(0) }
     DisposableEffect(Unit) {
-        shutterSound.load(MediaActionSound.SHUTTER_CLICK)
-        onDispose { shutterSound.release() }
+        // Try the two standard system camera-click paths; most stock and OEM ROMs have one.
+        // If neither exists, shutterSoundId stays 0 and we simply skip playing the sound.
+        for (path in listOf(
+            "/system/media/audio/ui/camera_click.ogg",
+            "/system/media/audio/ui/camera_click_lite.ogg",
+        )) {
+            if (File(path).exists()) {
+                shutterSoundId.intValue = shutterPool.load(path, 1)
+                break
+            }
+        }
+        onDispose { shutterPool.release() }
     }
 
     DisposableEffect(Unit) {
@@ -2067,8 +2090,10 @@ fun XServerScreen(
 
                             // Confirmed saved — give the user immediate audio feedback before
                             // the (potentially slow) Steam upload begins.
-                            if (uri != null) {
-                                shutterSound.play(MediaActionSound.SHUTTER_CLICK)
+                            // shutterSoundId is 0 if no system camera sound was found; skip in that case.
+                            if (uri != null && shutterSoundId.intValue != 0) {
+                                // 1f/1f = left/right volume at 100% of stream level; 0 = no loop; 1f = normal rate
+                                shutterPool.play(shutterSoundId.intValue, 1f, 1f, 1, 0, 1f)
                             }
 
                             // Determine the snackbar message only after all work is done so
