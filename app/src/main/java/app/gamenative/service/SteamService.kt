@@ -298,7 +298,7 @@ class SteamService : Service(), IChallengeUrlChanged {
     private val pendingSyncAppIds: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val pendingSyncFileLock = Any()
     private val pendingSyncFile by lazy { File(applicationContext.filesDir, "pending_achievement_sync.txt") }
-  
+
     // Debounce fields for onLicenseList — coalesces rapid callback bursts into one processing run.
     private var licenseListDebounceJob: Job? = null
     @Volatile private var pendingLicenseCallback: LicenseListCallback? = null
@@ -666,6 +666,34 @@ class SteamService : Service(), IChallengeUrlChanged {
         suspend fun setPersonaState(state: EPersonaState) = withContext(Dispatchers.IO) {
             PrefManager.personaState = state
             instance?._steamFriends?.setPersonaState(state)
+        }
+
+        /**
+         * Called when the app goes to background (screen lock, home, task switch).
+         * Sets Away transiently without persisting to preferences, and clears the
+         * in-game status on Steam's side. Invisible is never overridden.
+         */
+        suspend fun notifyAppBackgrounded() = withContext(Dispatchers.IO) {
+            if (PrefManager.personaState != EPersonaState.Invisible) {
+                instance?._steamFriends?.setPersonaState(EPersonaState.Away)
+            }
+            // Calling notifyRunningProcesses() with no args sends an empty game list,
+            // which clears the in-game status on Steam's side.
+            if (ActiveGameRegistry.get() != null) {
+                notifyRunningProcesses()
+            }
+        }
+
+        /**
+         * Called when the app returns to foreground (unlock, task switch back).
+         * Restores the user's preferred persona state and re-sends any active game sessions.
+         */
+        suspend fun notifyAppForegrounded() = withContext(Dispatchers.IO) {
+            instance?._steamFriends?.setPersonaState(PrefManager.personaState)
+            val activeGame = ActiveGameRegistry.get()
+            if (activeGame != null) {
+                notifyRunningProcesses(activeGame)
+            }
         }
 
         suspend fun requestUserPersona() = withContext(Dispatchers.IO) {
@@ -4615,16 +4643,31 @@ class SteamService : Service(), IChallengeUrlChanged {
                 }
 
                 // Tell steam we're online, this allows friends to update.
-                _steamFriends?.setPersonaState(PrefManager.personaState)
-
-                val activeGame = ActiveGameRegistry.get()
-                if (activeGame != null) {
-                    Timber.i("Re-sending active game session for appId=%d after Steam reconnect", activeGame.appId)
-                    scope.launch {
-                        notifyRunningProcesses(activeGame)
-                    }
+                // If the app is currently backgrounded, use Away instead of the user's preferred
+                // state so presence matches what we'd set in onPause.
+                if (PluviaApp.isActivityInForeground || PrefManager.personaState == EPersonaState.Invisible) {
+                    _steamFriends?.setPersonaState(PrefManager.personaState)
                 } else {
-                    Timber.d("No active game session to re-send after Steam reconnect")
+                    _steamFriends?.setPersonaState(EPersonaState.Away)
+                }
+
+                // Read the registry inside the coroutine so any exitSteamApp() call that races
+                // with this reconnect handler sees a fresh snapshot, not a stale one captured
+                // before the coroutine was scheduled.
+                scope.launch {
+                    val activeGame = ActiveGameRegistry.get()
+                    if (activeGame != null) {
+                        if (PluviaApp.isActivityInForeground) {
+                            Timber.i("Re-sending active game session for appId=%d after Steam reconnect", activeGame.appId)
+                            notifyRunningProcesses(activeGame)
+                        } else {
+                            // App is backgrounded; don't re-send in-game status. It will be
+                            // restored by notifyAppForegrounded() when the user returns.
+                            Timber.i("App is backgrounded; skipping game session re-send after reconnect")
+                        }
+                    } else {
+                        Timber.d("No active game session to re-send after Steam reconnect")
+                    }
                 }
 
                 notificationHelper.notify("Connected")
