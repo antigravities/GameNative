@@ -583,6 +583,18 @@ fun SettingsGroupInterface(
             },
             onClick = { openRegionDialog = true },
         )
+        // Auto-upload in-game screenshots to the user's Steam screenshot library (opt-in, defaults off)
+        var uploadScreenshotsToSteam by rememberSaveable { mutableStateOf(PrefManager.uploadScreenshotsToSteam) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_steam_upload_screenshots_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_steam_upload_screenshots_subtitle)) },
+            state = uploadScreenshotsToSteam,
+            onCheckedChange = {
+                uploadScreenshotsToSteam = it
+                PrefManager.uploadScreenshotsToSteam = it
+            },
+        )
     }
 
     // Steam Download Server choice dialog

@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import com.winlator.renderer.GLRenderer
+import java.io.ByteArrayOutputStream
 
 object ScreenshotUtils {
 
@@ -66,5 +67,34 @@ object ScreenshotUtils {
             resolver.delete(uri, null, null)
             null
         }
+    }
+
+    /**
+     * Compresses [bitmap] to JPEG bytes. JPEG is preferred over PNG for Steam uploads
+     * because it's significantly smaller while the Steam screenshot viewer displays it
+     * natively at full quality.
+     */
+    fun compressBitmapToJpeg(bitmap: Bitmap, quality: Int = 90): ByteArray {
+        val out = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        return out.toByteArray()
+    }
+
+    /**
+     * Scales [bitmap] down and encodes as JPEG for use as the Steam thumbnail.
+     * Steam requires a thumbnail alongside the full image when registering a screenshot.
+     */
+    fun generateThumbnailBytes(bitmap: Bitmap, maxWidth: Int = 320, quality: Int = 80): ByteArray {
+        val scale = maxWidth.toFloat() / bitmap.width
+        val thumb = Bitmap.createScaledBitmap(
+            bitmap,
+            maxWidth,
+            (bitmap.height * scale).toInt(),
+            /* filter= */ true,
+        )
+        val out = ByteArrayOutputStream()
+        thumb.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        thumb.recycle()
+        return out.toByteArray()
     }
 }
