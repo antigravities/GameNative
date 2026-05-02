@@ -93,6 +93,9 @@ public class InputControlsView extends View {
     // Tracks whether SHOW_KEYBOARD is currently held, so the callback fires once per press (rising edge only)
     private boolean showKeyboardPressed;
 
+    // Callback invoked when a SCREENSHOT overlay element is tapped
+    private Runnable screenshotCallback;
+
     @SuppressLint("ResourceType")
     public InputControlsView(Context context) {
         super(context);
@@ -408,6 +411,15 @@ public class InputControlsView extends View {
 
     public void triggerShowKeyboard() {
         if (showKeyboardCallback != null) showKeyboardCallback.run();
+    }
+
+    public void setScreenshotCallback(Runnable callback) {
+        this.screenshotCallback = callback;
+    }
+
+    /** Called by ControlElement when a SCREENSHOT-type button is tapped. */
+    public void triggerScreenshot() {
+        if (screenshotCallback != null) screenshotCallback.run();
     }
 
     /** Check if a STICK element should be hidden because container shooter mode replaces it. */
