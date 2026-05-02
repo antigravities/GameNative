@@ -117,6 +117,47 @@ Install-click stacking: SteamAppScreen launches SteamService.downloadApp via fir
 
 `onLicenseList` write-lock contention: On large libraries (~59k licenses), `onLicenseList` previously held the Room write lock for minutes inside a single `db.withTransaction` because it serialized all licenses to JSON, ran 60 batched `NOT IN` queries via `findStaleLicences`, and called `packagePicsChannel.send()` — all while the lock was held. The package PICS processor's own `db.withTransaction` calls blocked on this lock, halting the entire PICS pipeline. Fix: do CPU work (groupBy/map) outside the transaction, replace `findStaleLicences`+`deleteStaleLicenses` with `deleteAll`+`insertAll`, commit T1 before queuing to the channel, and defer the `cachedLicenseDao` write (T2) until after queuing.
 
+### Preferences (PrefManager)
+
+**File**: `app/src/main/java/app/gamenative/PrefManager.kt`
+
+Uses Jetpack DataStore (not SharedPreferences). All reads are blocking via `getPref()`; writes are fire-and-forget via `setPref()`. Both helpers are defined in PrefManager and handle the coroutine plumbing internally.
+
+**Adding a preference** — three parts, always together:
+
+```kotlin
+// 1. Private key — use the type-appropriate factory (booleanPreferencesKey,
+//    stringPreferencesKey, intPreferencesKey, floatPreferencesKey, etc.)
+private val MY_PREF = booleanPreferencesKey("my_pref")
+
+// 2 & 3. Public property with getter (supplies default) and setter
+var myPref: Boolean
+    get() = getPref(MY_PREF, false)   // second arg is the default value
+    set(value) {
+        setPref(MY_PREF, value)
+    }
+```
+
+**Exposing in Settings UI** — `SettingsGroupInterface.kt` contains all user-visible settings. Settings are grouped by `SettingsGroup {}` blocks (Downloads, appearance, etc.). The standard pattern for a boolean toggle:
+
+```kotlin
+var myPref by rememberSaveable { mutableStateOf(PrefManager.myPref) }
+SettingsSwitch(
+    colors = settingsTileColorsAlt(),
+    title = { Text(text = stringResource(R.string.settings_my_pref_title)) },
+    subtitle = { Text(text = stringResource(R.string.settings_my_pref_subtitle)) },
+    state = myPref,
+    onCheckedChange = {
+        myPref = it
+        PrefManager.myPref = it
+    },
+)
+```
+
+For dropdowns use `SettingsListDropdown`; for a tappable link use `SettingsMenuLink`. Always add matching string resources to `app/src/main/res/values/strings.xml`.
+
+**Reading at runtime** — call `PrefManager.myPref` directly from any thread (the getter blocks briefly on DataStore). No injection needed; PrefManager is a singleton object.
+
 ## Application Entry Points
 
 ```

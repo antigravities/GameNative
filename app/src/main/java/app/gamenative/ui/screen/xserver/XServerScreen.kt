@@ -2128,7 +2128,7 @@ fun XServerScreen(
             icView.setScreenshotCallback {
                 val renderer = xServerView?.getxServer()?.renderer
                 if (renderer != null) {
-                    ScreenshotUtils.captureFromGL(renderer) { bitmap ->
+                    ScreenshotUtils.captureFromGL(renderer, PrefManager.screenshotPostEffects) { bitmap ->
                         scope.launch(Dispatchers.IO) {
                             if (bitmap == null) {
                                 withContext(Dispatchers.Main) {

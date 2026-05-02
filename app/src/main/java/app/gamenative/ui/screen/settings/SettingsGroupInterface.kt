@@ -520,6 +520,18 @@ fun SettingsGroupInterface(
                 PrefManager.uploadScreenshotsToSteam = it
             },
         )
+        // Choose between raw game pixels (pre-effects) or the composited screen (post-effects).
+        var screenshotPostEffects by rememberSaveable { mutableStateOf(PrefManager.screenshotPostEffects) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_screenshot_post_effects_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_screenshot_post_effects_subtitle)) },
+            state = screenshotPostEffects,
+            onCheckedChange = {
+                screenshotPostEffects = it
+                PrefManager.screenshotPostEffects = it
+            },
+        )
     }
 
     // Steam Download Server choice dialog
