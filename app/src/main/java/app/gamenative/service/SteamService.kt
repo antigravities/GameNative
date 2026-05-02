@@ -4732,7 +4732,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                     ufsImageFilePath = imagePath,
                     usfThumbnailFilePath = thumbPath,
                     caption = "",
-                    privacy = EUCMFilePrivacyState.Private,
+                    // Read privacy from user prefs. Fall back to Private if the stored
+                    // value is unrecognized (e.g., after a future enum change).
+                    privacy = EUCMFilePrivacyState.entries.find { it.name == PrefManager.screenshotPrivacy }
+                        ?: EUCMFilePrivacyState.Private,
                     width = width,
                     height = height,
                     creationTime = Date(),
