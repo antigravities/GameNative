@@ -3948,14 +3948,17 @@ class SteamService : Service(), IChallengeUrlChanged {
                 // Tell steam we're online, this allows friends to update.
                 _steamFriends?.setPersonaState(PrefManager.personaState)
 
-                val activeGames = ActiveGameRegistry.all()
-                if (activeGames.isNotEmpty()) {
-                    Timber.i("Re-sending %d active game session(s) after Steam reconnect", activeGames.size)
-                    scope.launch {
+                // Read the registry inside the coroutine so any exitSteamApp() call that races
+                // with this reconnect handler sees a fresh snapshot, not a stale one captured
+                // before the coroutine was scheduled.
+                scope.launch {
+                    val activeGames = ActiveGameRegistry.all()
+                    if (activeGames.isNotEmpty()) {
+                        Timber.i("Re-sending %d active game session(s) after Steam reconnect", activeGames.size)
                         notifyRunningProcesses(*activeGames.toTypedArray())
+                    } else {
+                        Timber.d("No active game sessions to re-send after Steam reconnect")
                     }
-                } else {
-                    Timber.d("No active game sessions to re-send after Steam reconnect")
                 }
 
                 notificationHelper.notify("Connected")
