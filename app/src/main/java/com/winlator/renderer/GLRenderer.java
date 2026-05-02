@@ -41,6 +41,8 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private Runnable onFrameRenderedListener;
     // Set from any thread; consumed once on the next GL frame via doCapture().
     private volatile Consumer<Bitmap> pendingCaptureCallback;
+    // true = doCapture() reads from the screen framebuffer (post-effects); false = scene FBO (pre-effects).
+    private volatile boolean pendingCapturePostEffects;
     private final VertexAttribute quadVertices = new VertexAttribute("position", 2);
     private final float[] tmpXForm1 = XForm.getInstance();
     private final float[] tmpXForm2 = XForm.getInstance();
@@ -524,13 +526,24 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     }
 
     /**
-     * Schedules a one-shot frame capture on the GL thread. The callback receives the
-     * bitmap on the GL thread — marshal to Main/IO via a Handler or coroutine if needed.
-     * Captures from the scene FBO (before post-processing effects) when effects are
-     * active; falls back to the default framebuffer when no effects are enabled.
-     * Calling this triggers a render if the surface is in dirty-render mode.
+     * Schedules a one-shot frame capture on the GL thread, capturing the pre-effects
+     * scene (raw game pixels). Equivalent to captureFrame(callback, false).
      */
     public void captureFrame(Consumer<Bitmap> callback) {
+        captureFrame(callback, false);
+    }
+
+    /**
+     * Schedules a one-shot frame capture on the GL thread. The callback receives the
+     * bitmap on the GL thread — marshal to Main/IO via a Handler or coroutine if needed.
+     * Calling this triggers a render if the surface is in dirty-render mode.
+     *
+     * @param postEffects true = read from screen framebuffer after all effects have rendered
+     *                    (what the user sees on screen); false = read from the scene FBO
+     *                    (raw game pixels, no CRT/FSR/FXAA applied).
+     */
+    public void captureFrame(Consumer<Bitmap> callback, boolean postEffects) {
+        pendingCapturePostEffects = postEffects;
         pendingCaptureCallback = callback;
         // Wake up the GL thread in case the surface is in RENDERMODE_WHEN_DIRTY.
         xServerView.requestRender();
@@ -545,15 +558,16 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         int fboId;
         int w, h;
 
-        // Choose the pre-effects scene buffer when effects are active so the screenshot
-        // shows the raw game frame without CRT/FSR/etc. overlaid on it.
-        if (effectComposer.hasEffects()) {
+        // Post-effects: read from the screen framebuffer (FBO 0), which holds the fully
+        // composited output after effectComposer.render() has completed this frame.
+        // Pre-effects: read from the scene FBO so the screenshot has no CRT/FSR/FXAA applied.
+        // Without active effects, both paths are equivalent — both read from FBO 0.
+        if (effectComposer.hasEffects() && !pendingCapturePostEffects) {
             RenderTarget sceneBuffer = effectComposer.getSceneBuffer();
             fboId = sceneBuffer.getFramebuffer();
             w = sceneBuffer.getWidth();
             h = sceneBuffer.getHeight();
         } else {
-            // No effects — read directly from the screen framebuffer.
             fboId = 0;
             w = surfaceWidth;
             h = surfaceHeight;
