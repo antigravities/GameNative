@@ -103,6 +103,7 @@ import app.gamenative.ui.data.PerformanceHudSize
 import app.gamenative.ui.data.XServerState
 import app.gamenative.ui.widget.PerformanceHudView
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.ScreenshotUtils
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ExecutableSelectionUtils
 import app.gamenative.utils.LsfgQuickMenuHelper
@@ -2101,6 +2102,32 @@ fun XServerScreen(
             // Wire SHOW_KEYBOARD binding callback for overlay control buttons
             icView.setShowKeyboardCallback {
                 showSoftKeyboard(icView, "onscreen_keyboard_enabled_from_binding")
+            }
+
+            // Wire SCREENSHOT overlay button type — fires on UI thread from onTouchEvent,
+            // so scope.launch is safe. The GL read is queued inside captureFromGL().
+            icView.setScreenshotCallback {
+                val renderer = xServerView?.getxServer()?.renderer
+                if (renderer != null) {
+                    ScreenshotUtils.captureFromGL(renderer) { bitmap ->
+                        scope.launch(Dispatchers.IO) {
+                            val uri = bitmap?.let {
+                                ScreenshotUtils.saveBitmapToGallery(
+                                    context = context,
+                                    bitmap = it,
+                                    label = container?.name ?: "screenshot",
+                                )
+                            }
+                            withContext(Dispatchers.Main) {
+                                val msg = context.getString(
+                                    if (uri != null) R.string.screenshot_saved
+                                    else R.string.screenshot_failed,
+                                )
+                                SnackbarManager.show(msg)
+                            }
+                        }
+                    }
+                }
             }
 
             xServerView.getxServer().winHandler.setInputControlsView(PluviaApp.inputControlsView)
