@@ -507,6 +507,10 @@ class MainActivity : ComponentActivity() {
         PluviaApp.isActivityInForeground = true
 
         lifecycleScope.launch { app.gamenative.launch.LaunchReadiness.refresh() }
+
+        // Restore Steam persona state and in-game presence now that the app is visible again.
+
+        lifecycleScope.launch { SteamService.notifyAppForegrounded() }
         // Re-apply immersive mode to ensure fullscreen persists
         if (!desiredSystemUiVisible) {
             applyImmersiveMode()
@@ -559,6 +563,8 @@ class MainActivity : ComponentActivity() {
         }
         PowerManager.pause()
         PluviaApp.isActivityInForeground = false
+        // Clear in-game status and set Away while the app is not in the foreground.
+        lifecycleScope.launch { SteamService.notifyAppBackgrounded() }
         if (hasReadyGameLifecycleState("pause")) {
             when {
                 PluviaApp.isNeverSuspendMode() -> {
