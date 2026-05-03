@@ -92,7 +92,12 @@ import `in`.dragonbra.javasteam.steam.handlers.steamapps.GamePlayedInfo
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.License
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.PICSRequest
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.SteamApps
+import `in`.dragonbra.javasteam.base.ClientMsgProtobuf
+import `in`.dragonbra.javasteam.enums.EMsg
+import `in`.dragonbra.javasteam.enums.EPurchaseResultDetail
+import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesClientserver2.CMsgClientRegisterKey
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.callback.LicenseListCallback
+import `in`.dragonbra.javasteam.steam.handlers.steamapps.callback.PurchaseResponseCallback
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.SteamCloud
 import `in`.dragonbra.javasteam.steam.handlers.steamfriends.SteamFriends
 import `in`.dragonbra.javasteam.steam.handlers.steamfriends.callback.PersonaStateCallback
@@ -336,6 +341,20 @@ class SteamService : Service(), IChallengeUrlChanged {
         fun clearCachedAchievements() {
             cachedAchievements = null
             cachedAchievementsAppId = null
+        }
+
+        fun redeemProductCode(code: String) {
+            val client = instance?.steamClient ?: return
+            // SteamApps has no public wrapper for key registration, so we send the protobuf directly.
+            // The response arrives as PurchaseResponseCallback via the callback manager loop.
+            val request = ClientMsgProtobuf<CMsgClientRegisterKey.Builder>(
+                CMsgClientRegisterKey::class.java,
+                EMsg.ClientRegisterKey,
+            ).apply {
+                sourceJobID = client.getNextJobID()
+                body.key = code
+            }
+            client.send(request)
         }
 
         val hasWifiOrEthernet: Boolean get() = NetworkMonitor.hasWifiOrEthernet.value
@@ -3736,6 +3755,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                     add(subscribe(PersonaStateCallback::class.java, ::onPersonaStateReceived))
                     add(subscribe(LicenseListCallback::class.java, ::onLicenseList))
                     add(subscribe(PlayingSessionStateCallback::class.java, ::onPlayingSessionState))
+                    add(subscribe(PurchaseResponseCallback::class.java, ::onPurchaseResult))
                 }
             }
 
@@ -4130,6 +4150,16 @@ class SteamService : Service(), IChallengeUrlChanged {
             val event = SteamEvent.PlayingBlocked
             PluviaApp.events.emit(event)
         }
+    }
+
+    private fun onPurchaseResult(callback: PurchaseResponseCallback) {
+        // purchaseReceiptInfo is a KeyValue tree from Steam's binary receipt format.
+        // LineItemInfo contains one child per activated item; ItemDescription is the human-readable name.
+        val packageName = callback.purchaseReceiptInfo["lineitems"]
+            .children.firstOrNull()
+            ?.get("ItemDescription")?.asString()
+            ?.takeIf { it.isNotEmpty() }
+        PluviaApp.events.emit(AndroidEvent.ProductCodeResult(callback.purchaseResultDetail, packageName))
     }
 
     @OptIn(ExperimentalStdlibApi::class)
