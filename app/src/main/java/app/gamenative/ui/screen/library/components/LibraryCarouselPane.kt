@@ -488,16 +488,25 @@ internal fun LibraryCarouselPane(
                                             .height(cardHeight),
                                         contentAlignment = Alignment.Center,
                                     ) {
+                                        // Same stabilization pattern as LibraryListPane: listIndex
+                                        // can change when the list is reordered, so rememberUpdatedState
+                                        // ensures the lambda always forwards the current index.
+                                        val latestListIndex by rememberUpdatedState(listIndex)
+                                        val carouselOnClick = remember(item.appId) {
+                                            {
+                                                onFocusedIndexChanged(latestListIndex)
+                                                onNavigate(item.appId)
+                                            }
+                                        }
+                                        val carouselOnFocus = remember(item.appId) {
+                                            { onFocusedIndexChanged(latestListIndex) }
+                                        }
+
                                         AppItem(
                                             modifier = appItemModifier,
                                             appInfo = item,
-                                            onClick = {
-                                                onFocusedIndexChanged(listIndex)
-                                                onNavigate(item.appId)
-                                            },
-                                            onFocus = {
-                                                onFocusedIndexChanged(listIndex)
-                                            },
+                                            onClick = carouselOnClick,
+                                            onFocus = carouselOnFocus,
                                             paneType = PaneType.GRID_CAPSULE,
                                             imageRefreshCounter = state.imageRefreshCounter,
                                             compatibilityStatus = state.compatibilityMap[item.name],
