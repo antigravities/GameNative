@@ -1257,8 +1257,7 @@
     <string name="sort_name_asc">Name (A-Z)</string>
     <string name="sort_name_desc">Name (Z-A)</string>
     <string name="sort_recently_played">Recently Played</string>
-    <string name="sort_size_smallest">Size (Smallest)</string>
-    <string name="sort_size_largest">Size (Largest)</string>
+
 
     <!-- Game Options Panel -->
     <string name="game_options_title">Options</string>
