@@ -267,7 +267,8 @@ android {
     }
 
     kotlinter {
-        ignoreFormatFailures  = false
+        // only for alex2 builds - DO NOT UPSTREAM
+        ignoreFormatFailures  = true
     }
 
     // externalNativeBuild {
@@ -307,6 +308,11 @@ android {
     //         exclude(group = "junit", module = "junit")
     //     }
     // }
+
+    // only for alex2 builds - DO NOT UPSTREAM
+    lint {
+        abortOnError = false
+    }
 }
 
 // isolated resolvable configuration so we can fish the snappy-java jar out at build time
