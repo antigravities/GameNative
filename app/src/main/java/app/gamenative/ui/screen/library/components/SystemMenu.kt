@@ -41,6 +41,7 @@ import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.StarHalf
+import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -80,9 +81,14 @@ import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.data.SteamFriend
+import app.gamenative.events.AndroidEvent
 import app.gamenative.events.SteamEvent
 import app.gamenative.service.SteamService
+import app.gamenative.ui.component.dialog.ProductKeyDialog
 import app.gamenative.ui.component.dialog.SupportersDialog
+import app.gamenative.ui.component.dialog.state.ProductKeyDialogState
+import app.gamenative.ui.util.SnackbarManager
+import `in`.dragonbra.javasteam.enums.EPurchaseResultDetail
 import app.gamenative.ui.screen.PluviaScreen
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.SteamIconImage
@@ -268,6 +274,8 @@ fun SystemMenu(
     var selectedStatus by remember(persona) { mutableStateOf(persona?.state ?: EPersonaState.Online) }
     var showSupporters by remember { mutableStateOf(false) }
     var showStatusPicker by remember { mutableStateOf(false) }
+    var showProductKeyDialog by remember { mutableStateOf(false) }
+    var productKey by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         persona = SteamService.instance?.localPersona?.value
@@ -305,6 +313,41 @@ fun SystemMenu(
     }
 
     SupportersDialog(visible = showSupporters, onDismiss = { showSupporters = false })
+
+    // Listen for the async purchase result and surface it as a snackbar. The listener lives here
+    // so it stays registered for as long as the library screen is in the composition, even after
+    // the dialog and the system menu are dismissed (Steam's callback can arrive seconds later).
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        val onResult: (AndroidEvent.ProductCodeResult) -> Unit = { event ->
+            val msg = if (event.detail == EPurchaseResultDetail.NoDetail) {
+                if (event.packageName != null) {
+                    context.getString(R.string.activate_product_success, event.packageName)
+                } else {
+                    context.getString(R.string.activate_product_success_generic)
+                }
+            } else {
+                context.getString(R.string.activate_product_error, event.detail?.name ?: "Unknown")
+            }
+            SnackbarManager.show(msg)
+        }
+        PluviaApp.events.on<AndroidEvent.ProductCodeResult, Unit>(onResult)
+        onDispose { PluviaApp.events.off<AndroidEvent.ProductCodeResult, Unit>(onResult) }
+    }
+
+    ProductKeyDialog(
+        state = ProductKeyDialogState(visible = showProductKeyDialog, code = productKey),
+        onStateChange = { productKey = it.code },
+        onActivate = { code ->
+            SteamService.redeemProductCode(code)
+            showProductKeyDialog = false
+            productKey = ""
+        },
+        onDismiss = {
+            showProductKeyDialog = false
+            productKey = ""
+        },
+    )
 
     val colorOnline = PluviaTheme.colors.statusInstalled
     val colorAway = PluviaTheme.colors.statusAway
@@ -587,6 +630,15 @@ fun SystemMenu(
                                 onDismiss()
                             },
                             focusRequester = firstItemFocusRequester,
+                        )
+
+                        SystemMenuItem(
+                            text = stringResource(R.string.activate_product),
+                            icon = Icons.Default.CardGiftcard,
+                            onClick = {
+                                showProductKeyDialog = true
+                                onDismiss()
+                            },
                         )
 
                         SystemMenuItem(
