@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -259,6 +260,22 @@ internal fun LibraryListPane(
                             ) { listIndex ->
                                 val item = state.appInfoList[listIndex]
                                 val animateFade = remember(item.index) { !listState.isScrollInProgress }
+
+                                // Stable lambda references let Compose skip recomposing AppItem when
+                                // only the surrounding list recomposes. onClick captures only appId
+                                // (stable across reorders); onFocus uses rememberUpdatedState so the
+                                // lambda always reads the current index even after a sort/filter moves
+                                // the item to a different position without changing its appId.
+                                val onClick = remember(item.appId) { { onNavigate(item.appId) } }
+                                val latestIndex by rememberUpdatedState(item.index)
+                                val latestListIndex by rememberUpdatedState(listIndex)
+                                val onFocus = remember(item.appId) {
+                                    {
+                                        targetOfScroll = latestIndex
+                                        onFocusedIndexChanged(latestListIndex)
+                                    }
+                                }
+
                                 var isVisible by remember(item.index) { mutableStateOf(!animateFade) }
                                 val alpha by animateFloatAsState(
                                     targetValue = if (isVisible) 1f else 0f,
@@ -292,12 +309,9 @@ internal fun LibraryListPane(
                                     AppItem(
                                         modifier = appItemModifier,
                                         appInfo = item,
-                                        onClick = { onNavigate(item.appId) },
+                                        onClick = onClick,
                                         paneType = currentLayout,
-                                        onFocus = {
-                                            targetOfScroll = item.index
-                                            onFocusedIndexChanged(listIndex)
-                                        },
+                                        onFocus = onFocus,
                                         imageRefreshCounter = state.imageRefreshCounter,
                                         compatibilityStatus = state.compatibilityMap[item.name],
                                         gameStats = state.statsFor(item),
