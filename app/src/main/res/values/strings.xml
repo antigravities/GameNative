@@ -646,6 +646,12 @@
     <!-- Profile & Menu -->
     <string name="help_and_support">Help &amp; Support</string>
     <string name="hall_of_fame">Hall of Fame</string>
+    <string name="activate_product">Activate a Product</string>
+    <string name="activate_product_key_hint">Product Key</string>
+    <string name="activate_product_btn">Activate</string>
+    <string name="activate_product_success">Activated: %s</string>
+    <string name="activate_product_success_generic">Product key activated successfully</string>
+    <string name="activate_product_error">Activation failed: %s</string>
     <string name="go_online">Go Online</string>
     <string name="go_offline">Go Offline</string>
     <string name="log_out">Log Out</string>
