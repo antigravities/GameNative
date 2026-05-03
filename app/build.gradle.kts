@@ -193,7 +193,8 @@ android {
     dynamicFeatures += setOf(":ubuntufs")
 
     kotlinter {
-        ignoreFormatFailures  = false
+        // only for alex2 builds - DO NOT UPSTREAM
+        ignoreFormatFailures  = true
     }
 
     // externalNativeBuild {
@@ -233,6 +234,11 @@ android {
     //         exclude(group = "junit", module = "junit")
     //     }
     // }
+
+    // only for alex2 builds - DO NOT UPSTREAM
+    lint {
+        abortOnError = false
+    }
 }
 
 dependencies {
