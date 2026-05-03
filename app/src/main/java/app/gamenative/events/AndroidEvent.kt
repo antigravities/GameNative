@@ -2,6 +2,7 @@ package app.gamenative.events
 
 import app.gamenative.data.GameSource
 import app.gamenative.ui.enums.Orientation
+import `in`.dragonbra.javasteam.enums.EPurchaseResultDetail
 import java.util.EnumSet
 
 interface AndroidEvent<T> : Event<T> {
@@ -31,4 +32,8 @@ interface AndroidEvent<T> : Event<T> {
     data class EpicAuthCodeReceived(val authCode: String) : AndroidEvent<Unit>
     data object ServiceReady : AndroidEvent<Unit>
     // data class SetAppBarVisibility(val visible: Boolean) : AndroidEvent<Unit>
+    data class ProductCodeResult(
+        val detail: EPurchaseResultDetail?,
+        val packageName: String?,
+    ) : AndroidEvent<Unit>
 }
