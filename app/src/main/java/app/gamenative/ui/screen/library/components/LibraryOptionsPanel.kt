@@ -356,6 +356,4 @@ private fun SortOption.icon(): ImageVector = when (this) {
     SortOption.NAME_ASC -> Icons.Default.SortByAlpha
     SortOption.NAME_DESC -> Icons.Default.SortByAlpha
     SortOption.RECENTLY_PLAYED -> Icons.Default.Schedule
-    SortOption.SIZE_SMALLEST -> Icons.Default.Compress
-    SortOption.SIZE_LARGEST -> Icons.Default.Storage
 }
