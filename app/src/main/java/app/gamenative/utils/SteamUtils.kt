@@ -1034,7 +1034,8 @@ object SteamUtils {
         }
 
         val configsIni = settingsDir.resolve("configs.user.ini")
-        val accountName   = PrefManager.username
+        // Persona name (display name) is what games show; fall back to login name if not yet received.
+        val accountName = PrefManager.steamUserName.takeIf { it.isNotBlank() } ?: PrefManager.username
         val accountSteamId = SteamService.userSteamId?.convertToUInt64()?.toString()
             ?: PrefManager.steamUserSteamId64.takeIf { it != 0L }?.toString()
             ?: "0"
