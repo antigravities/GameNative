@@ -1,5 +1,6 @@
 package app.gamenative.data
 
+import androidx.compose.runtime.Immutable
 import app.gamenative.Constants
 import app.gamenative.utils.CustomGameScanner
 
@@ -37,6 +38,7 @@ enum class GameCompatibilityStatus {
 }
 
 /** Library list item. */
+@Immutable
 data class LibraryItem(
     val index: Int = 0,
     val appId: String = "",
