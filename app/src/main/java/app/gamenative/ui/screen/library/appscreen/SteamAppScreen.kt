@@ -409,6 +409,7 @@ class SteamAppScreen : BaseAppScreen() {
             compatibilityMessage = compatibilityMessage,
             compatibilityColor = compatibilityColor,
             runtime = runtime,
+            logoUrl = appInfo.getLogoUrl(),
         )
     }
 
