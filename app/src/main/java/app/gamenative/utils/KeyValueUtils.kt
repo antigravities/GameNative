@@ -129,7 +129,7 @@ fun KeyValue.generateSteamApp(): SteamApp {
         launchEulaUrl = this["common"]["extended"]["launcheula"].value.orEmpty(),
         requireDefaultInstallFolder = this["common"]["config"]["requiredefaultinstallfolder"].asBoolean(),
         contentType = this["common"]["config"]["contentType"].asInteger(),
-        installDir = this["common"]["config"]["installdir"].value.orEmpty(),
+        installDir = this["config"]["installdir"].value.orEmpty(),
         useLaunchCmdLine = this["common"]["config"]["uselaunchcommandline"].asBoolean(),
         launchWithoutWorkshopUpdates = this["common"]["config"]["launchwithoutworkshopupdates"].asBoolean(),
         useMms = this["common"]["config"]["usemms"].asBoolean(),
