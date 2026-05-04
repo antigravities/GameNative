@@ -493,6 +493,53 @@ private fun formatBytes(bytes: Long): String {
     }
 }
 
+// Extracted into its own composable to keep AppScreenContent's register count below the
+// DEX copy-cat1 limit (register index 255). The logo/fallback logic adds enough locals
+// to tip a function this large over the verifier threshold.
+@Composable
+private fun GameTitleOrLogo(name: String, logoUrl: String?) {
+    // Shared text style for the title fallback path.
+    val titleStyle = MaterialTheme.typography.headlineMedium.copy(
+        fontWeight = FontWeight.Bold,
+        shadow = Shadow(
+            color = Color.Black.copy(alpha = 0.6f),
+            offset = Offset(0f, 2f),
+            blurRadius = 8f,
+        ),
+    )
+    if (logoUrl != null) {
+        CoilImage(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 96.dp),
+            imageModel = { logoUrl },
+            imageOptions = ImageOptions(
+                contentScale = ContentScale.Fit,
+                alignment = Alignment.BottomStart,
+                contentDescription = name,
+            ),
+            loading = {},
+            failure = {
+                Text(
+                    text = name,
+                    style = titleStyle,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+        )
+    } else {
+        Text(
+            text = name,
+            style = titleStyle,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 @Composable
 internal fun AppScreenContent(
     modifier: Modifier = Modifier,
@@ -771,21 +818,9 @@ internal fun AppScreenContent(
                         .fillMaxWidth()
                         .padding(top = 128.dp, start = 20.dp, end = 20.dp, bottom = 16.dp),
                 ) {
-                    // Game title
-                    Text(
-                        text = displayInfo.name,
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            shadow = Shadow(
-                                color = Color.Black.copy(alpha = 0.6f),
-                                offset = Offset(0f, 2f),
-                                blurRadius = 8f,
-                            ),
-                        ),
-                        color = Color.White,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    // Game title: prefer library_logo image, fall back to text.
+                    // Logic lives in GameTitleOrLogo to avoid blowing the DEX register limit.
+                    GameTitleOrLogo(name = displayInfo.name, logoUrl = displayInfo.logoUrl)
 
                     // Developer and year
                     val releaseYear = remember(displayInfo.releaseDate) {
