@@ -508,18 +508,12 @@ fun SettingsGroupInterface(
             },
             onClick = { openRegionDialog = true },
         )
-        // Auto-upload in-game screenshots to the user's Steam screenshot library (opt-in, defaults off)
-        var uploadScreenshotsToSteam by rememberSaveable { mutableStateOf(PrefManager.uploadScreenshotsToSteam) }
-        SettingsSwitch(
-            colors = settingsTileColorsAlt(),
-            title = { Text(text = stringResource(R.string.settings_steam_upload_screenshots_title)) },
-            subtitle = { Text(text = stringResource(R.string.settings_steam_upload_screenshots_subtitle)) },
-            state = uploadScreenshotsToSteam,
-            onCheckedChange = {
-                uploadScreenshotsToSteam = it
-                PrefManager.uploadScreenshotsToSteam = it
-            },
-        )
+    }
+
+    SettingsGroup(
+        modifier = Modifier.background(Color.Transparent),
+        title = { Text(text = stringResource(R.string.settings_screenshots_title)) },
+    ) {
         // Choose between raw game pixels (pre-effects) or the composited screen (post-effects).
         var screenshotPostEffects by rememberSaveable { mutableStateOf(PrefManager.screenshotPostEffects) }
         SettingsSwitch(
@@ -530,6 +524,18 @@ fun SettingsGroupInterface(
             onCheckedChange = {
                 screenshotPostEffects = it
                 PrefManager.screenshotPostEffects = it
+            },
+        )
+        // Auto-upload in-game screenshots to the user's Steam screenshot library (opt-in, defaults off)
+        var uploadScreenshotsToSteam by rememberSaveable { mutableStateOf(PrefManager.uploadScreenshotsToSteam) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_steam_upload_screenshots_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_steam_upload_screenshots_subtitle)) },
+            state = uploadScreenshotsToSteam,
+            onCheckedChange = {
+                uploadScreenshotsToSteam = it
+                PrefManager.uploadScreenshotsToSteam = it
             },
         )
         // Privacy dropdown — only shown when upload is enabled, since it has no effect otherwise.
