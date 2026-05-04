@@ -226,6 +226,22 @@ class LibraryViewModel @Inject constructor(
                 onFilterApps(paginationCurrentPage)
             }
         }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            // One-time backfill: copy installDir from the config JSON blob into the flat
+            // install_dir column for all rows written before the KeyValueUtils PICS key fix.
+            // The PrefManager flag ensures this UPDATE runs at most once per app install;
+            // the WHERE clause in the DAO query makes it safe to re-run regardless.
+            if (!PrefManager.installDirBackfillDone) {
+                steamAppDao.backfillInstallDirsFromConfig()
+                PrefManager.installDirBackfillDone = true
+                // The DAO flow only re-emits on count changes, so a manual reload is needed
+                // to get SteamAppSummary objects with the freshly written install_dir values.
+                val includeExpired = if (_state.value.appInfoSortType.contains(AppFilter.EXPIRED)) 1 else 0
+                appList = steamAppDao._getAllOwnedAppSummariesPaged(includeExpired = includeExpired)
+                onFilterApps(paginationCurrentPage)
+            }
+        }
     }
 
     override fun onCleared() {
@@ -526,10 +542,20 @@ class LibraryViewModel @Inject constructor(
                 currentState.appInfoSortType.contains(AppFilter.SHARED) ||
                     item.ownerAccountId.contains(PrefManager.steamUserAccountId) ||
                     PrefManager.steamUserAccountId == 0
+            // Mirror getAppDirPath()'s dual-name resolution: a game installed when installDir was
+            // empty gets a folder named after `name`; a later PICS sync may then populate
+            // installDir to a different value. Also handles installDir = "." / ".." (a Steam data
+            // bug) — those never appear in downloadDirectorySet, so the check falls back to name.
+            fun isInDownloadDirectory(item: SteamAppSummary): Boolean {
+                val primaryName = SteamService.getAppDirName(item) // installDir ?? name
+                val altName = item.name
+                return downloadDirectorySet.contains(primaryName) ||
+                    (altName.isNotEmpty() && altName != primaryName && downloadDirectorySet.contains(altName))
+            }
             fun installedMatches(item: SteamAppSummary): Boolean {
                 val installedOnly = currentState.currentTab.installedOnly ||
                     currentState.appInfoSortType.contains(AppFilter.INSTALLED)
-                return !installedOnly || downloadDirectorySet.contains(SteamService.getAppDirName(item))
+                return !installedOnly || isInDownloadDirectory(item)
             }
 
             val steamFilteredBeforeCompatibility: List<SteamAppSummary> =
@@ -573,7 +599,7 @@ class LibraryViewModel @Inject constructor(
                 .filter { item -> passesCompatibleFilter(item.name) }
                 .sortedWith(
                     compareByDescending<SteamAppSummary> {
-                        downloadDirectorySet.contains(SteamService.getAppDirName(it))
+                        isInDownloadDirectory(it)
                     }.thenBy { it.name.lowercase() },
                 )
                 .toList()
@@ -585,7 +611,7 @@ class LibraryViewModel @Inject constructor(
             // Track appIds to filter out custom-game entries that duplicate an imported Steam game.
             val steamEntriesAppIds = mutableSetOf<String>()
             val steamEntries: List<LibraryEntry> = filteredSteamApps.map { item ->
-                val isInstalled = downloadDirectorySet.contains(SteamService.getAppDirName(item))
+                val isInstalled = isInDownloadDirectory(item)
                 // Compute appId once so it is accessible in both the cache-hit and cache-miss
                 // paths below, and so every Steam item is tracked for custom-game deduplication.
                 val appId = "${GameSource.STEAM.name}_${item.id}"

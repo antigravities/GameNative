@@ -317,6 +317,19 @@ interface SteamAppDao {
     @Query("SELECT * FROM steam_app WHERE config LIKE '%\"installDir\":\"' || :dirName || '\",%'")
     suspend fun findSteamAppWithInstallDir(dirName: String): List<SteamApp>
 
+    // One-time data backfill: the install_dir flat column was always empty because KeyValueUtils
+    // was reading the wrong PICS key. This copies the correct value from the config JSON blob
+    // so SteamAppSummary can find it without loading the full blob on every filter call.
+    // The WHERE guard makes it safe to re-run; rows already fixed are skipped.
+    @Query("""
+        UPDATE steam_app
+        SET install_dir = json_extract(config, '${'$'}.installDir')
+        WHERE install_dir = ''
+          AND json_extract(config, '${'$'}.installDir') IS NOT NULL
+          AND json_extract(config, '${'$'}.installDir') != ''
+    """)
+    suspend fun backfillInstallDirsFromConfig()
+
     @Query("SELECT * FROM steam_app WHERE id IN (:appIds)")
     suspend fun findSteamAppWithAppIds(appIds: List<Int>): List<SteamApp>
 }
