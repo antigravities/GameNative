@@ -1245,6 +1245,13 @@ object PrefManager {
         get() = getPref(GOG_AMAZON_PATH_MIGRATED, false)
         set(value) { setPref(GOG_AMAZON_PATH_MIGRATED, value) }
 
+    // Guards the one-time backfill that copies installDir from the config JSON blob into the
+    // flat install_dir column. Set to true after the UPDATE runs so it never repeats.
+    private val INSTALL_DIR_BACKFILL_DONE = booleanPreferencesKey("install_dir_backfill_done")
+    var installDirBackfillDone: Boolean
+        get() = getPref(INSTALL_DIR_BACKFILL_DONE, false)
+        set(value) { setPref(INSTALL_DIR_BACKFILL_DONE, value) }
+
     private val ACHIEVEMENT_SHOW_NOTIFICATION = booleanPreferencesKey("achievement_show_notification")
     var achievementShowNotification: Boolean
         get() = getPref(ACHIEVEMENT_SHOW_NOTIFICATION, true)
