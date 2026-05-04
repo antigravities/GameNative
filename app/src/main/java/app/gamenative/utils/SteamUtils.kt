@@ -1334,7 +1334,12 @@ object SteamUtils {
 
         Timber.i("[DX Fetch] Starting fetchDirect3DMajor for query=%s", url)
 
-        http.newCall(Request.Builder().url(url).build()).enqueue(object : Callback {
+        http.newCall(
+            Request.Builder()
+                .url(url)
+                .header("User-Agent", "GameNative/alex2 (https://alexandra.moe)")
+                .build()
+        ).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) = callback(-1)
 
             override fun onResponse(call: Call, res: Response) {
