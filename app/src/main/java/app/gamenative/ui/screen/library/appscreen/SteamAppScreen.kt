@@ -473,6 +473,7 @@ class SteamAppScreen : BaseAppScreen() {
             storeDetails = StoreGameDetails(
                 reviewPercentage = appInfo.reviewPercentage.toInt().takeIf { it in 1..100 },
             ),
+            logoUrl = appInfo.getLogoUrl(),
         )
     }
 
