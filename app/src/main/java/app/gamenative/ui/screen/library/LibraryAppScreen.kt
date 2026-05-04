@@ -69,6 +69,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.skydoves.landscapist.coil.CoilImageState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -92,6 +93,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import coil.request.ImageRequest
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -507,18 +509,36 @@ private fun GameTitleOrLogo(name: String, logoUrl: String?) {
             blurRadius = 8f,
         ),
     )
+    val context = LocalContext.current
     if (logoUrl != null) {
+        // Track whether the image has finished loading so we can animate its alpha.
+        var imageLoaded by remember(logoUrl) { mutableStateOf(false) }
+        val alpha by animateFloatAsState(
+            targetValue = if (imageLoaded) 1f else 0f,
+            animationSpec = tween(durationMillis = 300),
+            label = "logo_alpha",
+        )
         CoilImage(
+            // height() (not heightIn) reserves a fixed 96 dp slot while loading,
+            // preventing the content below from jumping when the image arrives.
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 96.dp),
-            imageModel = { logoUrl },
+                .height(96.dp)
+                .graphicsLayer { this.alpha = alpha },
+            imageRequest = {
+                ImageRequest.Builder(context)
+                    .data(logoUrl)
+                    .build()
+            },
             imageOptions = ImageOptions(
                 contentScale = ContentScale.Fit,
                 alignment = Alignment.BottomStart,
                 contentDescription = name,
             ),
             loading = {},
+            // onImageStateChanged is a plain callback — unlike the success slot,
+            // it doesn't replace the default image rendering.
+            onImageStateChanged = { if (it is CoilImageState.Success) imageLoaded = true },
             failure = {
                 Text(
                     text = name,
