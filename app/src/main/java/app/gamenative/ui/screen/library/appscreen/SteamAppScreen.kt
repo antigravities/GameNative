@@ -469,6 +469,7 @@ class SteamAppScreen : BaseAppScreen() {
             onChangePreferredCopy = { showPreferredCopyDialog(gameId) },
             isLoadingPreferredCopy = preferredCopyUi?.isLoading == true ||
                 (preferredCopyUi == null && familyGroupId != 0L),
+            logoUrl = appInfo.getLogoUrl(),
         )
     }
 
