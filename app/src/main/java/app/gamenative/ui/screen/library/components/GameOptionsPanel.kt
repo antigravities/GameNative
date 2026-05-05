@@ -320,6 +320,7 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
     return when (type) {
         AppOptionMenuType.StorePage -> Icons.AutoMirrored.Filled.OpenInNew
         AppOptionMenuType.CreateShortcut -> Icons.AutoMirrored.Filled.AddToHomeScreen
+        AppOptionMenuType.CreateGamePageShortcut -> Icons.AutoMirrored.Filled.AddToHomeScreen
         AppOptionMenuType.ExportFrontend -> Icons.Default.Share
         AppOptionMenuType.RunContainer -> Icons.Default.PlayArrow
         AppOptionMenuType.EditContainer -> Icons.Default.Settings
@@ -362,6 +363,7 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             AppOptionMenuType.EditContainer,
             AppOptionMenuType.RunContainer,
             AppOptionMenuType.CreateShortcut,
+            AppOptionMenuType.CreateGamePageShortcut,
             AppOptionMenuType.ExportFrontend,
             -> quickActions.add(option)
 
