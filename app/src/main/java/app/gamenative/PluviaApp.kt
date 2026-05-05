@@ -195,6 +195,9 @@ class PluviaApp : SplitCompatApplication() {
             }
         }.onFailure { Timber.e(it, "html5 origin-migration failed (non-fatal)") }
 
+        // Init file-based category manager (reads .bin files from filesDir/categories/).
+        app.gamenative.manager.CategoryManager.init(this)
+
         // Initialize GOGConstants
         app.gamenative.service.gog.GOGConstants.init(this)
 
