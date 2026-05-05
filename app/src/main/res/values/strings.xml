@@ -571,6 +571,7 @@
 
     <!-- Library & Game Management -->
     <string name="create_shortcut">Create shortcut</string>
+    <string name="create_game_page_shortcut">Shortcut to game page</string>
     <string name="label">Label</string>
     <string name="icon">Icon</string>
     <string name="create">Create</string>
