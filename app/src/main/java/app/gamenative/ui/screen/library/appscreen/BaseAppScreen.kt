@@ -41,6 +41,7 @@ import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.GameCompatibilityCache
 import app.gamenative.utils.GameCompatibilityService
 import app.gamenative.utils.ManifestInstaller
+import app.gamenative.utils.ShortcutTarget
 import app.gamenative.utils.createPinnedShortcut
 import com.winlator.container.Container
 import kotlinx.coroutines.CancellationException
@@ -619,6 +620,43 @@ abstract class BaseAppScreen {
     }
 
     /**
+     * Get Create Game Page Shortcut menu option. Creates a home screen shortcut that opens
+     * this game's detail page rather than launching the game. Subclasses can override to
+     * customize behavior.
+     */
+    @Composable
+    protected open fun getCreateGamePageShortcutOption(
+        context: Context,
+        libraryItem: LibraryItem,
+    ): AppMenuOption? {
+        val gameSource = getGameSource(libraryItem)
+        val gameId = getGameId(libraryItem)
+        val gameName = getGameName(context, libraryItem)
+        val iconUrl = getIconUrl(context, libraryItem)
+
+        return AppMenuOption(
+            optionType = AppOptionMenuType.CreateGamePageShortcut,
+            onClick = {
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        createPinnedShortcut(
+                            context = context,
+                            gameId = gameId,
+                            label = gameName,
+                            gameSource = gameSource,
+                            iconUrl = iconUrl,
+                            target = ShortcutTarget.GamePage,
+                        )
+                        SnackbarManager.show(context.getString(R.string.base_app_shortcut_created))
+                    } catch (e: Exception) {
+                        SnackbarManager.show(context.getString(R.string.base_app_shortcut_failed, e.message ?: ""))
+                    }
+                }
+            },
+        )
+    }
+
+    /**
      * Get source-specific menu options. Subclasses can override to add custom options.
      */
     @Composable
@@ -876,6 +914,7 @@ abstract class BaseAppScreen {
         // If the game isn't installed, we go to the detail screen instead of complaining
         // so we can add shortcuts for a game anytime
         getCreateShortcutOption(context, libraryItem)?.let { menuOptions.add(it) }
+        getCreateGamePageShortcutOption(context, libraryItem)?.let { menuOptions.add(it) }
 
         // Always available: Edit Container
         menuOptions.add(getEditContainerOption(context, libraryItem, onEditContainer))

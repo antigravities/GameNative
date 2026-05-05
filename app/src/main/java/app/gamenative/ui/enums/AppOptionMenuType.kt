@@ -6,6 +6,7 @@ import app.gamenative.R
 enum class AppOptionMenuType(@StringRes val title: Int) {
     StorePage(R.string.option_open_store_page),
     CreateShortcut(R.string.create_shortcut),
+    CreateGamePageShortcut(R.string.create_game_page_shortcut),
     ExportFrontend(R.string.option_export_for_frontend),
     RunContainer(R.string.option_open_container),
     EditContainer(R.string.option_edit_container),
