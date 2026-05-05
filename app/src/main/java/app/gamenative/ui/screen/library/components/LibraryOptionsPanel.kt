@@ -48,9 +48,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -82,9 +86,18 @@ fun LibraryOptionsPanel(
     onSortOptionChanged: (SortOption) -> Unit,
     currentView: PaneType,
     onViewChanged: (PaneType) -> Unit,
+    selectedCategories: Set<String> = emptySet(),
+    onCategoryFilterToggled: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val firstItemFocusRequester = remember { FocusRequester() }
+
+    // Refresh the category list each time the panel opens so newly-created
+    // categories appear without requiring a restart.
+    var categoryNames by remember { mutableStateOf(app.gamenative.manager.CategoryManager.getCategoryNames()) }
+    LaunchedEffect(isOpen) {
+        if (isOpen) categoryNames = app.gamenative.manager.CategoryManager.getCategoryNames()
+    }
 
     BackHandler(enabled = isOpen) {
         onDismiss()
@@ -173,6 +186,30 @@ fun LibraryOptionsPanel(
                             .verticalScroll(rememberScrollState())
                             .padding(vertical = 12.dp)
                     ) {
+                        // Categories section — only shown when at least one category exists
+                        if (categoryNames.isNotEmpty()) {
+                            OptionSectionHeader(text = stringResource(R.string.library_categories_title))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusGroup()
+                                    .padding(horizontal = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                categoryNames.forEach { name ->
+                                    OptionListItem(
+                                        text = name,
+                                        selected = selectedCategories.contains(name),
+                                        onClick = { onCategoryFilterToggled(name) },
+                                        icon = Icons.Default.Bookmark,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(20.dp))
+                        }
+
                         OptionSectionHeader(text = stringResource(R.string.options_sort_by))
                         Column(
                             modifier = Modifier

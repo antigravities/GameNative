@@ -904,6 +904,19 @@ abstract class BaseAppScreen {
             getExportContainerOption(context, libraryItem, exportFrontendLauncher)?.let { menuOptions.add(it) }
         }
 
+        // Always available: categorize this game. Emits an event caught in LibraryScreen
+        // so the dialog can access LibraryViewModel without coupling BaseAppScreen to it.
+        menuOptions.add(
+            app.gamenative.ui.data.AppMenuOption(
+                optionType = app.gamenative.ui.enums.AppOptionMenuType.AddToCategory,
+                onClick = {
+                    app.gamenative.PluviaApp.events.emit(
+                        app.gamenative.events.AndroidEvent.ShowAddToCategory(libraryItem.appId),
+                    )
+                },
+            ),
+        )
+
         // Always available options
         menuOptions.add(getSubmitFeedbackOption(context, libraryItem))
         menuOptions.add(getGetSupportOption(context))

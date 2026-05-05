@@ -1240,6 +1240,7 @@
     <string name="steam_save_export_failed">Failed to export saves: %s</string>
     <string name="steam_save_import_success">Saves imported</string>
     <string name="steam_save_import_failed">Failed to import saves: %s</string>
+    <string name="library_categories_title">Categories</string>
     <string name="library_app_type">App Type</string>
     <string name="library_app_status">App Status</string>
     <string name="library_layout">Layout</string>
@@ -1278,6 +1279,13 @@
     <string name="sort_recently_played">Recently Played</string>
     <string name="sort_size_smallest">Size (Smallest)</string>
     <string name="sort_size_largest">Size (Largest)</string>
+
+    <!-- Add to Category -->
+    <string name="option_add_to_category">Add to Category</string>
+    <string name="category_dialog_title">Add to Category</string>
+    <string name="category_dialog_label">Category name</string>
+    <string name="category_dialog_existing">Existing categories</string>
+    <string name="category_dialog_add_btn">Add</string>
 
     <!-- Game Options Panel -->
     <string name="game_options_title">Options</string>
