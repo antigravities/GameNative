@@ -348,6 +348,58 @@ class LibraryViewModel @Inject constructor(
         onFilterApps()
     }
 
+    // ── Category filter & dialog ─────────────────────────────────────────────
+
+    /** Toggles [categoryName] in/out of the active category filter set and re-filters the list. */
+    fun onCategoryFilterToggled(categoryName: String) {
+        _state.update { s ->
+            val updated = s.selectedCategories.toMutableSet()
+            if (categoryName in updated) updated.remove(categoryName) else updated.add(categoryName)
+            PrefManager.selectedCategories = updated
+            s.copy(selectedCategories = updated)
+        }
+        onFilterApps()
+    }
+
+    /** Opens the "Add to Category" dialog pre-populated with existing category names. */
+    fun onShowCategoryDialog(appId: String) {
+        _state.update { s ->
+            s.copy(
+                categoryDialogState = app.gamenative.ui.component.dialog.state.CategoryDialogState(
+                    visible = true,
+                    appId = appId,
+                    existingCategories = app.gamenative.manager.CategoryManager.getCategoryNames(),
+                ),
+            )
+        }
+    }
+
+    /** Adds the game to the named category and closes the dialog. */
+    fun onAddToCategory(categoryName: String) {
+        val appId = _state.value.categoryDialogState.appId
+        if (appId.isBlank() || categoryName.isBlank()) return
+        val trimmed = categoryName.trim()
+        app.gamenative.manager.CategoryManager.addAppToCategory(appId, trimmed)
+        app.gamenative.ui.util.SnackbarManager.show("Added to $trimmed")
+        _state.update { s ->
+            s.copy(categoryDialogState = app.gamenative.ui.component.dialog.state.CategoryDialogState())
+        }
+    }
+
+    fun dismissCategoryDialog() {
+        _state.update { s ->
+            s.copy(categoryDialogState = app.gamenative.ui.component.dialog.state.CategoryDialogState())
+        }
+    }
+
+    fun updateCategoryDialogInput(input: String) {
+        _state.update { s ->
+            s.copy(categoryDialogState = s.categoryDialogState.copy(input = input))
+        }
+    }
+
+    // ── Pagination ───────────────────────────────────────────────────────────
+
     fun onPageChange(pageIncrement: Int) {
         // Amount to change by
         var toPage = max(0, paginationCurrentPage + pageIncrement)
@@ -753,8 +805,18 @@ class LibraryViewModel @Inject constructor(
                 entry.item.copy(index = idx, isInstalled = entry.isInstalled)
             }
 
+            // If any categories are selected, narrow the list to games in at least one of them.
+            // Category lookup is O(1) per game via the in-memory ConcurrentHashMap in CategoryManager.
+            val effectiveCombined = if (currentState.selectedCategories.isNotEmpty()) {
+                val allowedIds = currentState.selectedCategories
+                    .flatMapTo(HashSet()) { app.gamenative.manager.CategoryManager.getAppsInCategory(it) }
+                combined.filter { it.appId in allowedIds }
+            } else {
+                combined
+            }
+
             // Total count for the current filter
-            val totalFound = combined.size
+            val totalFound = effectiveCombined.size
 
             // Determine how many pages and slice the list for incremental loading
             val pageSize = PrefManager.itemsPerPage
@@ -763,7 +825,7 @@ class LibraryViewModel @Inject constructor(
             lastPageInCurrentFilter = if (totalFound == 0) 0 else (totalFound - 1) / pageSize
             // Calculate how many items to show: (pagesLoaded * pageSize)
             val endIndex = min((paginationPage + 1) * pageSize, totalFound)
-            var pagedList = combined.take(endIndex)
+            var pagedList = effectiveCombined.take(endIndex)
 
             // Prepend recommendation as first item on ALL tab when enabled and not searching
             val rec = cachedRecommendation

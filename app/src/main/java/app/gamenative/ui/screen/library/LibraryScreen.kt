@@ -90,6 +90,7 @@ import app.gamenative.service.SteamService
 import app.gamenative.ui.screen.library.components.LibraryCarouselPane
 import app.gamenative.ui.screen.library.components.LibraryDetailPane
 import app.gamenative.ui.screen.library.components.LibraryListPane
+import app.gamenative.ui.component.dialog.AddToCategoryDialog
 import app.gamenative.ui.screen.library.components.LibraryOptionsPanel
 import app.gamenative.ui.screen.library.components.LibrarySearchBar
 import app.gamenative.ui.screen.library.components.LibrarySourceNotLoggedInSplash
@@ -125,6 +126,27 @@ fun HomeLibraryScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    // Listen for "Add to Category" events emitted from the game options panel in any source screen.
+    // Because the dialog state lives in LibraryViewModel, we handle the event here where the VM is
+    // in scope, rather than threading a lambda all the way down through BaseAppScreen.
+    DisposableEffect(Unit) {
+        val handler: (AndroidEvent.ShowAddToCategory) -> Unit = { event ->
+            viewModel.onShowCategoryDialog(event.appId)
+        }
+        PluviaApp.events.on<AndroidEvent.ShowAddToCategory, Unit>(handler)
+        onDispose {
+            PluviaApp.events.off<AndroidEvent.ShowAddToCategory, Unit>(handler)
+        }
+    }
+
+    // "Add to Category" dialog is rendered at the root so it overlays the detail pane too.
+    AddToCategoryDialog(
+        state = state.categoryDialogState,
+        onStateChange = { viewModel.updateCategoryDialogInput(it.input) },
+        onAdd = viewModel::onAddToCategory,
+        onDismiss = viewModel::dismissCategoryDialog,
+    )
+
     LibraryScreenContent(
         state = state,
         listState = viewModel.listState,
@@ -148,6 +170,7 @@ fun HomeLibraryScreen(
         onTabChanged = viewModel::onTabChanged,
         onPreviousTab = viewModel::onPreviousTab,
         onNextTab = viewModel::onNextTab,
+        onCategoryFilterToggled = viewModel::onCategoryFilterToggled,
         isOffline = isOffline,
     )
 }
@@ -177,6 +200,7 @@ private fun LibraryScreenContent(
     onTabChanged: (LibraryTab) -> Unit,
     onPreviousTab: () -> Unit,
     onNextTab: () -> Unit,
+    onCategoryFilterToggled: (String) -> Unit = {},
     isOffline: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -1078,6 +1102,8 @@ private fun LibraryScreenContent(
                     PrefManager.libraryLayout = newPaneType
                     currentPaneType = newPaneType
                 },
+                selectedCategories = state.selectedCategories,
+                onCategoryFilterToggled = onCategoryFilterToggled,
             )
 
             // System menu (START) - renders on top of everything
