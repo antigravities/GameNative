@@ -1281,10 +1281,12 @@
     <string name="sort_size_largest">Size (Largest)</string>
 
     <!-- Add to Category -->
-    <string name="option_add_to_category">Add to Category</string>
+    <string name="option_add_to_category">Manage Categories</string>
     <string name="category_dialog_title">Add to Category</string>
     <string name="category_dialog_label">Category name</string>
     <string name="category_dialog_existing">Existing categories</string>
+    <string name="category_dialog_current">Currently in</string>
+    <string name="category_dialog_remove_desc">Remove from category</string>
     <string name="category_dialog_add_btn">Add</string>
 
     <!-- Game Options Panel -->
