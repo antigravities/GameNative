@@ -73,6 +73,9 @@ class PluviaApp : SplitCompatApplication() {
         // Init our datastore preferences.
         PrefManager.init(this)
 
+        // Init file-based category manager (reads .bin files from filesDir/categories/).
+        app.gamenative.manager.CategoryManager.init(this)
+
         // Initialize GOGConstants
         app.gamenative.service.gog.GOGConstants.init(this)
 
