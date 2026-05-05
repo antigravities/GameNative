@@ -22,6 +22,9 @@ import java.util.Arrays
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+// Determines whether the shortcut launches the game or opens its detail page.
+internal enum class ShortcutTarget { LaunchGame, GamePage }
+
 private fun createAdaptiveIconBitmap(context: Context, src: Bitmap): Bitmap {
     val density = context.resources.displayMetrics.density
     val targetSize = (108f * density).toInt().coerceAtLeast(108)
@@ -85,11 +88,30 @@ private fun createAdaptiveIconBitmap(context: Context, src: Bitmap): Bitmap {
     return outBmp
 }
 
-internal suspend fun createPinnedShortcut(context: Context, gameId: Int, label: String, gameSource: GameSource, iconUrl: String?) {
+internal suspend fun createPinnedShortcut(
+    context: Context,
+    gameId: Int,
+    label: String,
+    gameSource: GameSource,
+    iconUrl: String?,
+    // Controls whether the shortcut launches the game or opens its detail page.
+    target: ShortcutTarget = ShortcutTarget.LaunchGame,
+) {
     val appContext = context.applicationContext
     val shortcutManager = appContext.getSystemService(ShortcutManager::class.java)
 
-    val intent = Intent("app.gamenative.LAUNCH_GAME").apply {
+    // The intent action and shortcut ID differ by target type so both shortcuts
+    // can coexist on the home screen simultaneously.
+    val intentAction = when (target) {
+        ShortcutTarget.LaunchGame -> "app.gamenative.LAUNCH_GAME"
+        ShortcutTarget.GamePage   -> IntentLaunchManager.ACTION_OPEN_GAME_PAGE
+    }
+    val shortcutId = when (target) {
+        ShortcutTarget.LaunchGame -> "game_$gameId"
+        ShortcutTarget.GamePage   -> "game_page_$gameId"
+    }
+
+    val intent = Intent(intentAction).apply {
         setClass(appContext, MainActivity::class.java)
         putExtra("app_id", gameId)
         putExtra("game_source", gameSource.name)
@@ -146,7 +168,7 @@ internal suspend fun createPinnedShortcut(context: Context, gameId: Int, label: 
         Icon.createWithResource(appContext, R.mipmap.ic_shortcut_filter)
     }
 
-    val shortcut = ShortcutInfo.Builder(appContext, "game_$gameId")
+    val shortcut = ShortcutInfo.Builder(appContext, shortcutId)
         .setShortLabel(label)
         .setLongLabel(label)
         .setIcon(finalIcon)
