@@ -144,6 +144,7 @@ fun HomeLibraryScreen(
         state = state.categoryDialogState,
         onStateChange = { viewModel.updateCategoryDialogInput(it.input) },
         onAdd = viewModel::onAddToCategory,
+        onRemove = viewModel::onRemoveFromCategory,
         onDismiss = viewModel::dismissCategoryDialog,
     )
 
