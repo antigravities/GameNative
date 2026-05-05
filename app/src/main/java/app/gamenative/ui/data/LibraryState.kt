@@ -4,6 +4,7 @@ import app.gamenative.PrefManager
 import app.gamenative.data.GameCompatibilityStatus
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
+import app.gamenative.ui.component.dialog.state.CategoryDialogState
 import app.gamenative.ui.enums.AppFilter
 import app.gamenative.utils.DeviceGameStatsService.DeviceGameStats
 import app.gamenative.ui.enums.LibraryTab
@@ -64,6 +65,12 @@ data class LibraryState(
     val epicCount: Int = 0,
     val amazonCount: Int = 0,
     val localCount: Int = 0,
+
+    // Active category filters (empty = no filtering; categories are OR-ed together)
+    val selectedCategories: Set<String> = PrefManager.selectedCategories,
+
+    // State for the "Add to Category" dialog triggered from the game options panel
+    val categoryDialogState: CategoryDialogState = CategoryDialogState(),
 )
 
 /**
