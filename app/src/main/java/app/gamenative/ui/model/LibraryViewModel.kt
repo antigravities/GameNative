@@ -369,6 +369,8 @@ class LibraryViewModel @Inject constructor(
                     visible = true,
                     appId = appId,
                     existingCategories = app.gamenative.manager.CategoryManager.getCategoryNames(),
+                    currentCategories = app.gamenative.manager.CategoryManager.getCategoryNames()
+                        .filter { app.gamenative.manager.CategoryManager.isAppInCategory(appId, it) },
                 ),
             )
         }
@@ -384,6 +386,24 @@ class LibraryViewModel @Inject constructor(
         _state.update { s ->
             s.copy(categoryDialogState = app.gamenative.ui.component.dialog.state.CategoryDialogState())
         }
+    }
+
+    /** Removes the game from [categoryName], refreshes the chip list in the dialog, and re-filters. */
+    fun onRemoveFromCategory(categoryName: String) {
+        val appId = _state.value.categoryDialogState.appId
+        if (appId.isBlank()) return
+        app.gamenative.manager.CategoryManager.removeAppFromCategory(appId, categoryName)
+        app.gamenative.ui.util.SnackbarManager.show("Removed from $categoryName")
+        // Refresh currentCategories so the chip disappears immediately without closing the dialog
+        _state.update { s ->
+            s.copy(
+                categoryDialogState = s.categoryDialogState.copy(
+                    currentCategories = app.gamenative.manager.CategoryManager.getCategoryNames()
+                        .filter { app.gamenative.manager.CategoryManager.isAppInCategory(appId, it) },
+                ),
+            )
+        }
+        onFilterApps()
     }
 
     fun dismissCategoryDialog() {
