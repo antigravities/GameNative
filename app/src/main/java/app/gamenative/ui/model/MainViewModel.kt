@@ -341,6 +341,14 @@ class MainViewModel @Inject constructor(
         _state.update { it.copy(bootingSplashHeroImageUrl = url) }
     }
 
+    fun setBootingLogoImageUrl(url: String){
+        _state.update { it.copy(bootingLogoImageUrl = url)}
+    }
+
+    fun setBootingGameName(name: String){
+        _state.update { it.copy(bootingGameName = name)}
+    }
+
     // Connection state management
 
     /**
@@ -474,22 +482,38 @@ class MainViewModel @Inject constructor(
             // Resolve hero image URL for the booting splash background
             val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
             val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
-            val heroUrl = when (gameSource) {
+            val (heroUrl, logoUrl, gameName) = when (gameSource) {
                 GameSource.STEAM -> {
                     val steamApp = SteamService.getAppInfoOf(gameId)
-                    steamApp?.getHeroUrl()?.ifEmpty { steamApp.headerUrl } ?: ""
+                    Triple(
+                        steamApp?.getHeroUrl()?.ifEmpty { steamApp.headerUrl } ?: "",
+                        steamApp?.getLogoUrl()?.ifEmpty { steamApp.logoUrl } ?: "",
+                        steamApp?.name
+                    );
                 }
                 GameSource.GOG -> {
                     val game = GOGService.getGOGGameOf(gameId.toString())
-                    game?.backgroundUrl?.ifEmpty { game.imageUrl } ?: ""
+                    Triple(
+                        game?.backgroundUrl?.ifEmpty { game.imageUrl } ?: "",
+                        "",
+                        game?.title
+                    )
                 }
                 GameSource.EPIC -> {
                     val game = EpicService.getEpicGameOf(gameId)
-                    game?.artPortrait?.ifEmpty { game.artCover.ifEmpty { game.artSquare } } ?: ""
+                    Triple(
+                        game?.artPortrait?.ifEmpty { game.artCover.ifEmpty { game.artSquare } } ?: "",
+                        game?.artLogo,
+                        game?.title
+                    )
                 }
                 GameSource.AMAZON -> {
                     val game = AmazonService.getAmazonGameByAppId(gameId)
-                    game?.heroUrl?.ifEmpty { game.artUrl } ?: ""
+                    Triple(
+                        game?.heroUrl?.ifEmpty { game.artUrl } ?: "",
+                        "",
+                        game?.title
+                    )
                 }
                 GameSource.CUSTOM_GAME -> {
                     val folderPath = CustomGameScanner.getFolderPathFromAppId(appId)
@@ -503,11 +527,18 @@ class MainViewModel @Inject constructor(
                                     file.name.endsWith(".jpg", ignoreCase = true) ||
                                     file.name.endsWith(".webp", ignoreCase = true))
                         }
-                        heroFile?.let { android.net.Uri.fromFile(it).toString() } ?: ""
-                    } else ""
+                        Triple(
+                            heroFile?.let { android.net.Uri.fromFile(it).toString() } ?: "",
+                            "",
+                            "GameNative"
+                        )
+                    } else Triple("", "", "")
                 }
             }
+
             setBootingSplashHeroImageUrl(heroUrl)
+            setBootingLogoImageUrl(logoUrl ?: "")
+            setBootingGameName(gameName ?: "GameNative")
             setShowBootingSplash(true)
             PluviaApp.events.emit(AndroidEvent.SetAllowedOrientation(PrefManager.allowedOrientation))
 
