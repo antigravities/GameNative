@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,6 +50,8 @@ fun BootingSplash(
     text: String = "Initializing...",
     progress: Float = -1f, // -1 for indeterminate, 0-1 for determinate
     heroImageUrl: String = "",
+    logoUrl: String = "",
+    gameName: String = ""
 ) {
     // Tips rotation (no animation cost, safe outside visibility check)
     val tips = remember {
@@ -204,37 +207,66 @@ fun BootingSplash(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier.scale(logoScale),
                 ) {
-                    // Glow layer (blurred behind)
-                    Text(
-                        text = "GameNative",
-                        style = MaterialTheme.typography.displaySmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 36.sp,
-                            letterSpacing = 2.sp,
-                        ),
-                        color = PluviaTheme.colors.accentCyan.copy(alpha = glowAlpha * 0.6f),
-                        modifier = Modifier
-                            .blur(20.dp)
-                            .alpha(glowAlpha),
-                    )
+                    @Composable
+                    fun glowyText(){
+                        // Glow layer (blurred behind)
+                        Text(
+                            text = gameName.ifEmpty { "GameNative" },
+                            style = MaterialTheme.typography.displaySmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 36.sp,
+                                letterSpacing = 2.sp,
+                            ),
+                            color = PluviaTheme.colors.accentCyan.copy(alpha = glowAlpha * 0.6f),
+                            modifier = Modifier
+                                .blur(20.dp)
+                                .alpha(glowAlpha),
+                            overflow = TextOverflow.Ellipsis,
+                            maxLines = 2,
+                            textAlign = TextAlign.Center
+                        )
 
-                    // Main logo text
-                    Text(
-                        text = "GameNative",
-                        style = MaterialTheme.typography.displaySmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 36.sp,
-                            letterSpacing = 2.sp,
-                            shadow = Shadow(
-                                color = PluviaTheme.colors.accentCyan.copy(alpha = 0.5f),
-                                offset = Offset(0f, 0f),
-                                blurRadius = 20f,
+                        // Main logo text
+                        Text(
+                            text = gameName.ifEmpty { "GameNative" },
+                            style = MaterialTheme.typography.displaySmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 36.sp,
+                                letterSpacing = 2.sp,
+                                shadow = Shadow(
+                                    color = PluviaTheme.colors.accentCyan.copy(alpha = 0.5f),
+                                    offset = Offset(0f, 0f),
+                                    blurRadius = 20f,
+                                ),
+                                brush = Brush.horizontalGradient(
+                                    colors = BrandGradient,
+                                )
                             ),
-                            brush = Brush.horizontalGradient(
-                                colors = BrandGradient,
+                            overflow = TextOverflow.Ellipsis,
+                            maxLines = 2,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    if( logoUrl.isEmpty() ) {
+                        glowyText();
+                    } else {
+                        CoilImage(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 96.dp),
+                            imageModel = { logoUrl },
+                            imageOptions = ImageOptions(
+                                contentScale = ContentScale.Fit,
+                                alignment = Alignment.Center,
+                                contentDescription = gameName,
                             ),
-                        ),
-                    )
+                            loading = {},
+                            failure = {
+                                glowyText()
+                            },
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(48.dp))
