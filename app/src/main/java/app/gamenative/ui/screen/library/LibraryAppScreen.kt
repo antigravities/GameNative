@@ -939,28 +939,33 @@ internal fun AppScreenContent(
                             Spacer(modifier = Modifier.weight(1f))
                         }
 
-                        // Secondary action icons (right-aligned)
-                        // DD2 fork: Workshop browser shortcut — Steam games only when host wired the entry.
-                        val workshopEntry = app.gamenative.ui.local.LocalWorkshopBrowseEntry.current
-                        if (workshopEntry != null && displayInfo.appId.startsWith("STEAM_")) {
+                        // Secondary action icons (right-aligned) — wrapped in their own Row so
+                        // spacing between buttons is self-contained regardless of which are visible.
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // DD2 fork: Workshop browser shortcut — Steam games only when host wired the entry.
+                            val workshopEntry = app.gamenative.ui.local.LocalWorkshopBrowseEntry.current
+                            if (workshopEntry != null && displayInfo.appId.startsWith("STEAM_")) {
+                                ActionIconButton(
+                                    icon = Icons.Default.GetApp,
+                                    contentDescription = "Browse Workshop",
+                                    onClick = { workshopEntry(displayInfo.gameId) },
+                                )
+                            }
                             ActionIconButton(
-                                icon = Icons.Default.GetApp,
-                                contentDescription = "Browse Workshop",
-                                onClick = { workshopEntry(displayInfo.gameId) },
+                                icon = Icons.Default.Settings,
+                                contentDescription = stringResource(R.string.options),
+                                onClick = { optionsMenuVisible = true },
                             )
-                        }
-                        ActionIconButton(
-                            icon = Icons.Default.Settings,
-                            contentDescription = stringResource(R.string.options),
-                            onClick = { optionsMenuVisible = true },
-                        )
-
-                        if (isInstalled || hasPartialDownload) {
-                            ActionIconButton(
-                                icon = Icons.Default.Delete,
-                                contentDescription = if (isInstalled) stringResource(R.string.uninstall) else stringResource(R.string.delete_app),
-                                onClick = onDeleteDownloadClick,
-                            )
+                            if (isInstalled || hasPartialDownload) {
+                                ActionIconButton(
+                                    icon = Icons.Default.Delete,
+                                    contentDescription = if (isInstalled) stringResource(R.string.uninstall) else stringResource(R.string.delete_app),
+                                    onClick = onDeleteDownloadClick,
+                                )
+                            }
                         }
                     }
 
