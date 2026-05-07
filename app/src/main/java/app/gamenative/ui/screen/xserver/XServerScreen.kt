@@ -526,6 +526,8 @@ fun XServerScreen(
     var performanceHudDragOffsetX by remember { mutableStateOf(0f) }
     var performanceHudDragOffsetY by remember { mutableStateOf(0f) }
     val performanceHudTouchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    // Armed when 4 fingers are simultaneously down; fires a screenshot on the first lift.
+    var fourFingerTapActive by remember { mutableStateOf(false) }
 
     fun persistPerformanceHudConfig(config: PerformanceHudConfig) {
         PrefManager.performanceHudShowFrameRate = config.showFrameRate
@@ -1622,6 +1624,30 @@ fun XServerScreen(
                             }
                         }
                     }
+                }
+
+                // 4-finger tap screenshot — outside the HUD null-guard so it fires
+                // whether or not the performance HUD is enabled.
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_POINTER_DOWN -> {
+                        // Arm when the 4th finger touches down.
+                        if (PrefManager.fourFingerScreenshot && event.pointerCount == 4) {
+                            fourFingerTapActive = true
+                        }
+                    }
+                    MotionEvent.ACTION_POINTER_UP -> {
+                        // ACTION_POINTER_UP still counts the lifting pointer, so
+                        // pointerCount == 4 means we're transitioning 4 → 3: fire screenshot.
+                        if (fourFingerTapActive && event.pointerCount == 4) {
+                            fourFingerTapActive = false
+                            PluviaApp.inputControlsView?.triggerScreenshot()
+                        } else if (event.pointerCount < 4) {
+                            // A finger lifted before we reached 4 — disarm.
+                            fourFingerTapActive = false
+                        }
+                    }
+                    MotionEvent.ACTION_UP,
+                    MotionEvent.ACTION_CANCEL -> fourFingerTapActive = false
                 }
 
                 val overlayHandled = swapInputOverlay
