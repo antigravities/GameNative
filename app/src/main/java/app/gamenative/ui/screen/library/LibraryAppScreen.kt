@@ -51,6 +51,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GetApp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -938,6 +940,15 @@ internal fun AppScreenContent(
                         }
 
                         // Secondary action icons (right-aligned)
+                        // DD2 fork: Workshop browser shortcut — Steam games only when host wired the entry.
+                        val workshopEntry = app.gamenative.ui.local.LocalWorkshopBrowseEntry.current
+                        if (workshopEntry != null && displayInfo.appId.startsWith("STEAM_")) {
+                            ActionIconButton(
+                                icon = Icons.Default.GetApp,
+                                contentDescription = "Browse Workshop",
+                                onClick = { workshopEntry(displayInfo.gameId) },
+                            )
+                        }
                         ActionIconButton(
                             icon = Icons.Default.Settings,
                             contentDescription = stringResource(R.string.options),
