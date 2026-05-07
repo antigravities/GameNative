@@ -1343,6 +1343,11 @@ fun PluviaMain(
                         }
                     }
 
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        app.gamenative.ui.local.LocalWorkshopBrowseEntry provides { appId ->
+                            navController.navigate(PluviaScreen.WorkshopBrowser.route(appId))
+                        },
+                    ) {
                     HomeScreen(
                         onClickPlay = { appId, asContainer ->
                             trackGameLaunched(appId)
@@ -1406,6 +1411,7 @@ fun PluviaMain(
                         },
                         isOffline = isOffline,
                     )
+                    }
                 }
 
                 /** Full Screen Chat **/
@@ -1522,6 +1528,51 @@ fun PluviaMain(
                             )
                         },
                         onBack = { navController.popBackStack() },
+                    )
+                }
+
+                /** Workshop browser (DD2 fork addition) **/
+                composable(
+                    route = PluviaScreen.WorkshopBrowser.route,
+                    arguments = listOf(
+                        navArgument(PluviaScreen.WorkshopBrowser.ARG_APP_ID) {
+                            type = NavType.IntType
+                        },
+                    ),
+                ) { backStackEntry ->
+                    val appId = backStackEntry.arguments
+                        ?.getInt(PluviaScreen.WorkshopBrowser.ARG_APP_ID) ?: 0
+                    app.gamenative.ui.screen.workshop.WorkshopBrowserScreen(
+                        appId = appId,
+                        onBack = { navController.navigateUp() },
+                        onItemClick = { publishedFileId ->
+                            navController.navigate(
+                                PluviaScreen.WorkshopDetail.route(appId, publishedFileId),
+                            )
+                        },
+                    )
+                }
+
+                /** Workshop item detail (DD2 fork addition) **/
+                composable(
+                    route = PluviaScreen.WorkshopDetail.route,
+                    arguments = listOf(
+                        navArgument(PluviaScreen.WorkshopDetail.ARG_APP_ID) {
+                            type = NavType.IntType
+                        },
+                        navArgument(PluviaScreen.WorkshopDetail.ARG_FILE_ID) {
+                            type = NavType.LongType
+                        },
+                    ),
+                ) { backStackEntry ->
+                    val appId = backStackEntry.arguments
+                        ?.getInt(PluviaScreen.WorkshopDetail.ARG_APP_ID) ?: 0
+                    val publishedFileId = backStackEntry.arguments
+                        ?.getLong(PluviaScreen.WorkshopDetail.ARG_FILE_ID) ?: 0L
+                    app.gamenative.ui.screen.workshop.WorkshopDetailScreen(
+                        appId = appId,
+                        publishedFileId = publishedFileId,
+                        onBack = { navController.navigateUp() },
                     )
                 }
             }
