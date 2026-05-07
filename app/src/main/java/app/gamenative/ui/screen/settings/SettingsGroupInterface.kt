@@ -601,6 +601,18 @@ fun SettingsGroupInterface(
                 PrefManager.screenshotPostEffects = it
             },
         )
+        // 4-finger tap gesture — off by default to prevent accidental captures.
+        var fourFingerScreenshot by rememberSaveable { mutableStateOf(PrefManager.fourFingerScreenshot) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_four_finger_screenshot_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_four_finger_screenshot_subtitle)) },
+            state = fourFingerScreenshot,
+            onCheckedChange = {
+                fourFingerScreenshot = it
+                PrefManager.fourFingerScreenshot = it
+            },
+        )
         // Auto-upload in-game screenshots to the user's Steam screenshot library (opt-in, defaults off)
         var uploadScreenshotsToSteam by rememberSaveable { mutableStateOf(PrefManager.uploadScreenshotsToSteam) }
         SettingsSwitch(

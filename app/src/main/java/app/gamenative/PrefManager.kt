@@ -347,6 +347,14 @@ object PrefManager {
             setPref(SCREENSHOT_POST_EFFECTS, value)
         }
 
+    private val FOUR_FINGER_SCREENSHOT = booleanPreferencesKey("four_finger_screenshot")
+    // Default false — gesture is opt-in so users aren't surprised by accidental captures.
+    var fourFingerScreenshot: Boolean
+        get() = getPref(FOUR_FINGER_SCREENSHOT, false)
+        set(value) {
+            setPref(FOUR_FINGER_SCREENSHOT, value)
+        }
+
     private val SCREENSHOT_PRIVACY = stringPreferencesKey("screenshot_privacy")
     // Stores the EUCMFilePrivacyState enum name. Default "Private" matches prior hardcoded behavior.
     var screenshotPrivacy: String
