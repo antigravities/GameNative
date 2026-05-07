@@ -3215,9 +3215,18 @@ class SteamService : Service(), IChallengeUrlChanged {
         // specifically want to overwrite stub rows written by license processing before
         // the full PICS product info had been synced.
         suspend fun requestAppInfoNow(appId: Int): Unit = withContext(Dispatchers.IO) {
-            val service = instance ?: return@withContext
-            val steamApps = service._steamApps ?: return@withContext
-            if (!isConnected) return@withContext
+            val service = instance ?: run {
+                Timber.w("requestAppInfoNow($appId): skipped — SteamService instance is null")
+                return@withContext
+            }
+            val steamApps = service._steamApps ?: run {
+                Timber.w("requestAppInfoNow($appId): skipped — _steamApps is null")
+                return@withContext
+            }
+            if (!isConnected) {
+                Timber.d("requestAppInfoNow($appId): skipped — not connected")
+                return@withContext
+            }
 
             // Signal that an on-demand request is in flight. The bulk consumer checks this
             // and yields between batches so this request isn't starved behind thousands of

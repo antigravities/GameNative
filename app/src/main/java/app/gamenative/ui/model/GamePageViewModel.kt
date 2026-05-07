@@ -78,7 +78,9 @@ class GamePageViewModel @Inject constructor(
                 //   2. App not in DB yet — observeApp blocks; PICS writes the row and
                 //      unblocks it.
                 val picsJob = launch {
+                    Timber.d("[GamePageViewModel]: firing on-demand PICS for appId=$id")
                     SteamService.requestAppInfoNow(id)
+                    Timber.d("[GamePageViewModel]: on-demand PICS returned for appId=$id")
                 }
 
                 val app = withTimeoutOrNull(30_000L) {
@@ -87,12 +89,31 @@ class GamePageViewModel @Inject constructor(
                         .first()
                 }
 
-                // Wait for PICS to finish, but cap the extra wait so a slow/failed network
-                // request doesn't stall the page indefinitely.
+                // Phase 1: show cached data immediately so the page renders without waiting
+                // for the PICS network round-trip. If the app isn't in the DB yet (cold
+                // start), we skip this and let Phase 2 handle it after PICS writes the row.
+                if (app != null) {
+                    _libraryItem.value = LibraryItem(
+                        appId = appId,
+                        name = app.name,
+                        iconHash = app.clientIconHash,
+                        capsuleImageUrl = app.getCapsuleUrl(),
+                        headerImageUrl = app.getHeaderImageUrl().orEmpty().ifEmpty { app.headerUrl },
+                        heroImageUrl = app.getHeroUrl().ifEmpty { app.headerUrl },
+                        gameSource = GameSource.STEAM,
+                        hasWorkshop = app.config.hasWorkshop,
+                    )
+                    _isLoaded.value = true
+                }
+
+                // Phase 2: wait for PICS to finish, then update the page with fresh data
+                // (correct manifest GIDs, hasWorkshop flag, updated title/artwork, etc.).
+                // Capped so a slow/failed network request doesn't stall indefinitely.
+                // requestAppInfoNow guards against offline via its !isConnected check and
+                // catches all exceptions internally, so picsJob always completes cleanly.
                 withTimeoutOrNull(10_000L) { picsJob.join() }
 
-                // Re-fetch from DB so the LibraryItem is built from the PICS-updated row
-                // (which has valid manifest GIDs) rather than the stub row that observeApp saw.
+                // Re-fetch from DB so the LibraryItem reflects the PICS-updated row.
                 val freshApp = steamAppDao.findApp(id) ?: app
 
                 if (freshApp != null) {
@@ -104,8 +125,10 @@ class GamePageViewModel @Inject constructor(
                         headerImageUrl = freshApp.getHeaderImageUrl().orEmpty().ifEmpty { freshApp.headerUrl },
                         heroImageUrl = freshApp.getHeroUrl().ifEmpty { freshApp.headerUrl },
                         gameSource = GameSource.STEAM,
+                        hasWorkshop = freshApp.config.hasWorkshop,
                     )
-                } else {
+                } else if (app == null) {
+                    // No data from cache or PICS — nothing to show.
                     Timber.w("[GamePageViewModel]: Game not found or timed out for appId=$appId")
                     _notFound.value = true
                 }

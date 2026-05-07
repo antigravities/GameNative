@@ -39,6 +39,10 @@ data class LibraryItem(
     val isInstalled: Boolean = false,
     val isRecommended: Boolean = false,
     val recommendedGameId: String = "",
+    // True when Steam PICS reports community/workshop = 1. Carried here so that
+    // Phase 2 of GamePageViewModel produces a structurally different LibraryItem
+    // when the flag changes, bypassing StateFlow's equality deduplication.
+    val hasWorkshop: Boolean = false,
 ) {
     val clientIconUrl: String
         get() = when (gameSource) {

@@ -151,7 +151,7 @@ fun KeyValue.generateSteamApp(): SteamApp {
             steamControllerTouchTemplateIndex = this["config"]["steamcontrollertouchtemplateindex"].asInteger(),
             steamInputManifestPath = this["config"]["steaminputmanifestpath"].value.orEmpty(),
             steamControllerConfigDetails = parseSteamControllerConfigDetails(),
-            hasWorkshop = this["community"]["workshop"].asBoolean(),
+            hasWorkshop = this["common"]["workshop_visible"].asBoolean(),
         ),
         ufsParseVersion = CURRENT_UFS_PARSE_VERSION,
         ufs = run {
