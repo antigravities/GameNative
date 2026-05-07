@@ -16,4 +16,17 @@ sealed class PluviaScreen(val route: String) {
         fun route(appId: String) = "gamepage/$appId"
         const val ARG_APP_ID = "appId"
     }
+
+    /** DD2 fork: in-app Steam Workshop browser (search · sort · subscribe). */
+    data object WorkshopBrowser : PluviaScreen("workshop_browser/{appId}") {
+        fun route(appId: Int) = "workshop_browser/$appId"
+        const val ARG_APP_ID = "appId"
+    }
+
+    /** DD2 fork: detail of one Workshop item (description · subscribe button). */
+    data object WorkshopDetail : PluviaScreen("workshop_detail/{appId}/{publishedFileId}") {
+        fun route(appId: Int, publishedFileId: Long) = "workshop_detail/$appId/$publishedFileId"
+        const val ARG_APP_ID = "appId"
+        const val ARG_FILE_ID = "publishedFileId"
+    }
 }
