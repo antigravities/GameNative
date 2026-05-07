@@ -59,6 +59,10 @@ data class LibraryItem(
     // string-typed (matches Container.runtime field) so we don't drag in winlator types.
     // default "wine" mirrors Container.RUNTIME_WINE so non-installed entries are inert.
     val runtime: String = "wine",
+    // True when Steam PICS reports community/workshop = 1. Carried here so that
+    // Phase 2 of GamePageViewModel produces a structurally different LibraryItem
+    // when the flag changes, bypassing StateFlow's equality deduplication.
+    val hasWorkshop: Boolean = false,
 ) {
     val clientIconUrl: String
         get() = when (gameSource) {
