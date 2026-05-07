@@ -232,9 +232,25 @@ class SteamAppScreen : BaseAppScreen() {
         libraryItem: LibraryItem,
     ): GameDisplayInfo {
         val gameId = libraryItem.gameId
-        val appInfo = remember(libraryItem.appId) {
-            SteamService.getAppInfoOf(gameId)
-        } ?: return GameDisplayInfo(
+        // Phase 1: read cached DB row synchronously so the page renders immediately.
+        // Keyed on gameId (not libraryItem) so it doesn't reset when GamePageViewModel
+        // re-emits an updated LibraryItem; artwork/name changes are picked up in Phase 2.
+        var appInfoState by remember(gameId) {
+            mutableStateOf(SteamService.getAppInfoOf(gameId))
+        }
+
+        // Phase 2: fire on-demand PICS fetch then re-read DB so hasWorkshop and other
+        // PICS-derived fields are up to date. LaunchedEffect runs once per unique gameId
+        // on every path that opens this screen (library pane, downloads, GamePageScreen).
+        LaunchedEffect(gameId) {
+            SteamService.requestAppInfoNow(gameId)
+            appInfoState = SteamService.getAppInfoOf(gameId)
+        }
+
+        // Extract to a non-null val for downstream code. Returns the skeleton
+        // GameDisplayInfo when the DB row doesn't exist yet; LaunchedEffect above
+        // will trigger recomposition once PICS writes the row.
+        val appInfo = appInfoState ?: return GameDisplayInfo(
             name = libraryItem.name,
             developer = "",
             releaseDate = 0L,
@@ -895,7 +911,7 @@ class SteamAppScreen : BaseAppScreen() {
     ) {
         val context = LocalContext.current
         val gameId = libraryItem.gameId
-        val appInfo = remember(libraryItem.appId) {
+        val appInfo = remember(libraryItem) {
             SteamService.getAppInfoOf(gameId)
         }
 
