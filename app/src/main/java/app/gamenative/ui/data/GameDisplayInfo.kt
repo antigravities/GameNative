@@ -26,5 +26,6 @@ data class GameDisplayInfo(
     // -- runtime indicator for the detail screen "Runtime" InfoCard.
     // string-typed for parity with LibraryItem.runtime + Container.runtime; default "wine".
     val runtime: String = "wine",
+    val hasWorkshop: Boolean = false, // True if this Steam app has Workshop support per PICS data
 )
 
