@@ -947,7 +947,7 @@ internal fun AppScreenContent(
                         ) {
                             // DD2 fork: Workshop browser shortcut — Steam games only when host wired the entry.
                             val workshopEntry = app.gamenative.ui.local.LocalWorkshopBrowseEntry.current
-                            if (workshopEntry != null && displayInfo.appId.startsWith("STEAM_")) {
+                            if (workshopEntry != null && displayInfo.appId.startsWith("STEAM_") && displayInfo.hasWorkshop) {
                                 ActionIconButton(
                                     icon = Icons.Default.GetApp,
                                     contentDescription = "Browse Workshop",
