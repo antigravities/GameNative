@@ -23,5 +23,6 @@ data class GameDisplayInfo(
     val compatibilityMessage: String? = null, // Compatibility message text (e.g., "Works on your GPU")
     val compatibilityColor: ULong? = null, // Compatibility message color (ARGB)
     val hltbStats: app.gamenative.utils.HltbService.Stats? = null, // How Long To Beat stats
+    val hasWorkshop: Boolean = false, // True if this Steam app has Workshop support per PICS data
 )
 

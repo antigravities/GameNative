@@ -11,6 +11,8 @@ data class ConfigInfo(
     val steamInputManifestPath: String = "",
     val steamControllerConfigDetails: List<SteamControllerConfigDetail> = emptyList(),
     // val steamControllerTouchConfigDetails: TouchConfigDetails,
+    // True when Steam PICS reports community/workshop = 1 for this app.
+    val hasWorkshop: Boolean = false,
 )
 
 @Serializable
