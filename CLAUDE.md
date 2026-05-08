@@ -40,7 +40,6 @@ MVVM + clean-ish layering with Hilt DI throughout.
   - `MainViewModel` — top-level navigation and Steam event handling
   - `LibraryViewModel` — game list filtering and sorting
   - `DownloadsViewModel` — download queue state
-  - `GamePageViewModel` — individual game details
   - `XServerViewModel` — Windows emulation session state
 - **Components**: `ui/component/` — reusable composables (dialogs, FAB menu, top bar, settings)
 - **Theme**: `ui/theme/` — Material Kolor dynamic theming
@@ -116,6 +115,10 @@ On-demand PICS: SteamService.requestAppInfoNow(appId) calls picsGetProductInfo f
 Install-click stacking: SteamAppScreen launches SteamService.downloadApp via fire-and-forget CoroutineScope(Dispatchers.IO).launch calls (not tied to any ViewModel). The second downloadApp overload guards against duplicate active downloads via downloadJobs.contains() and an atomic pendingDownloads set (ConcurrentHashMap.newKeySet()). The first overload retries with an on-demand PICS fetch (runBlocking { requestAppInfoNow(appId) }) when getDownloadableDepots() returns empty, to handle stub rows created during initial PICS sync; if still empty after the retry it posts a notificationHelper notification.
 
 Two-phase display refresh: `SteamAppScreen.getGameDisplayInfo()` reads the cached DB row synchronously first (Phase 1, renders instantly), then a `LaunchedEffect(gameId)` fires `SteamService.requestAppInfoNow()` and re-reads the DB row (Phase 2) so name/artwork/other PICS-derived fields catch up once the network round-trip completes.
+
+`isValidToDownloadAsync` retry: When `isValidToDownload` returns false (empty depots in DB), `SteamAppScreen.isValidToDownloadAsync` calls `requestAppInfoNow` before calling `getDownloadableDepots`. This mirrors the retry in the first `downloadApp` overload and handles stub rows that arrive before PICS sync completes. Without this, apps with family-shared licenses (which generate early stub rows) can end up with a permanently grayed install button because `BaseAppScreen`'s `LaunchedEffect(libraryItem.appId)` only fires once per app ID and cannot re-run after PICS writes depot data.
+
+`requestAppInfoNow` access tokens: Some apps (e.g. Risk of Rain 2) require a non-zero PICS access token or Steam responds with `isMissingToken=true` and an empty buffer. `generateSteamApp()` on an empty buffer returns `id=Int.MAX_VALUE` (INVALID_APP_ID) and `depots=emptyMap()`, so `appDao.insert()` writes to the wrong row and the stub at the real app ID is never updated. `requestAppInfoNow` calls `picsGetAccessTokens` before `picsGetProductInfo` and passes the token in `PICSRequest(id, accessToken)`, matching the pattern in `bufferedPICSGetProductInfo`. An `isMissingToken` guard after the result prevents inserting a garbage row if the token fetch still wasn't sufficient.
 
 `onLicenseList` write-lock contention: On large libraries (~59k licenses), `onLicenseList` previously held the Room write lock for minutes inside a single `db.withTransaction` because it serialized all licenses to JSON, ran 60 batched `NOT IN` queries via `findStaleLicences`, and called `packagePicsChannel.send()` — all while the lock was held. The package PICS processor's own `db.withTransaction` calls blocked on this lock, halting the entire PICS pipeline. Fix: do CPU work (groupBy/map) outside the transaction, replace `findStaleLicences`+`deleteStaleLicenses` with `deleteAll`+`insertAll`, commit T1 before queuing to the channel, and defer the `cachedLicenseDao` write (T2) until after queuing.
 
