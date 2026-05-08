@@ -1,5 +1,8 @@
 package app.gamenative.ui.screen.workshop
 
+import android.text.Html
+import android.text.method.LinkMovementMethod
+import android.widget.TextView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.gamenative.service.SteamService
@@ -50,6 +54,8 @@ import app.gamenative.workshop.WorkshopItemDetail
 import com.skydoves.landscapist.ImageOptions
 import com.skydoves.landscapist.coil.CoilImage
 import kotlinx.coroutines.launch
+import org.kefirsf.bb.BBProcessorFactory
+import org.kefirsf.bb.TextProcessor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,6 +64,10 @@ fun WorkshopDetailScreen(
     publishedFileId: Long,
     onBack: () -> Unit,
 ) {
+    val processor = remember<TextProcessor> {
+        BBProcessorFactory.getInstance().create()
+    }
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -211,10 +221,13 @@ fun WorkshopDetailScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                             )
-                            Text(
-                                text = current.description,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            AndroidView(
+                                factory = { context ->
+                                    TextView(context).apply {
+                                        movementMethod = LinkMovementMethod.getInstance()
+                                    }
+                                },
+                                update = { it.text = Html.fromHtml(processor.process(current.description), Html.FROM_HTML_MODE_COMPACT) }
                             )
                         }
                     }
