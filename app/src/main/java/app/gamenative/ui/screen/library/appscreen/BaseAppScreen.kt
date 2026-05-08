@@ -1026,10 +1026,10 @@ abstract class BaseAppScreen {
         }
         val displayInfo = displayInfoBase.copy(hltbStats = hltbStats)
 
-        // Use composable state for values that change over time
-        var isInstalledState by remember(libraryItem.appId) {
-            mutableStateOf(isInstalled(context, libraryItem))
-        }
+        // Use composable state for values that change over time.
+        // Initialize to safe defaults — LaunchedEffect below calls performStateRefresh
+        // immediately, which sets the real values on the IO dispatcher.
+        var isInstalledState by remember(libraryItem.appId) { mutableStateOf(false) }
         var isValidToDownloadState by remember(libraryItem.appId) {
             mutableStateOf(isValidToDownload(context, libraryItem))
         }
@@ -1043,24 +1043,27 @@ abstract class BaseAppScreen {
             mutableStateOf(false) // Initialize to false, will be updated in LaunchedEffect
         }
 
-        // Calculate hasPartialDownload state
-        var hasPartialDownloadState by remember(libraryItem.appId) {
-            mutableStateOf(hasPartialDownload(context, libraryItem))
-        }
-        var hasLeftoverInstallState by remember(libraryItem.appId) {
-            mutableStateOf(hasLeftoverInstall(context, libraryItem))
-        }
+        var hasPartialDownloadState by remember(libraryItem.appId) { mutableStateOf(false) }
+        var hasLeftoverInstallState by remember(libraryItem.appId) { mutableStateOf(false) }
 
         val uiScope = rememberCoroutineScope()
 
         suspend fun performStateRefresh(includeUpdatePending: Boolean) {
-            isInstalledState = isInstalled(context, libraryItem)
+            // isInstalled, hasPartialDownload, and hasLeftoverInstall do blocking DB/file I/O — dispatch to IO
+            val (installed, partial, leftover) = withContext(Dispatchers.IO) {
+                Triple(
+                    isInstalled(context, libraryItem),
+                    hasPartialDownload(context, libraryItem),
+                    hasLeftoverInstall(context, libraryItem),
+                )
+            }
+            isInstalledState = installed
+            hasPartialDownloadState = partial
+            hasLeftoverInstallState = leftover
             isValidToDownloadState = isValidToDownloadAsync(context, libraryItem)
             val currentlyDownloading = isDownloading(context, libraryItem)
             isDownloadingState = currentlyDownloading
             downloadProgressState = getDownloadProgress(context, libraryItem)
-            hasPartialDownloadState = hasPartialDownload(context, libraryItem)
-            hasLeftoverInstallState = hasLeftoverInstall(context, libraryItem)
             if (includeUpdatePending) {
                 isUpdatePendingState = isUpdatePendingSuspend(context, libraryItem)
             }
