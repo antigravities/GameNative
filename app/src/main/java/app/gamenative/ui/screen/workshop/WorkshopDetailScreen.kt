@@ -1,8 +1,11 @@
 package app.gamenative.ui.screen.workshop
 
+import android.graphics.drawable.LevelListDrawable
 import android.text.Html
 import android.text.method.LinkMovementMethod
 import android.widget.TextView
+import coil.imageLoader
+import coil.request.ImageRequest
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -227,7 +230,39 @@ fun WorkshopDetailScreen(
                                         movementMethod = LinkMovementMethod.getInstance()
                                     }
                                 },
-                                update = { it.text = Html.fromHtml(processor.process(current.description), Html.FROM_HTML_MODE_COMPACT) }
+                                update = { textView ->
+                                    // ImageGetter is called synchronously per <img> tag; we return a
+                                    // placeholder immediately and fill it in once Coil finishes loading.
+                                    val imageGetter = Html.ImageGetter { source ->
+                                        val placeholder = LevelListDrawable()
+                                        placeholder.setBounds(0, 0, 0, 0)
+                                        textView.context.imageLoader.enqueue(
+                                            ImageRequest.Builder(textView.context)
+                                                .data(source)
+                                                .target { drawable ->
+                                                    // Scale to the TextView's width; fall back to intrinsic
+                                                    // size if the view hasn't been laid out yet.
+                                                    val w = if (textView.width > 0) textView.width else drawable.intrinsicWidth
+                                                    val h = if (drawable.intrinsicWidth > 0)
+                                                        (w.toFloat() / drawable.intrinsicWidth * drawable.intrinsicHeight).toInt().coerceAtLeast(1)
+                                                    else drawable.intrinsicHeight.coerceAtLeast(1)
+                                                    drawable.setBounds(0, 0, w, h)
+                                                    placeholder.addLevel(0, 0, drawable)
+                                                    placeholder.setBounds(0, 0, w, h)
+                                                    // Re-set text to trigger re-layout with the now-sized drawable.
+                                                    textView.text = textView.text
+                                                }
+                                                .build()
+                                        )
+                                        placeholder
+                                    }
+                                    textView.text = Html.fromHtml(
+                                        processor.process(current.description),
+                                        Html.FROM_HTML_MODE_COMPACT,
+                                        imageGetter,
+                                        null,
+                                    )
+                                }
                             )
                         }
                     }
