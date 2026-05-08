@@ -26,8 +26,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -46,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.gamenative.service.SteamService
 import app.gamenative.ui.model.WorkshopBrowserViewModel
+import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.workshop.WorkshopBrowser
 import app.gamenative.workshop.WorkshopItemDetail
 import com.skydoves.landscapist.ImageOptions
@@ -61,7 +60,6 @@ fun WorkshopDetailScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
 
     // ViewModel reused for subscribe/unsubscribe action (3-step flow inside).
     val viewModel: WorkshopBrowserViewModel = viewModel(
@@ -107,7 +105,7 @@ fun WorkshopDetailScreen(
     LaunchedEffect(toast) {
         val msg = toast ?: return@LaunchedEffect
         scope.launch {
-            snackbarHostState.showSnackbar(msg.text)
+            SnackbarManager.show(msg.text)
             viewModel.consumeToast()
         }
     }
@@ -122,8 +120,7 @@ fun WorkshopDetailScreen(
                     }
                 },
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        }
     ) { padding ->
         val current = detail
         when {
