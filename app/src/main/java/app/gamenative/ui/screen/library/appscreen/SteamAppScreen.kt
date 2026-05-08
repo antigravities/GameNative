@@ -392,6 +392,10 @@ class SteamAppScreen : BaseAppScreen() {
     // getDownloadableDepots() which reads from DB directly (not from any in-memory cache).
     override suspend fun isValidToDownloadAsync(context: Context, libraryItem: LibraryItem): Boolean {
         if (isValidToDownload(context, libraryItem)) return true
+        // Depots missing — likely a stub row written before full PICS data arrived.
+        // Request fresh PICS data (no-op if not connected) then re-evaluate.
+        // Mirrors the retry in SteamService.downloadApp (first overload).
+        SteamService.requestAppInfoNow(libraryItem.gameId)
         return withContext(Dispatchers.IO) {
             SteamService.getDownloadableDepots(libraryItem.gameId).isNotEmpty()
         }
