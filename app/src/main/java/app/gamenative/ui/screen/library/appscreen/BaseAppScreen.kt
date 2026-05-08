@@ -959,10 +959,10 @@ abstract class BaseAppScreen {
         val displayInfo = getGameDisplayInfo(context, libraryItem)
         val appId = libraryItem.appId
 
-        // Use composable state for values that change over time
-        var isInstalledState by remember(libraryItem.appId) {
-            mutableStateOf(isInstalled(context, libraryItem))
-        }
+        // Use composable state for values that change over time.
+        // Initialize to safe defaults — LaunchedEffect below calls performStateRefresh
+        // immediately, which sets the real values on the IO dispatcher.
+        var isInstalledState by remember(libraryItem.appId) { mutableStateOf(false) }
         var isValidToDownloadState by remember(libraryItem.appId) {
             mutableStateOf(isValidToDownload(context, libraryItem))
         }
@@ -976,20 +976,21 @@ abstract class BaseAppScreen {
             mutableStateOf(false) // Initialize to false, will be updated in LaunchedEffect
         }
 
-        // Calculate hasPartialDownload state
-        var hasPartialDownloadState by remember(libraryItem.appId) {
-            mutableStateOf(hasPartialDownload(context, libraryItem))
-        }
+        var hasPartialDownloadState by remember(libraryItem.appId) { mutableStateOf(false) }
 
         val uiScope = rememberCoroutineScope()
 
         suspend fun performStateRefresh(includeUpdatePending: Boolean) {
-            isInstalledState = isInstalled(context, libraryItem)
+            // isInstalled and hasPartialDownload do blocking DB/file I/O — dispatch to IO
+            val (installed, partial) = withContext(Dispatchers.IO) {
+                isInstalled(context, libraryItem) to hasPartialDownload(context, libraryItem)
+            }
+            isInstalledState = installed
+            hasPartialDownloadState = partial
             isValidToDownloadState = isValidToDownloadAsync(context, libraryItem)
             val currentlyDownloading = isDownloading(context, libraryItem)
             isDownloadingState = currentlyDownloading
             downloadProgressState = getDownloadProgress(context, libraryItem)
-            hasPartialDownloadState = hasPartialDownload(context, libraryItem)
             if (includeUpdatePending) {
                 isUpdatePendingState = isUpdatePendingSuspend(context, libraryItem)
             }

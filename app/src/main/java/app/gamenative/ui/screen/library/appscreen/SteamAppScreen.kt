@@ -534,11 +534,12 @@ class SteamAppScreen : BaseAppScreen() {
         onClickPlay: (Boolean) -> Unit,
     ) {
         val gameId = libraryItem.gameId
-        val isDownloading = isDownloading(context, libraryItem)
-        val isInstalled = SteamService.isAppInstalled(gameId)
+        // Fast in-memory lookup — safe on the main thread
+        val downloadInfo = SteamService.getAppDownloadInfo(gameId)
+        val isDownloading = downloadInfo != null && (downloadInfo.getProgress() ?: 0f) < 1f
 
         if (isDownloading) {
-            // Show cancel download dialog
+            // Fast path: no I/O needed, show dialog immediately on main thread
             showInstallDialog(
                 gameId,
                 MessageDialogState(
@@ -550,25 +551,45 @@ class SteamAppScreen : BaseAppScreen() {
                     dismissBtnText = context.getString(R.string.no),
                 ),
             )
-        } else if (SteamService.workshopPausedApps.remove(gameId)) {
+            return
+        }
+
+        // ConcurrentHashMap.remove() — safe on the main thread
+        if (SteamService.workshopPausedApps.remove(gameId)) {
             resumeWorkshopDownload(gameId, context)
-        } else if (SteamService.hasPartialDownload(gameId)) {
-            if (SteamService.getAppDownloadInfo(gameId) == null) {
-                CoroutineScope(Dispatchers.IO).launch {
-                    SteamService.downloadApp(gameId)
+            return
+        }
+
+        // hasPartialDownload and isAppInstalled both do runBlocking DB queries +
+        // file I/O internally — calling them on the main thread causes an ANR.
+        CoroutineScope(Dispatchers.IO).launch {
+            val hasPartial = SteamService.hasPartialDownload(gameId)
+            val isInstalled = SteamService.isAppInstalled(gameId)
+
+            when {
+                hasPartial -> {
+                    // downloadApp is already designed for the IO thread
+                    if (SteamService.getAppDownloadInfo(gameId) == null) {
+                        SteamService.downloadApp(gameId)
+                    }
+                }
+                !isInstalled -> {
+                    // mutableStateMapOf writes must happen on the main thread
+                    withContext(Dispatchers.Main) {
+                        // Request storage permissions first, then show install dialog
+                        // This will be handled by the permission launcher in AdditionalDialogs
+                        showGameManagerDialog(
+                            gameId,
+                            GameManagerDialogState(visible = true),
+                        )
+                    }
+                }
+                else -> {
+                    withContext(Dispatchers.Main) {
+                        onClickPlay(false)
+                    }
                 }
             }
-        } else if (!isInstalled) {
-            // Request storage permissions first, then show install dialog
-            // This will be handled by the permission launcher in AdditionalDialogs
-            showGameManagerDialog(
-                gameId,
-                GameManagerDialogState(
-                    visible = true
-                )
-            )
-        } else {
-            onClickPlay(false)
         }
     }
 
@@ -591,11 +612,12 @@ class SteamAppScreen : BaseAppScreen() {
 
     override fun onDeleteDownloadClick(context: Context, libraryItem: LibraryItem) {
         val gameId = libraryItem.gameId
-        val isInstalled = SteamService.isAppInstalled(gameId)
-        val isDownloading = isDownloading(context, libraryItem)
+        // Fast in-memory lookup — safe on the main thread
+        val downloadInfo = SteamService.getAppDownloadInfo(gameId)
+        val isDownloading = downloadInfo != null && (downloadInfo.getProgress() ?: 0f) < 1f
 
-        if (isDownloading || SteamService.hasPartialDownload(gameId)) {
-            // Show cancel download dialog when downloading
+        if (isDownloading) {
+            // Fast path: no I/O needed
             showInstallDialog(
                 gameId,
                 MessageDialogState(
@@ -607,9 +629,31 @@ class SteamAppScreen : BaseAppScreen() {
                     dismissBtnText = context.getString(R.string.no),
                 ),
             )
-        } else if (isInstalled) {
-            // Show uninstall dialog when installed
-            showUninstallDialog(libraryItem.appId)
+            return
+        }
+
+        // Both hasPartialDownload and isAppInstalled block on DB/file I/O internally
+        CoroutineScope(Dispatchers.IO).launch {
+            val hasPartial = SteamService.hasPartialDownload(gameId)
+            val isInstalled = SteamService.isAppInstalled(gameId)
+
+            withContext(Dispatchers.Main) {
+                when {
+                    hasPartial -> showInstallDialog(
+                        gameId,
+                        MessageDialogState(
+                            visible = true,
+                            type = DialogType.CANCEL_APP_DOWNLOAD,
+                            title = context.getString(R.string.cancel_download_prompt_title),
+                            message = context.getString(R.string.steam_delete_download_message),
+                            confirmBtnText = context.getString(R.string.yes),
+                            dismissBtnText = context.getString(R.string.no),
+                        ),
+                    )
+                    // Show uninstall dialog when installed
+                    isInstalled -> showUninstallDialog(libraryItem.appId)
+                }
+            }
         }
     }
 
