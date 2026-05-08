@@ -3174,8 +3174,17 @@ class SteamService : Service(), IChallengeUrlChanged {
             // concurrent callers all register correctly.
             onDemandPicsCount.incrementAndGet()
             try {
+                // Fetch the PICS access token first. Some apps (e.g. Risk of Rain 2) require a
+                // non-zero token; without it, Steam returns isMissingToken=true with an empty
+                // buffer, causing generateSteamApp() to produce id=INVALID_APP_ID and depots=[].
+                // Mirrors the token-fetch in bufferedPICSGetProductInfo.
+                val token = steamApps.picsGetAccessTokens(
+                    appIds = listOf(appId),
+                    packageIds = emptyList(),
+                ).await().appTokens[appId] ?: 0L
+
                 val pics = steamApps.picsGetProductInfo(
-                    apps = listOf(PICSRequest(id = appId)),
+                    apps = listOf(PICSRequest(id = appId, accessToken = token)),
                     packages = emptyList(),
                 ).await()
 
@@ -3185,6 +3194,14 @@ class SteamService : Service(), IChallengeUrlChanged {
                     ?.values
                     ?.firstOrNull()
                     ?: return@withContext
+
+                // Guard: if we still got no buffer despite providing the token (network glitch,
+                // or app genuinely requires something else), skip to avoid writing a garbage row
+                // at id=INVALID_APP_ID.
+                if (remoteAppInfo.isMissingToken) {
+                    Timber.w("requestAppInfoNow($appId): isMissingToken=true even after token fetch, skipping insert")
+                    return@withContext
+                }
 
                 // Preserve license-derived fields from the existing DB row, if any.
                 val appFromDb = service.appDao.findApp(appId)
