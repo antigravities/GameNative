@@ -277,7 +277,11 @@ class SteamAppScreen : BaseAppScreen() {
 
         // Get icon URL
         val iconUrl = remember(appInfo.id) {
-            appInfo.clientIconUrl
+            if (appInfo.clientIconHash.isNotEmpty()) {
+                appInfo.clientIconUrl
+            } else{
+                appInfo.iconUrl
+            }
         }
 
         // Get install location
