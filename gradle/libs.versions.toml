@@ -42,6 +42,7 @@ spongycastle = "1.58.0.0" # https://mvnrepository.com/artifact/com.madgag.spongy
 timber = "5.0.1" # https://mvnrepository.com/artifact/com.jakewharton.timber/timber
 zstd-jni = "1.5.7-5" # https://mvnrepository.com/artifact/com.github.luben/zstd-jni
 zxing = "3.5.3" # https://mvnrepository.com/artifact/com.google.zxing/core
+kefirbb = "1.5"
 
 [libraries]
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -90,6 +91,7 @@ orgJson = { module = "org.json:json", version.ref = "orgJson" }
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
 spongycastle = { group = "com.madgag.spongycastle", name = "prov", version.ref = "spongycastle" }
 timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }
+kefirbb = { group = "org.kefirsf", name = "kefirbb", version.ref = "kefirbb" }
 zstd-jni = { group = "com.github.luben", name = "zstd-jni", version.ref = "zstd-jni" }
 zxing = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 

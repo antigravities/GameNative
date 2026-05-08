@@ -415,6 +415,9 @@ dependencies {
 
     implementation("com.auth0.android:jwtdecode:2.0.2")
 
+    // bbcode rendering (Workshop)
+    implementation(libs.kefirbb)
+
     "modernXrImplementation"("com.meta.horizon.platform.sdk:core-kotlin:0.2.2")
     "modernXrImplementation"("com.meta.horizon.platform.sdk:iap-kotlin:0.2.2")
 }
