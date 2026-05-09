@@ -30,6 +30,8 @@ data class WorkshopItemDetail(
     val lifetimeSubscriptions: Long = 0L,
     /** True when the local user is currently subscribed. Filled in by browser via AreFilesInSubscriptionList. */
     val isSubscribedByLocalUser: Boolean = false,
+    /** Actual screenshot URLs from Steam's `previews` list, sorted by sortorder. Excludes YouTube videos and the square thumbnail. */
+    val previewUrls: List<String> = emptyList(),
 )
 
 /**
