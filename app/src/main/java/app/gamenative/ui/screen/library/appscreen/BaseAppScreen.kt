@@ -323,6 +323,9 @@ abstract class BaseAppScreen {
         return progress > 0f && progress < 1f
     }
 
+    // Returns true when this app is waiting in the download queue but not yet active.
+    open fun isQueued(context: Context, libraryItem: LibraryItem): Boolean = false
+
     /**
      * Check if an update is pending (synchronous version, returns false by default)
      * Override isUpdatePendingSuspend for async checks
@@ -1017,6 +1020,7 @@ abstract class BaseAppScreen {
         }
 
         var hasPartialDownloadState by remember(libraryItem.appId) { mutableStateOf(false) }
+        var isQueuedState by remember(libraryItem.appId) { mutableStateOf(false) }
 
         val uiScope = rememberCoroutineScope()
 
@@ -1030,6 +1034,7 @@ abstract class BaseAppScreen {
             isValidToDownloadState = isValidToDownloadAsync(context, libraryItem)
             val currentlyDownloading = isDownloading(context, libraryItem)
             isDownloadingState = currentlyDownloading
+            isQueuedState = isQueued(context, libraryItem)
             downloadProgressState = getDownloadProgress(context, libraryItem)
             if (includeUpdatePending) {
                 isUpdatePendingState = isUpdatePendingSuspend(context, libraryItem)
@@ -1292,6 +1297,7 @@ abstract class BaseAppScreen {
             isDownloading = isDownloadingState,
             downloadProgress = downloadProgressState,
             hasPartialDownload = hasPartialDownloadState,
+            isQueued = isQueuedState,
             isUpdatePending = isUpdatePendingState,
             downloadInfo = downloadInfo,
             onDownloadInstallClick = {
