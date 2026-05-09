@@ -705,14 +705,26 @@ class MainViewModel @Inject constructor(
             val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
 
             SteamService.getAppInfoOf(gameId)?.let { appInfo ->
+                val windowExe = window.className.lowercase()
+
                 // TODO: this should not be a search, the app should have been launched with a specific launch config that we then use to compare
-                val launchConfig = SteamService.getWindowsLaunchInfos(gameId).firstOrNull {
-                    val gameExe = Paths.get(it.executable.replace('\\', '/')).name.lowercase()
-                    val windowExe = window.className.lowercase()
-                    gameExe == windowExe
+                val manifestMatch = SteamService.getWindowsLaunchInfos(gameId).any {
+                    Paths.get(it.executable.replace('\\', '/')).name.lowercase() == windowExe
                 }
 
-                if (launchConfig != null) {
+                // When the user sets a custom executablePath in container settings (e.g. a
+                // modded launcher or alternate binary), that exe won't appear in the Steam
+                // manifest. Fall back to comparing against the container's configured path so
+                // in-game status is still reported to Steam.
+                val containerMatch = !manifestMatch && try {
+                    val container = ContainerUtils.getContainer(context, appId)
+                    container.executablePath.isNotEmpty() &&
+                        Paths.get(container.executablePath.replace('\\', '/')).name.lowercase() == windowExe
+                } catch (_: Exception) {
+                    false
+                }
+
+                if (manifestMatch || containerMatch) {
                     val steamProcessId = Process.myPid()
                     val processes = mutableListOf<AppProcessInfo>()
                     var currentWindow: Window = window
