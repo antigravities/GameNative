@@ -45,18 +45,18 @@ fun WorkshopItemCard(
         ),
     ) {
         Column {
-            Box(modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
+            Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f)) {
                 if (detail.item.previewUrl.isNotEmpty()) {
                     CoilImage(
                         imageModel = { detail.item.previewUrl },
-                        modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                         imageOptions = ImageOptions(contentScale = androidx.compose.ui.layout.ContentScale.Crop),
                     )
                 } else {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
+                            .aspectRatio(1f)
                             .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
                     )
                 }
