@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -118,7 +117,7 @@ fun WorkshopBrowserScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(items = WorkshopBrowser.QuerySort.entries) { sort ->
+                items(items = WorkshopBrowser.QueryType.entries) { sort ->
                     FilterChip(
                         selected = state.sort == sort,
                         onClick = { viewModel.onSortChanged(sort) },
@@ -173,11 +172,12 @@ fun WorkshopBrowserScreen(
     }
 }
 
-private fun WorkshopBrowser.QuerySort.label(): String = when (this) {
-    WorkshopBrowser.QuerySort.Popular -> "Popular"
-    WorkshopBrowser.QuerySort.Newest -> "Newest"
-    WorkshopBrowser.QuerySort.Trending -> "Trending"
-    WorkshopBrowser.QuerySort.RecentlyUpdated -> "Recent"
-    WorkshopBrowser.QuerySort.MostVotesUp -> "Top voted"
+private fun WorkshopBrowser.QueryType.label(): String = when (this) {
+    WorkshopBrowser.QueryType.Popular -> "Popular"
+    WorkshopBrowser.QueryType.Newest -> "Newest"
+    WorkshopBrowser.QueryType.Trending -> "Trending"
+    WorkshopBrowser.QueryType.RecentlyUpdated -> "Recent"
+    WorkshopBrowser.QueryType.MostVotesUp -> "Top voted"
+    WorkshopBrowser.QueryType.Subscribed -> "Subscribed"
 }
 

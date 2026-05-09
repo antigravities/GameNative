@@ -3,6 +3,7 @@ package app.gamenative.workshop
 import `in`.dragonbra.javasteam.enums.EResult
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesPublishedfileSteamclient.CPublishedFile_AreFilesInSubscriptionList_Request
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesPublishedfileSteamclient.CPublishedFile_GetDetails_Request
+import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesPublishedfileSteamclient.CPublishedFile_GetUserFiles_Request
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesPublishedfileSteamclient.CPublishedFile_QueryFiles_Request
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesPublishedfileSteamclient.CPublishedFile_Subscribe_Request
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesPublishedfileSteamclient.CPublishedFile_Unsubscribe_Request
@@ -36,7 +37,7 @@ object WorkshopBrowser {
 
     private const val TAG = "WorkshopBrowser"
 
-    /** Steam-side enum [EUserUGCList::k_PublishedFileQueryType_*] used by [QuerySort]. */
+    /** Steam-side enum [EUserUGCList::k_PublishedFileQueryType_*] used by [QueryType]. */
     private const val QUERY_TYPE_RANKED_BY_VOTE: Int = 0
     private const val QUERY_TYPE_RANKED_BY_PUBLICATION_DATE: Int = 1
     private const val QUERY_TYPE_RANKED_BY_TREND: Int = 3
@@ -44,13 +45,14 @@ object WorkshopBrowser {
     private const val QUERY_TYPE_RANKED_BY_LAST_UPDATED_DATE: Int = 12
     private const val QUERY_TYPE_RANKED_BY_VOTES_UP: Int = 21
 
-    /** Sort presets surfaced to the browser UI. */
-    enum class QuerySort(internal val rawValue: Int) {
+    /** Sort/filter presets surfaced to the browser UI. */
+    enum class QueryType(internal val rawValue: Int) {
         Popular(QUERY_TYPE_RANKED_BY_VOTE),
         Newest(QUERY_TYPE_RANKED_BY_PUBLICATION_DATE),
         Trending(QUERY_TYPE_RANKED_BY_TREND),
         RecentlyUpdated(QUERY_TYPE_RANKED_BY_LAST_UPDATED_DATE),
         MostVotesUp(QUERY_TYPE_RANKED_BY_VOTES_UP),
+        Subscribed(-1)
     }
 
     /**
@@ -65,10 +67,10 @@ object WorkshopBrowser {
         appId: Int,
         steamClient: SteamClient,
         searchText: String = "",
-        sort: QuerySort = QuerySort.Popular,
+        sort: QueryType = QueryType.Popular,
         page: Int = 1,
         perPage: Int = 20,
-        requiredTags: List<String> = emptyList(),
+        requiredTags: List<String> = emptyList()
     ): WorkshopQueryResult = withContext(Dispatchers.IO) {
         Timber.tag(TAG).d(
             "QueryFiles appId=$appId page=$page perPage=$perPage sort=$sort searchText='${searchText.take(40)}'"
@@ -84,45 +86,97 @@ object WorkshopBrowser {
                 sort.rawValue
             }
 
-            val request = CPublishedFile_QueryFiles_Request.newBuilder().apply {
-                this.appid = appId
-                this.queryType = effectiveQueryType
-                this.page = page
-                this.numperpage = perPage
-                this.searchText = searchText
-                this.returnDetails = true
-                this.returnPreviews = true
-                this.returnVoteData = true
-                this.returnShortDescription = true
-                this.returnTags = true
-                if (requiredTags.isNotEmpty()) {
-                    addAllRequiredtags(requiredTags)
+            var items: List<WorkshopItemDetail> = emptyList()
+            var total: Int = 0
+
+            if( sort != QueryType.Subscribed ){
+                val request = CPublishedFile_QueryFiles_Request.newBuilder().apply {
+                    this.appid = appId
+                    this.queryType = effectiveQueryType
+                    this.page = page
+                    this.numperpage = perPage
+                    this.searchText = searchText
+                    this.returnDetails = true
+                    this.returnPreviews = true
+                    this.returnVoteData = true
+                    this.returnShortDescription = true
+                    this.returnTags = true
+                    if (requiredTags.isNotEmpty()) {
+                        addAllRequiredtags(requiredTags)
+                    }
+                }.build()
+
+                val response = withTimeoutOrNull(30_000L) {
+                    publishedFile.queryFiles(request).toFuture().await()
                 }
-            }.build()
+                if (response == null) {
+                    Timber.tag(TAG).e("QueryFiles timed out for appId=$appId page=$page")
+                    return@withContext WorkshopQueryResult(emptyList(), succeeded = false)
+                }
+                if (response.result != EResult.OK) {
+                    Timber.tag(TAG).e("QueryFiles failed: result=${response.result} appId=$appId page=$page")
+                    return@withContext WorkshopQueryResult(emptyList(), succeeded = false)
+                }
 
-            val response = withTimeoutOrNull(30_000L) {
-                publishedFile.queryFiles(request).toFuture().await()
-            }
-            if (response == null) {
-                Timber.tag(TAG).e("QueryFiles timed out for appId=$appId page=$page")
-                return@withContext WorkshopQueryResult(emptyList(), succeeded = false)
-            }
-            if (response.result != EResult.OK) {
-                Timber.tag(TAG).e("QueryFiles failed: result=${response.result} appId=$appId page=$page")
-                return@withContext WorkshopQueryResult(emptyList(), succeeded = false)
-            }
+                val body = response.body.build()
 
-            val body = response.body.build()
-            val items = body.publishedfiledetailsList.map { detail ->
-                detail.toWorkshopItemDetail(appId)
-            }
+                items = body.publishedfiledetailsList.map { detail ->
+                    detail.toWorkshopItemDetail(appId)
+                }
 
-            Timber.tag(TAG).d("QueryFiles -> ${items.size} items, total=${body.total} [appId=$appId page=$page]")
+                total = body.total
+
+                Timber.tag(TAG).d("QueryFiles -> ${items.size} items, total=${body.total} [appId=$appId page=$page]")
+            } else {
+                val request = CPublishedFile_GetUserFiles_Request.newBuilder().apply {
+                    this.steamid = steamClient.steamID!!.convertToUInt64()
+                    this.appid = appId
+                    this.page = page
+                    this.type = "mysubscriptions"
+                    this.numperpage = perPage
+                    // 0xFFFFFFFF = k_EUGCMatchingUGCType_All; default 0 omits GameManagedItems
+                    this.filetype = 0xFFFFFFFF.toInt()
+                    this.returnPreviews = true
+                    this.returnVoteData = true
+                    this.returnShortDescription = true
+                    this.returnTags = true
+
+                    if( requiredTags.isNotEmpty() ){
+                        addAllRequiredtags(requiredTags)
+                    }
+                }.build()
+
+                val response = withTimeoutOrNull(30_000L) {
+                    publishedFile.getUserFiles(request).toFuture().await()
+                }
+                if (response == null) {
+                    Timber.tag(TAG).e("GetUserFiles timed out for appId=$appId page=$page")
+                    return@withContext WorkshopQueryResult(emptyList(), succeeded = false)
+                }
+                if (response.result != EResult.OK) {
+                    Timber.tag(TAG).e("GetUserFiles failed: result=${response.result} appId=$appId page=$page")
+                    return@withContext WorkshopQueryResult(emptyList(), succeeded = false)
+                }
+
+                val body = response.body.build()
+
+                items = body.publishedfiledetailsList.map { detail ->
+                    detail.toWorkshopItemDetail(appId)
+                }
+
+                Timber.tag(TAG).d("GetUserFiles -> ${items.size} items, total=${body.total} [appId=$appId page=$page]")
+                // Shouldn't be too bad, hopefully users aren't subscribing to millions of items
+                if( searchText.isNotEmpty() ){
+                    items = items.filter { item -> item.item.title.contains(searchText, true) }
+                }
+
+                total = body.total
+            }
 
             WorkshopQueryResult(
                 items = items,
-                totalResults = body.total,
-                hasMore = (page * perPage) < body.total,
+                totalResults = total,
+                hasMore = (page * perPage) < total,
                 succeeded = true,
             )
         } catch (e: CancellationException) {
