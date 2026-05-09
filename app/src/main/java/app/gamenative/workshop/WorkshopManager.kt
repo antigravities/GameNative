@@ -3442,6 +3442,14 @@ object WorkshopManager {
         val steamClient = SteamService.instance?.steamClient ?: return null
         val steamId = SteamService.userSteamId ?: return null
 
+        // If another download is already running, queue this one rather than starting
+        // a parallel DepotDownloader. dequeueNextDownload() will call us again when
+        // the active slot frees up.
+        if (SteamService.getActiveDownloads().isNotEmpty()) {
+            SteamService.enqueueWorkshopDownload(appId, enabledIds)
+            return null
+        }
+
         // Cancel any existing download for this app (e.g. user re-saved
         // with different mod selection while previous download was running).
         SteamService.getAppDownloadInfo(appId)?.cancel("Replaced by new workshop download")

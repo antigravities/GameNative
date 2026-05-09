@@ -391,6 +391,32 @@ class SteamService : Service(), IChallengeUrlChanged {
         /** Apps with a workshop download that was paused (cancelled) by the user. */
         val workshopPausedApps: MutableSet<Int> = ConcurrentHashMap.newKeySet()
 
+        // Represents a download request waiting for the active slot to free up.
+        // The Workshop subtype is used by WorkshopManager without it needing to
+        // import this type — WorkshopManager calls enqueueWorkshopDownload() instead.
+        sealed class QueuedDownload {
+            abstract val appId: Int
+
+            data class App(
+                override val appId: Int,
+                val downloadableDepots: Map<Int, DepotInfo>,
+                val userSelectedDlcAppIds: List<Int>,
+                val branch: String,
+                val containerLanguage: String,
+                val isUpdateOrVerify: Boolean,
+            ) : QueuedDownload()
+
+            data class Workshop(
+                override val appId: Int,
+                val enabledIds: Set<Long>,
+            ) : QueuedDownload()
+        }
+
+        // FIFO queue of downloads waiting for the single active slot to free up.
+        // All access must be synchronized on downloadQueueLock.
+        private val downloadQueue = ArrayDeque<QueuedDownload>()
+        private val downloadQueueLock = Any()
+
         internal fun notifyDownloadStarted(appId: Int) {
             PluviaApp.events.emit(AndroidEvent.DownloadStatusChanged(appId, true))
         }
@@ -399,10 +425,70 @@ class SteamService : Service(), IChallengeUrlChanged {
             PluviaApp.events.emit(AndroidEvent.DownloadStatusChanged(appId, false))
         }
 
+        /** Returns a snapshot of the current queue for the Downloads UI. */
+        fun getQueuedDownloads(): List<QueuedDownload> =
+            synchronized(downloadQueueLock) { downloadQueue.toList() }
+
+        /**
+         * Enqueues a workshop download behind any currently active download.
+         * Called by WorkshopManager so it never needs to import QueuedDownload directly.
+         * Returns true if the item was added, false if it was already queued.
+         */
+        fun enqueueWorkshopDownload(appId: Int, enabledIds: Set<Long>): Boolean {
+            synchronized(downloadQueueLock) {
+                if (downloadQueue.any { it.appId == appId }) return false
+                downloadQueue.addLast(QueuedDownload.Workshop(appId, enabledIds))
+            }
+            Timber.i("Queued workshop download for $appId (queue size=${downloadQueue.size})")
+            notifyDownloadStarted(appId)
+            return true
+        }
+
+        /**
+         * Removes a queued download and cleans up its DB row so it does not
+         * reappear as a resumable partial download after cancellation.
+         */
+        fun cancelQueuedDownload(appId: Int) {
+            val wasWorkshop: Boolean
+            synchronized(downloadQueueLock) {
+                wasWorkshop = downloadQueue.any { it is QueuedDownload.Workshop && it.appId == appId }
+                downloadQueue.removeAll { it.appId == appId }
+            }
+            runBlocking {
+                if (wasWorkshop) {
+                    // Workshop pending state lives in the steam_app row, not DownloadingAppInfo
+                    instance?.appDao?.setWorkshopDownloadPending(appId, false)
+                } else {
+                    instance?.downloadingAppInfoDao?.deleteApp(appId)
+                }
+            }
+            notifyDownloadStopped(appId)
+        }
+
         fun removeDownloadJob(appId: Int) {
             val removed = downloadJobs.remove(appId)
             if (removed != null) {
                 notifyDownloadStopped(appId)
+            }
+            // Start the next queued download now that the active slot is free.
+            dequeueNextDownload()
+        }
+
+        private fun dequeueNextDownload() {
+            val next = synchronized(downloadQueueLock) {
+                downloadQueue.removeFirstOrNull()
+            } ?: return
+            instance?.scope?.launch {
+                when (next) {
+                    is QueuedDownload.App -> downloadApp(
+                        next.appId, next.downloadableDepots, next.userSelectedDlcAppIds,
+                        next.branch, next.containerLanguage, next.isUpdateOrVerify,
+                    )
+                    is QueuedDownload.Workshop -> {
+                        val ctx = instance ?: return@launch
+                        WorkshopManager.startWorkshopDownload(next.appId, next.enabledIds, ctx)
+                    }
+                }
             }
         }
 
@@ -810,9 +896,14 @@ class SteamService : Service(), IChallengeUrlChanged {
         fun getActiveDownloads(): Map<Int, DownloadInfo> = HashMap(downloadJobs)
 
         suspend fun getPartialDownloads(): List<Int> {
+            // Exclude apps already in the in-memory queue — those show as QUEUED in the UI,
+            // not RESUMABLE. They survive a restart via their DownloadingAppInfo DB row.
+            val queuedIds = synchronized(downloadQueueLock) {
+                downloadQueue.map { it.appId }.toSet()
+            }
             return instance?.downloadingAppInfoDao?.getAll()
                 ?.map { it.appId }
-                ?.filter { appId -> !downloadJobs.containsKey(appId) }
+                ?.filter { appId -> !downloadJobs.containsKey(appId) && appId !in queuedIds }
                 ?: emptyList()
         }
 
@@ -1882,6 +1973,36 @@ class SteamService : Service(), IChallengeUrlChanged {
             // meaning it is between this guard and the downloadJobs assignment below.
             if (!pendingDownloads.add(appId)) return getAppDownloadInfo(appId)
             try {
+            // If another download is already running, add this one to the queue instead
+            // of starting a second parallel DepotDownloader that would compete for CDN
+            // connections and decompression threads.
+            if (downloadJobs.isNotEmpty()) {
+                pendingDownloads.remove(appId) // release the slot we claimed above
+                val alreadyQueued = synchronized(downloadQueueLock) {
+                    downloadQueue.any { it.appId == appId }
+                }
+                if (!alreadyQueued) {
+                    synchronized(downloadQueueLock) {
+                        downloadQueue.addLast(
+                            QueuedDownload.App(
+                                appId, downloadableDepots, userSelectedDlcAppIds,
+                                branch, containerLanguage, isUpdateOrVerify,
+                            )
+                        )
+                    }
+                    // Write DownloadingAppInfo now so this item survives a restart
+                    // as a resumable partial download even if it never started.
+                    runBlocking {
+                        instance?.downloadingAppInfoDao?.insert(
+                            DownloadingAppInfo(appId, userSelectedDlcAppIds, branch)
+                        )
+                    }
+                    Timber.i("Queued app download for $appId (queue size=${downloadQueue.size})")
+                    notifyDownloadStarted(appId)
+                }
+                return null
+            }
+
             if (downloadableDepots.isEmpty()) {
                 Timber.w("downloadApp($appId): downloadableDepots is empty — no depots passed filters")
                 return null

@@ -981,6 +981,8 @@
     <string name="downloads_cancel_all">Cancel all</string>
     <string name="downloads_clear_finished">Clear</string>
     <string name="downloads_resume_available">Ready to resume</string>
+    <string name="downloads_status_queued">Queued (#%d)</string>
+    <string name="downloads_status_queued_label">Queued</string>
     <string name="downloads_status_paused">Paused</string>
     <string name="downloads_status_complete">Complete</string>
     <string name="downloads_status_cancelled">Cancelled</string>
