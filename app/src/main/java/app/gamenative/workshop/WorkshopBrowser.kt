@@ -396,6 +396,14 @@ private fun `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesPublishe
         previewUrl = previewUrl ?: "",
     )
 
+    // Extract actual screenshots from the repeated `previews` field.
+    // Deliberately excludes the top-level previewUrl (field 11), which is usually a small
+    // square thumbnail not suitable for 16:9 display.
+    val screenshotUrls = previewsList
+        .filter { it.youtubevideoid.isNullOrEmpty() && it.url.isNotEmpty() }
+        .sortedBy { it.sortorder }
+        .map { it.url }
+
     val totalVotes = (voteData.votesUp.toLong() + voteData.votesDown.toLong()).coerceAtLeast(0L)
     val score = if (totalVotes > 0) voteData.score else 0f
 
@@ -413,5 +421,6 @@ private fun `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesPublishe
         subscriberCount = subscriptions.toLong(),
         favoritedCount = favorited.toLong(),
         lifetimeSubscriptions = lifetimeSubscriptions.toLong(),
+        previewUrls = screenshotUrls,
     )
 }
