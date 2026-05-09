@@ -133,7 +133,7 @@ object GOGApiClient {
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     val errorBody = response.body?.string() ?: "Unknown error"
-                    Timber.e("Failed to fetch game IDs: HTTP ${response.code} - $errorBody")
+                    Timber.e("Failed to fetch game IDs: HTTP ${response.code}")
                     return@withContext Result.failure(
                         Exception("Failed to fetch game IDs: HTTP ${response.code}")
                     )
@@ -218,7 +218,7 @@ object GOGApiClient {
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     val errorBody = response.body?.string() ?: "Unknown error"
-                    Timber.tag("GOG").e("Failed to fetch game details for $gameId: HTTP ${response.code} - $errorBody")
+                    Timber.tag("GOG").e("Failed to fetch game details for $gameId: HTTP ${response.code}")
                     return@withContext Result.failure(
                         Exception("Failed to fetch game details: HTTP ${response.code}")
                     )
