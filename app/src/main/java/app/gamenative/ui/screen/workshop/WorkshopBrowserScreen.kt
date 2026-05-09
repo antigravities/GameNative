@@ -140,7 +140,7 @@ fun WorkshopBrowserScreen(
             }
 
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 220.dp),
+                columns = GridCells.Adaptive(minSize = 150.dp),
                 state = gridState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
