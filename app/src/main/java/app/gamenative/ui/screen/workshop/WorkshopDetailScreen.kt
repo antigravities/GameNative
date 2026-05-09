@@ -6,6 +6,7 @@ import android.text.method.LinkMovementMethod
 import android.widget.TextView
 import coil.imageLoader
 import coil.request.ImageRequest
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,11 +15,16 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
@@ -163,14 +169,63 @@ fun WorkshopDetailScreen(
                         .padding(padding)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    if (current.item.previewUrl.isNotEmpty()) {
-                        CoilImage(
-                            imageModel = { current.item.previewUrl },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f),
-                            imageOptions = ImageOptions(contentScale = ContentScale.Crop),
-                        )
+                    val previews = current.previewUrls
+                    when {
+                        // Actual screenshots available → swipeable carousel with dot indicators.
+                        previews.isNotEmpty() -> {
+                            // rememberPagerState must be called at the composable call site
+                            // (not inside a lambda), so it's placed here in the `when` branch.
+                            val pagerState = rememberPagerState(pageCount = { previews.size })
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                HorizontalPager(
+                                    state = pagerState,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(16f / 9f),
+                                ) { page ->
+                                    CoilImage(
+                                        imageModel = { previews[page] },
+                                        modifier = Modifier.fillMaxSize(),
+                                        imageOptions = ImageOptions(contentScale = ContentScale.Crop),
+                                    )
+                                }
+                                // Dot indicators — only shown when there is more than one screenshot.
+                                if (previews.size > 1) {
+                                    Row(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .padding(bottom = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        repeat(previews.size) { index ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(if (index == pagerState.currentPage) 8.dp else 6.dp)
+                                                    .background(
+                                                        color = if (index == pagerState.currentPage)
+                                                            Color.White
+                                                        else
+                                                            Color.White.copy(alpha = 0.5f),
+                                                        shape = CircleShape,
+                                                    )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // No screenshots — fall back to the square thumbnail (current behavior).
+                        current.item.previewUrl.isNotEmpty() -> {
+                            CoilImage(
+                                imageModel = { current.item.previewUrl },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f),
+                                imageOptions = ImageOptions(contentScale = ContentScale.Crop),
+                            )
+                        }
+                        // No images at all — show nothing.
                     }
 
                     Column(modifier = Modifier.padding(16.dp)) {
