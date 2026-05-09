@@ -3,6 +3,7 @@ package app.gamenative.ui.data
 import app.gamenative.data.GameSource
 
 enum class DownloadItemStatus {
+    QUEUED,       // waiting for the active download slot to free up
     DOWNLOADING,
     PAUSED,
     RESUMABLE,
@@ -40,7 +41,9 @@ data class DownloadItemState(
             )
 
     val canCancel: Boolean
-        get() = status == DownloadItemStatus.DOWNLOADING || isPartial
+        get() = status == DownloadItemStatus.DOWNLOADING ||
+                status == DownloadItemStatus.QUEUED ||
+                isPartial
 
     val isFinished: Boolean
         get() = !isPartial && (
