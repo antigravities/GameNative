@@ -571,6 +571,7 @@ internal fun AppScreenContent(
     isDownloading: Boolean,
     downloadProgress: Float,
     hasPartialDownload: Boolean,
+    isQueued: Boolean = false,
     isUpdatePending: Boolean,
     downloadInfo: app.gamenative.data.DownloadInfo? = null,
     onDownloadInstallClick: () -> Unit,
@@ -879,13 +880,15 @@ internal fun AppScreenContent(
                         // Primary action button (left-aligned)
                         if (isDownloading || hasPartialDownload) {
                             PrimaryActionButton(
-                                text = if (isDownloading) {
-                                    stringResource(R.string.pause_download)
-                                } else {
-                                    stringResource(R.string.resume_download)
+                                text = when {
+                                    isDownloading -> stringResource(R.string.pause_download)
+                                    isQueued -> stringResource(R.string.downloads_status_queued_label)
+                                    else -> stringResource(R.string.resume_download)
                                 },
                                 onClick = onPauseResumeClick,
-                                enabled = pauseResumeEnabled,
+                                // Queued items start automatically — disable the button so the user
+                                // can't accidentally try to resume/pause something not yet active.
+                                enabled = if (isQueued) false else pauseResumeEnabled,
                                 isInstalled = false,
                                 isDownloading = isDownloading,
                                 downloadProgress = downloadProgress,
