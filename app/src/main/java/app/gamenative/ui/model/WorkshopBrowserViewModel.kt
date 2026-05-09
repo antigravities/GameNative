@@ -37,7 +37,7 @@ class WorkshopBrowserViewModel(val appId: Int) : ViewModel() {
     data class UiState(
         val items: List<WorkshopItemDetail> = emptyList(),
         val searchText: String = "",
-        val sort: WorkshopBrowser.QuerySort = WorkshopBrowser.QuerySort.Popular,
+        val sort: WorkshopBrowser.QueryType = WorkshopBrowser.QueryType.Popular,
         val isLoading: Boolean = false,
         val errorMessage: String? = null,
         val page: Int = 0,
@@ -76,7 +76,7 @@ class WorkshopBrowserViewModel(val appId: Int) : ViewModel() {
         }
     }
 
-    fun onSortChanged(sort: WorkshopBrowser.QuerySort) {
+    fun onSortChanged(sort: WorkshopBrowser.QueryType) {
         if (sort == _state.value.sort) return
         _state.update { it.copy(sort = sort) }
         loadFirstPage()
