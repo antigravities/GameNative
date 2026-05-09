@@ -367,10 +367,11 @@ class DownloadsViewModel @Inject constructor(
             compareBy<DownloadItemState> { item ->
                 when {
                     item.status == DownloadItemStatus.DOWNLOADING -> 0
-                    item.isPartial -> 1
-                    item.status == DownloadItemStatus.COMPLETED -> 2
-                    item.status == DownloadItemStatus.CANCELLED -> 3
-                    else -> 4
+                    item.status == DownloadItemStatus.QUEUED -> 1
+                    item.isPartial -> 2
+                    item.status == DownloadItemStatus.COMPLETED -> 3
+                    item.status == DownloadItemStatus.CANCELLED -> 4
+                    else -> 5
                 }
             }
                 .thenByDescending { item -> if (item.isFinished) item.updatedAtMs else 0L }
@@ -481,6 +482,29 @@ class DownloadsViewModel @Inject constructor(
                 if (liveDownloads.containsKey(key)) continue
                 val (name, icon) = getSteamMetadata(appId)
                 liveDownloads[key] = buildPartialDownloadItem(appIdString, GameSource.STEAM, name, icon)
+            }
+
+            // Queued Steam downloads — waiting for the active slot, not yet running.
+            // Queue order is preserved so position badges (#1, #2, …) are stable.
+            SteamService.getQueuedDownloads().forEachIndexed { index, queued ->
+                val appIdString = queued.appId.toString()
+                val key = downloadKey(GameSource.STEAM, appIdString)
+                if (liveDownloads.containsKey(key)) return@forEachIndexed
+                val (name, icon) = getSteamMetadata(queued.appId)
+                liveDownloads[key] = DownloadItemState(
+                    appId = appIdString,
+                    gameSource = GameSource.STEAM,
+                    gameName = name,
+                    iconUrl = icon,
+                    progress = null,
+                    bytesDownloaded = null,
+                    bytesTotal = null,
+                    etaMs = null,
+                    statusMessage = appContext.getString(R.string.downloads_status_queued, index + 1),
+                    isActive = false,
+                    isPartial = false,
+                    status = DownloadItemStatus.QUEUED,
+                )
             }
 
             for ((appId, info) in EpicService.getActiveDownloads()) {
@@ -714,9 +738,17 @@ class DownloadsViewModel @Inject constructor(
             when (gameSource) {
                 GameSource.STEAM -> {
                     val id = appId.toIntOrNull() ?: return@launch
-                    SteamService.getAppDownloadInfo(id)?.cancel()
-                    SteamService.deleteApp(id)
-                    PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(id, GameSource.STEAM))
+                    // Check if this is a queued (not yet started) download first.
+                    // Queued items have no active DepotDownloader and no files on disk,
+                    // so we only need to remove them from the queue — no deleteApp call.
+                    val isQueued = SteamService.getQueuedDownloads().any { it.appId == id }
+                    if (isQueued) {
+                        SteamService.cancelQueuedDownload(id)
+                    } else {
+                        SteamService.getAppDownloadInfo(id)?.cancel()
+                        SteamService.deleteApp(id)
+                        PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(id, GameSource.STEAM))
+                    }
                     scheduleRefreshDownloads()
                 }
 
