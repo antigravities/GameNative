@@ -86,6 +86,24 @@ import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.util.SteamSaveTransfer
 import app.gamenative.utils.ContainerUtils.getContainer
 import app.gamenative.utils.CustomGameScanner
+import app.gamenative.utils.SteamPeekService
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import app.gamenative.data.SteamApp
+import com.skydoves.landscapist.ImageOptions
+import com.skydoves.landscapist.coil.CoilImage
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.json.JSONObject
@@ -1572,6 +1590,63 @@ class SteamAppScreen : BaseAppScreen() {
                 },
                 onDismissRequest = { hideBranchDialog(gameId) },
             )
+        }
+    }
+
+    @Composable
+    override fun AdditionalBottomContent(
+        libraryItem: LibraryItem,
+        onNavigate: (String) -> Unit,
+    ) {
+        val gameId = libraryItem.gameId
+
+        // Fetch from SteamPeek (already cached after first call) and keep only apps the user owns.
+        // getAppInfoOf is a DB primary-key lookup; null means not in our library, so mapNotNull filters it out.
+        var relatedApps by remember(gameId) { mutableStateOf<List<SteamApp>>(emptyList()) }
+        LaunchedEffect(gameId) {
+            val ids = SteamPeekService.fetch(gameId)
+            relatedApps = ids.mapNotNull { SteamService.getAppInfoOf(it) }
+        }
+
+        // Render nothing if SteamPeek returned no results or none are owned
+        if (relatedApps.isEmpty()) return
+
+        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            Text(
+                text = "Games Like This (SteamPeek)",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(relatedApps) { app ->
+                    Column(
+                        modifier = Modifier
+                            .width(60.dp)
+                            // Navigate to the tapped game's detail page using its STEAM_ prefixed app ID
+                            .clickable { onNavigate("STEAM_${app.id}") },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CoilImage(
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            imageModel = { app.clientIconUrl.ifEmpty { app.iconUrl } },
+                            imageOptions = ImageOptions(contentScale = ContentScale.Crop),
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = app.name,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            }
         }
     }
 }
