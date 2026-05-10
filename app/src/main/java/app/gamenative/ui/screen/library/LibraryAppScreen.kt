@@ -873,6 +873,7 @@ fun AppScreen(
     onAiDebugRun: () -> Unit,
     onBack: () -> Unit,
     onViewScreenshots: () -> Unit = {},
+    onNavigate: (LibraryItem) -> Unit = {},
 ) {
     // Get the appropriate screen model based on game source
     val screenModel = remember(libraryItem.gameSource) {
@@ -894,6 +895,7 @@ fun AppScreen(
         onAiDebugRun = onAiDebugRun,
         onBack = onBack,
         onViewScreenshots = onViewScreenshots,
+        onNavigate = onNavigate,
     )
 }
 
@@ -986,6 +988,9 @@ internal fun AppScreenContent(
     achievements: List<Achievement>? = null,
     onViewScreenshots: () -> Unit = {},
     optionsMenu: List<AppMenuOption>,
+    // Slot for source-specific content at the end of the scrollable area (e.g. SteamPeek recommendations).
+    // In Compose a "slot" is just a @Composable lambda parameter the caller fills in.
+    bottomContent: @Composable () -> Unit = {},
     dialogOpen: Boolean = false,
     immersiveMode: ImmersiveModeUiState = ImmersiveModeUiState(),
 ) {
@@ -1837,6 +1842,8 @@ internal fun AppScreenContent(
                 )
 
             }
+
+            bottomContent()
         }
 
         GamepadActionBar(

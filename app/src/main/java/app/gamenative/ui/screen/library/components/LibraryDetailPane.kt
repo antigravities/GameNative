@@ -33,6 +33,7 @@ internal fun LibraryDetailPane(
     onAiDebugRun: () -> Unit,
     onBack: () -> Unit,
     onNavigateRoute: (String) -> Unit,
+    onNavigate: (LibraryItem) -> Unit = {},
 ) {
     Surface {
         if (libraryItem == null) {
@@ -86,6 +87,7 @@ internal fun LibraryDetailPane(
                 onViewScreenshots = {
                     onNavigateRoute(PluviaScreen.ScreenshotGallery.route(libraryItem.appId))
                 },
+                onNavigate = onNavigate,
             )
         }
     }

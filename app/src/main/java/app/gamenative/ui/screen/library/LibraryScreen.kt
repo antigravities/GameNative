@@ -1226,6 +1226,13 @@ private fun LibraryScreenContent(
                     }
                 },
                 onNavigateRoute = onNavigateRoute,
+                // "Games like this" taps carry the item itself, so it opens even if the current
+                // tab/search/filter has hidden it from state.appInfoList. Prefer the list's
+                // instance when present so it matches what the grid shows.
+                onNavigate = { item ->
+                    selectedAppId = item.appId
+                    selectedLibraryItem = state.appInfoList.find { it.appId == item.appId } ?: item
+                },
             )
         }
 

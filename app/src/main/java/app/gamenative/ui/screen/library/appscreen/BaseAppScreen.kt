@@ -1340,6 +1340,7 @@ abstract class BaseAppScreen {
         onAiDebugRun: () -> Unit,
         onBack: () -> Unit,
         onViewScreenshots: () -> Unit = {},
+        onNavigate: (LibraryItem) -> Unit = {},
     ) {
         val context = LocalContext.current
         val displayInfoBase = getGameDisplayInfo(context, libraryItem)
@@ -1882,6 +1883,7 @@ abstract class BaseAppScreen {
             achievements = achievementsState,
             onViewScreenshots = onViewScreenshots,
             optionsMenu = optionsMenu,
+            bottomContent = { AdditionalBottomContent(libraryItem, onNavigate) },
             dialogOpen = showConfigDialog || communityConfigsRequested || manageModsRequested ||
                 importFilesRequested || exportFilesRequested || installThunderstoreModRequested,
         )
@@ -2099,5 +2101,18 @@ abstract class BaseAppScreen {
         onBack: () -> Unit,
     ) {
         // Default: no additional dialogs
+    }
+
+    /**
+     * Optional content rendered at the bottom of the scrollable game detail area.
+     * Override in a source-specific subclass (e.g. SteamAppScreen's "Games Like This" row).
+     * [onNavigate] opens another game in the detail pane.
+     */
+    @Composable
+    open fun AdditionalBottomContent(
+        libraryItem: LibraryItem,
+        onNavigate: (LibraryItem) -> Unit,
+    ) {
+        // Default: nothing
     }
 }
