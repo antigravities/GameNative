@@ -219,6 +219,12 @@ class WorkshopBrowserViewModel(val appId: Int) : ViewModel() {
                     val current = WorkshopManager.parseEnabledIds(appDao.getEnabledWorkshopItemIds(appId))
                     val updated = current - publishedFileId
                     appDao.updateWorkshopState(appId, updated.isNotEmpty(), updated.joinToString(","))
+
+                    // Delete the item's files from disk immediately rather than waiting
+                    // for the next startWorkshopDownload cycle to clean up.
+                    if (SteamService.isAppInstalled(appId)) {
+                        WorkshopManager.deleteWorkshopItemFromDisk(context, appId, publishedFileId)
+                    }
                 }
 
                 _state.update { it.copy(subscribedIds = it.subscribedIds - publishedFileId) }
