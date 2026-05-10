@@ -119,6 +119,30 @@ fun GameSkeletonLoader(
                             .background(skeletonColor)
                     )
                 }
+                PaneType.GRID_ICON -> {
+                    // Square icon placeholder + short text bar below
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(skeletonColor)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.8f)
+                                .height(12.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(skeletonColor)
+                        )
+                    }
+                }
                 else -> {
                     // Default to list view
                     Box(
