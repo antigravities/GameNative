@@ -1309,6 +1309,27 @@ object WorkshopManager {
     }
 
     /**
+     * Deletes the on-disk content for a single workshop item immediately.
+     * Called right after a successful Unsubscribe RPC so the directory is
+     * removed without waiting for the next startWorkshopDownload cycle.
+     * Safe to call when the directory doesn't exist.
+     */
+    fun deleteWorkshopItemFromDisk(context: Context, appId: Int, publishedFileId: Long) {
+        val winePrefix = getContainerWinePrefix(context, appId)
+        val workshopContentDir = getWorkshopContentDir(winePrefix, appId)
+        File(workshopContentDir, publishedFileId.toString()).deleteRecursively()
+        // Also remove any in-progress download directory for this item
+        File(workshopContentDir, "$publishedFileId.partial").deleteRecursively()
+        Timber.tag(TAG).i("Deleted workshop item $publishedFileId from disk (appId=$appId)")
+        // Rewrite gbe_fork metadata (mods.json etc.) so the game doesn't see a stale
+        // subscription entry pointing to the now-missing files. Passing emptyList() causes
+        // configureModSymlinks to scan what's actually on disk (the deleted item is already
+        // gone) and rebuild all metadata from the current on-disk state — the same pattern
+        // used in checkForWorkshopUpdates when no enabled items remain.
+        configureSymlinksForApp(context, appId, emptyList(), winePrefix, workshopContentDir)
+    }
+
+    /**
      * Removes workshop-owned symlinks and copies from the game tree.
      * Handles gbe_fork steam_settings/mods/ dirs and strategy-detected
      * game mod directories.
@@ -2089,24 +2110,89 @@ object WorkshopManager {
                     } == true
             }
 
-        // Delete content directories for mods no longer in the enabled set.
-        // This reclaims disk space and prevents stale mods from appearing
-        // if the game scans the filesystem independently.
-        if (enabledIdSet != null) {
-            workshopContentDir.listFiles()?.forEach { dir ->
-                if (dir.isDirectory && dir.name.toLongOrNull() != null &&
-                    dir.name !in enabledIdSet
-                ) {
-                    Timber.tag(TAG).i("Removing deselected mod content: ${dir.name}")
-                    dir.deleteRecursively()
-                    // Also remove .partial sibling if present
-                    File(workshopContentDir, "${dir.name}.partial").deleteRecursively()
-                }
-            }
-        }
+        // Note: content directory deletion is handled exclusively by cleanupUnsubscribedItems,
+        // which runs with a fetchResult.isComplete guard. Deleting here would bypass that guard
+        // and could remove directories for items still subscribed on Steam.
 
         if (modDirs.isNullOrEmpty()) {
-            Timber.tag(TAG).d("No mod directories with content in ${workshopContentDir.absolutePath}")
+            Timber.tag(TAG).d("No mod directories with content — clearing stale workshop metadata")
+
+            // When all addons are gone, the normal (non-empty) path never runs, so stale
+            // metadata files are never updated. Walk the same locations the main path writes
+            // and clear each one so gbe_fork doesn't report missing-but-subscribed items.
+
+            // 1. Per-DLL steam_settings: write {} to mods.json and remove mods/ symlinks.
+            //    Mirrors the DLL walk and settings-dir validation at lines ~2332–2378.
+            val emptyDllNames = setOf(
+                "steam_api.dll", "steam_api64.dll",
+                "steamclient.dll", "steamclient64.dll",
+            )
+            gameRootDir.walkTopDown().maxDepth(10).forEach { file ->
+                if (!file.isFile || file.name.lowercase() !in emptyDllNames) return@forEach
+                val settingsDir = file.parentFile?.let { File(it, "steam_settings") } ?: return@forEach
+                if (!settingsDir.isDirectory) return@forEach
+                val hasCoreConfig =
+                    File(settingsDir, "steam_appid.txt").isFile ||
+                        File(settingsDir, "configs.user.ini").isFile ||
+                        File(settingsDir, "configs.app.ini").isFile
+                if (!hasCoreConfig) return@forEach
+                // Write {} rather than deleting — gbe_fork expects the file to exist.
+                try { File(settingsDir, "mods.json").writeText("{}") } catch (_: Exception) { }
+                val modsDir = File(settingsDir, "mods")
+                if (modsDir.isDirectory) {
+                    clearModEntries(modsDir)
+                    modsDir.delete()
+                }
+            }
+
+            // 2. Global Steam steam_settings/mods.json (used by ColdClient games that have
+            //    no per-game steam_api.dll). workshopContentDir = .../Steam/steamapps/workshop/content/<appId>
+            //    so four parentFile() calls reach the Steam/ root — same walk as lines 2324–2327.
+            val steamRootForCleanup = workshopContentDir.parentFile?.parentFile?.parentFile?.parentFile
+            steamRootForCleanup?.let {
+                val globalSettingsDir = File(it, "steam_settings")
+                if (globalSettingsDir.isDirectory) {
+                    try { File(globalSettingsDir, "mods.json").writeText("{}") } catch (_: Exception) { }
+                }
+            }
+
+            // 3. Clean manifest-tracked files from addons/ (Garry's Mod, L4D2, Portal 2 …)
+            //    and Insurgency's custom/ directory. These were written by the main path on the
+            //    previous sync and must be removed so the game doesn't mount stale content.
+            gameRootDir.walkTopDown().maxDepth(5).forEach { file ->
+                if (!file.isFile || file.name != "gameinfo.txt") return@forEach
+                if (file.absolutePath.contains("steam_settings") ||
+                    file.absolutePath.contains(".DepotDownloader")) return@forEach
+                val gameContentDir = file.parentFile ?: return@forEach
+
+                // addons/ — .gma and .vpk files tracked by .gamenative_workshop_addons
+                val addonsDir = File(gameContentDir, "addons")
+                if (addonsDir.isDirectory) {
+                    val manifestFile = File(addonsDir, ".gamenative_workshop_addons")
+                    if (manifestFile.isFile) {
+                        manifestFile.readText().lines().filter { it.isNotBlank() }.forEach { name ->
+                            try { Files.deleteIfExists(File(addonsDir, name).toPath()) } catch (_: Exception) { }
+                        }
+                        manifestFile.delete()
+                    }
+                    // Also remove any leftover symlinks from older code versions
+                    addonsDir.listFiles()?.forEach { f ->
+                        if (Files.isSymbolicLink(f.toPath())) Files.deleteIfExists(f.toPath())
+                    }
+                }
+
+                // custom/ — Insurgency VPKs tracked by the same manifest format
+                val customDir = File(gameContentDir, "custom")
+                if (customDir.isDirectory) {
+                    val manifestFile = File(customDir, ".gamenative_workshop_addons")
+                    if (manifestFile.isFile) {
+                        manifestFile.readText().lines().filter { it.isNotBlank() }.forEach { name ->
+                            try { Files.deleteIfExists(File(customDir, name).toPath()) } catch (_: Exception) { }
+                        }
+                        manifestFile.delete()
+                    }
+                }
+            }
             return
         }
 
@@ -3505,9 +3591,12 @@ object WorkshopManager {
                 val winePrefix = getContainerWinePrefix(context, appId)
                 val workshopContentDir = getWorkshopContentDir(winePrefix, appId)
 
-                // Clean up mods that were deselected
+                // Delete items that Steam no longer shows as subscribed.
+                // Uses fetchResult.items (the full list from Steam) so that items
+                // still subscribed on Steam are never deleted, even if they're absent
+                // from enabledIds due to a state mismatch or external subscription.
                 if (fetchResult.isComplete) {
-                    cleanupUnsubscribedItems(items, workshopContentDir)
+                    cleanupUnsubscribedItems(fetchResult.items, workshopContentDir)
                 }
 
                 val itemsToSync = getItemsNeedingSync(items, workshopContentDir)
@@ -3647,7 +3736,9 @@ object WorkshopManager {
 
         val workshopContentDir = getWorkshopContentDir(winePrefix, appId)
 
-        cleanupUnsubscribedItems(items, workshopContentDir)
+        // Use the full Steam subscription list so items still subscribed on Steam
+        // are never deleted due to an enabledIds mismatch.
+        cleanupUnsubscribedItems(fetchResult.items, workshopContentDir)
 
         val itemsToSync = getItemsNeedingSync(items, workshopContentDir)
         if (itemsToSync.isEmpty()) {
