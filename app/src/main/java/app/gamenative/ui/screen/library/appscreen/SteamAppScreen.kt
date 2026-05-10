@@ -1573,7 +1573,7 @@ class SteamAppScreen : BaseAppScreen() {
             Text(
                 text = "Games Like This (SteamPeek)",
                 style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
