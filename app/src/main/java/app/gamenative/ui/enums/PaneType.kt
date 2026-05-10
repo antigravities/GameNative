@@ -6,4 +6,5 @@ enum class PaneType {
     GRID_HERO,
     GRID_CAPSULE,
     CAROUSEL,
+    GRID_ICON,
 }

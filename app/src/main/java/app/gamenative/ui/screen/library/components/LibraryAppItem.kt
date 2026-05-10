@@ -46,11 +46,23 @@ import app.gamenative.ui.theme.PluviaTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Face4
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import com.skydoves.landscapist.ImageOptions
+import com.skydoves.landscapist.coil.CoilImage
 
 /**
  * Library app item that displays a game in either list or grid view.
@@ -123,6 +135,13 @@ internal fun AppItem(
             context = context,
         )
 
+        PaneType.GRID_ICON -> IconViewCard(
+            modifier = modifier,
+            appInfo = appInfo,
+            onClick = onClick,
+            onFocus = onFocus,
+        )
+
         else -> GridViewCard(
             modifier = modifier,
             appInfo = appInfo,
@@ -142,6 +161,43 @@ internal fun AppItem(
             compatibilityStatus = compatibilityStatus,
             showFocusGlow = showFocusGlow,
             context = context,
+        )
+    }
+}
+
+/**
+ * Compact icon-grid item: 60 dp square icon + 2-line centered name label.
+ * Mirrors the SteamPeek "Games Like This" widget exactly — just in a vertical grid.
+ */
+@Composable
+private fun IconViewCard(
+    modifier: Modifier = Modifier,
+    appInfo: LibraryItem,
+    onClick: () -> Unit,
+    onFocus: () -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        CoilImage(
+            modifier = Modifier
+                .size(60.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            // clientIconUrl is the per-platform 60×60 icon; fall back to header art
+            imageModel = { appInfo.clientIconUrl.ifEmpty { appInfo.headerImageUrl } },
+            imageOptions = ImageOptions(contentScale = ContentScale.Crop),
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = appInfo.name,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
         )
     }
 }

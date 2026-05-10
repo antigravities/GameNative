@@ -161,6 +161,16 @@ internal fun LibraryListPane(
                 GridCells.Adaptive(minSize = minSize)
             }
 
+            PaneType.GRID_ICON -> {
+                // ~80 dp per cell gives the 60 dp icon comfortable breathing room
+                val minSize = when (windowWidthClass) {
+                    WindowWidthClass.COMPACT -> 80.dp
+                    WindowWidthClass.MEDIUM -> 90.dp
+                    WindowWidthClass.EXPANDED -> 100.dp
+                }
+                GridCells.Adaptive(minSize = minSize)
+            }
+
             else -> GridCells.Fixed(1)
         }
     }
