@@ -1528,6 +1528,7 @@ fun PluviaMain(
                             )
                         },
                         onBack = { navController.popBackStack() },
+                        onNavigate = { appId -> navController.navigate(PluviaScreen.GamePage.route(appId)) },
                     )
                 }
 

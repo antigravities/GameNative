@@ -20,6 +20,7 @@ fun GamePageScreen(
     onClickPlay: (String, Boolean) -> Unit,
     onTestGraphics: (String) -> Unit,
     onBack: () -> Unit,
+    onNavigate: (String) -> Unit = {},
     viewModel: GamePageViewModel = hiltViewModel(),
 ) {
     val libraryItem by viewModel.libraryItem.collectAsStateWithLifecycle()
@@ -43,6 +44,7 @@ fun GamePageScreen(
                 onClickPlay = { useBoxArt -> libraryItem?.let { onClickPlay(it.appId, useBoxArt) } },
                 onTestGraphics = { libraryItem?.let { onTestGraphics(it.appId) } },
                 onBack = onBack,
+                onNavigate = onNavigate,
             )
         }
     }
