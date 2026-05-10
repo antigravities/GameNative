@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.PhotoSizeSelectActual
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.SportsEsports
@@ -338,6 +339,13 @@ fun LibraryOptionsPanel(
                                 selected = currentView == PaneType.CAROUSEL,
                                 onClick = { onViewChanged(PaneType.CAROUSEL) },
                                 icon = Icons.Default.ViewCarousel,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OptionRadioItem(
+                                text = stringResource(R.string.library_layout_icon),
+                                selected = currentView == PaneType.GRID_ICON,
+                                onClick = { onViewChanged(PaneType.GRID_ICON) },
+                                icon = Icons.Default.Apps,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
