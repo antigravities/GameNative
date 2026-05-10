@@ -561,6 +561,7 @@ fun AppScreen(
     onClickPlay: (Boolean) -> Unit,
     onTestGraphics: () -> Unit,
     onBack: () -> Unit,
+    onNavigate: (String) -> Unit = {},
 ) {
     // Get the appropriate screen model based on game source
     val screenModel = remember(libraryItem.gameSource) {
@@ -579,6 +580,7 @@ fun AppScreen(
         onClickPlay = onClickPlay,
         onTestGraphics = onTestGraphics,
         onBack = onBack,
+        onNavigate = onNavigate,
     )
 }
 
@@ -680,6 +682,7 @@ internal fun AppScreenContent(
     onDeleteDownloadClick: () -> Unit,
     onUpdateClick: () -> Unit,
     onBack: () -> Unit = {},
+    bottomContent: @Composable () -> Unit = {},
     vararg optionsMenu: AppMenuOption,
 ) {
     val context = LocalContext.current
@@ -1276,6 +1279,9 @@ internal fun AppScreenContent(
                 }
 
             }
+
+            // Slot for source-specific bottom content (e.g., SteamPeek recommendations)
+            bottomContent()
         }
 
         GamepadActionBar(

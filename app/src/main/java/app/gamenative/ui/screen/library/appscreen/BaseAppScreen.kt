@@ -962,6 +962,7 @@ abstract class BaseAppScreen {
         onClickPlay: (Boolean) -> Unit,
         onTestGraphics: () -> Unit,
         onBack: () -> Unit,
+        onNavigate: (String) -> Unit = {},
     ) {
         val context = LocalContext.current
         val displayInfoBase = getGameDisplayInfo(context, libraryItem)
@@ -1307,6 +1308,7 @@ abstract class BaseAppScreen {
                 }
             },
             onBack = onBack,
+            bottomContent = { AdditionalBottomContent(libraryItem, onNavigate) },
             optionsMenu = optionsMenu.toTypedArray(),
         )
 
@@ -1431,5 +1433,17 @@ abstract class BaseAppScreen {
         onBack: () -> Unit,
     ) {
         // Default: no additional dialogs
+    }
+
+    /**
+     * Optional content rendered at the bottom of the scrollable game detail area.
+     * Override in a source-specific subclass to inject additional UI (e.g., a "Games Like This" row).
+     */
+    @Composable
+    open fun AdditionalBottomContent(
+        libraryItem: LibraryItem,
+        onNavigate: (String) -> Unit,
+    ) {
+        // Default: nothing
     }
 }

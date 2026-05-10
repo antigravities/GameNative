@@ -1029,6 +1029,7 @@ private fun LibraryScreenContent(
                         onTestGraphics(libraryItem.appId)
                     }
                 },
+                onNavigate = { appId -> onNavigateRoute("gamepage/$appId") },
             )
         }
 
