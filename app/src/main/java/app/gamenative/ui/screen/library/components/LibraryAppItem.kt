@@ -46,10 +46,12 @@ import app.gamenative.ui.theme.PluviaTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Face4
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -58,6 +60,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -183,14 +187,33 @@ private fun IconViewCard(
             .padding(vertical = 6.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CoilImage(
-            modifier = Modifier
-                .size(60.dp)
-                .clip(RoundedCornerShape(8.dp)),
-            // clientIconUrl is the per-platform 60×60 icon; fall back to header art
-            imageModel = { appInfo.clientIconUrl.ifEmpty { appInfo.headerImageUrl } },
-            imageOptions = ImageOptions(contentScale = ContentScale.Crop),
-        )
+        Box(modifier = Modifier.size(60.dp)) {
+            CoilImage(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                // clientIconUrl is the per-platform 60×60 icon; fall back to header art
+                imageModel = { appInfo.clientIconUrl.ifEmpty { appInfo.headerImageUrl } },
+                imageOptions = ImageOptions(contentScale = ContentScale.Crop),
+            )
+            if (appInfo.isInstalled) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = stringResource(R.string.library_installed),
+                        tint = PluviaTheme.colors.statusInstalled,
+                        modifier = Modifier.size(10.dp),
+                    )
+                }
+            }
+        }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = appInfo.name,
