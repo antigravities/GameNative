@@ -53,7 +53,7 @@ object SteamPeekService {
                         return@withLock emptyList()
                     }
 
-                    ids
+                    ids.filter { it != appid }
                 }
             } catch (e: Exception) {
                 Timber.tag("SteamPeek").e(e, "Couldn't fetch recommendations for $appid")
