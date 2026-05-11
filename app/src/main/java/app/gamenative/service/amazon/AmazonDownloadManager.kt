@@ -270,7 +270,7 @@ class AmazonDownloadManager @Inject constructor(
 
                 response.body.byteStream().use { input ->
                     tmpFile.outputStream().use { output ->
-                        val buf = ByteArray(8192)
+                        val buf = ByteArray(256 * 1024)
                         var read: Int
                         var bytesSinceLastEmit = 0L
                         while (input.read(buf).also { read = it } != -1) {
