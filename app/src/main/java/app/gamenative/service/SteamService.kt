@@ -7,7 +7,9 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.Environment
 import android.os.IBinder
+import android.os.StatFs
 import android.util.Base64
 import app.gamenative.ui.util.SnackbarManager
 import androidx.room.withTransaction
@@ -574,12 +576,26 @@ class SteamService : Service(), IChallengeUrlChanged {
         val externalAppInstallPath: String
             get() = Paths.get(PrefManager.externalStoragePath, "Steam", "steamapps", "common").pathString
 
+        // StatFs uses statvfs() — a kernel syscall that works on mounted volume roots
+        // without MANAGE_EXTERNAL_STORAGE and throws on disconnected/invalid paths.
+        // Environment.getExternalStorageState(File) is NOT used here: its internal
+        // StorageManager.getStorageVolume(File) lookup returns null when the File IS
+        // the mount point (e.g. /storage/UUID for OTG), causing it to report MEDIA_REMOVED.
+        private fun isMounted(path: String): Boolean {
+            if (path.isBlank()) return false
+            return try {
+                StatFs(path).blockCountLong > 0
+            } catch (_: Exception) {
+                false
+            }
+        }
+
         // all install paths: internal + configured external + all mounted volumes
         val allInstallPaths: List<String>
             get() {
                 val paths = mutableListOf(internalAppInstallPath)
-                // only include configured external path if it's a real absolute path
-                if (PrefManager.externalStoragePath.isNotBlank()) {
+                // only include configured external path if it's a real absolute path and the volume is mounted
+                if (isMounted(PrefManager.externalStoragePath)) {
                     paths += externalAppInstallPath
                 }
                 for (volPath in DownloadService.externalVolumePaths) {
@@ -601,22 +617,20 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         val defaultStoragePath: String
             get() {
-                return if (PrefManager.useExternalStorage && File(PrefManager.externalStoragePath).exists()) {
-                    // We still have an SD card file structure as expected
+                return if (PrefManager.useExternalStorage && isMounted(PrefManager.externalStoragePath)) {
                     Timber.i("External storage path is " + PrefManager.externalStoragePath)
                     PrefManager.externalStoragePath
                 } else {
-                    if (instance != null) {
-                        return DownloadService.baseDataDirPath
-                    }
-                    return ""
+                    // baseDataDirPath is populated at app startup (not service-dependent) so
+                    // it's always a valid path — avoids throwing IllegalArgumentException in
+                    // callers like GameManagerDialog that don't guard against an empty string.
+                    DownloadService.baseDataDirPath
                 }
             }
 
         val defaultAppInstallPath: String
             get() {
-                return if (PrefManager.useExternalStorage && File(PrefManager.externalStoragePath).exists()) {
-                    // We still have an SD card file structure as expected
+                return if (PrefManager.useExternalStorage && isMounted(PrefManager.externalStoragePath)) {
                     Timber.i("Using external storage")
                     Timber.i("install path for external storage is " + externalAppInstallPath)
                     externalAppInstallPath
@@ -1280,8 +1294,9 @@ class SteamService : Service(), IChallengeUrlChanged {
             val resolved = resolveExistingAppDir(allInstallPaths, names)
             if (resolved != null) return resolved
 
-            // nothing on disk yet — default to preferred install location
-            if (PrefManager.useExternalStorage) {
+            // nothing on disk yet — default to preferred install location.
+            // Guard with a mount check so a disconnected USB drive falls back to internal.
+            if (PrefManager.useExternalStorage && isMounted(PrefManager.externalStoragePath)) {
                 return Paths.get(externalAppInstallPath, appName).pathString
             }
             return Paths.get(internalAppInstallPath, appName).pathString

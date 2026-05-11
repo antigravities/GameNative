@@ -1,7 +1,9 @@
 package app.gamenative.service
 
 import android.content.Context
+import android.os.Build
 import android.os.Environment
+import android.os.storage.StorageManager
 import app.gamenative.utils.StorageUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,12 +38,41 @@ object DownloadService {
         val extFiles = context.getExternalFilesDir(null)
         baseExternalAppDirPath = extFiles?.parentFile?.path ?: ""
 
-        val sm = context.getSystemService(android.os.storage.StorageManager::class.java)
-        externalVolumePaths = context.getExternalFilesDirs(null)
+        val sm = context.getSystemService(StorageManager::class.java)
+        val fromExternalDirs = context.getExternalFilesDirs(null)
             .filterNotNull()
             .filter { Environment.getExternalStorageState(it) == Environment.MEDIA_MOUNTED }
             .filter { sm.getStorageVolume(it)?.isPrimary != true }
             .map { it.absolutePath }
+
+        // getExternalFilesDirs() only returns volumes where Android has pre-created the
+        // app-scoped directory structure; USB OTG drives on API 29+ are mounted but excluded.
+        externalVolumePaths = (fromExternalDirs + otgVolumePaths(context, sm)).distinct()
+    }
+
+    // Returns root paths for USB OTG volumes not already covered by getExternalFilesDirs().
+    // Uses StorageVolume.getDirectory() on API 30+; constructs /storage/<UUID> on older APIs
+    // (standard Android convention, valid with MANAGE_EXTERNAL_STORAGE).
+    private fun otgVolumePaths(context: Context, sm: StorageManager): List<String> {
+        val coveredUuids = context.getExternalFilesDirs(null)
+            .filterNotNull()
+            .mapNotNull { sm.getStorageVolume(it)?.uuid }
+            .toSet()
+
+        return sm.storageVolumes
+            .filter { vol ->
+                !vol.isPrimary &&
+                vol.state == Environment.MEDIA_MOUNTED &&
+                vol.uuid != null &&
+                vol.uuid !in coveredUuids
+            }
+            .mapNotNull { vol ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    vol.directory?.absolutePath
+                } else {
+                    "/storage/${vol.uuid}"
+                }
+            }
     }
 
     @Synchronized

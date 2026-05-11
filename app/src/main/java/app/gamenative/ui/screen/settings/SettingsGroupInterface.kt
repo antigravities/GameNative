@@ -1,6 +1,7 @@
 package app.gamenative.ui.screen.settings
 
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Environment
 import android.os.storage.StorageManager
 import androidx.compose.foundation.background
@@ -65,7 +66,10 @@ import app.gamenative.ui.component.dialog.LoadingDialog
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.gamenative.utils.CustomGameScanner
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -446,58 +450,113 @@ fun SettingsGroupInterface(
         val ctx = LocalContext.current
         val sm = ctx.getSystemService(StorageManager::class.java)
 
-        // All writable volumes: primary first, then every SD / USB
-        val dirs = remember {
-            ctx.getExternalFilesDirs(null)
+        // (path, label) pairs for all writable non-primary volumes. SD cards come from
+        // getExternalFilesDirs() (which pre-creates app-scoped dirs for them); USB OTG
+        // drives are caught via getStorageVolumes() since API 29+ excludes them from
+        // getExternalFilesDirs(). Requires MANAGE_EXTERNAL_STORAGE for OTG root access.
+        val volumes = remember {
+            val sdEntries = ctx.getExternalFilesDirs(null)
                 .filterNotNull()
                 .filter { Environment.getExternalStorageState(it) == Environment.MEDIA_MOUNTED }
                 .filter { sm.getStorageVolume(it)?.isPrimary != true }
+                .map { dir ->
+                    dir.absolutePath to (sm.getStorageVolume(dir)?.getDescription(ctx) ?: dir.name)
+                }
+
+            val coveredUuids = ctx.getExternalFilesDirs(null)
+                .filterNotNull()
+                .mapNotNull { sm.getStorageVolume(it)?.uuid }
+                .toSet()
+
+            val otgEntries = sm.storageVolumes
+                .filter { vol ->
+                    !vol.isPrimary &&
+                    vol.state == Environment.MEDIA_MOUNTED &&
+                    vol.uuid != null &&
+                    vol.uuid !in coveredUuids
+                }
+                .mapNotNull { vol ->
+                    val path = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        vol.directory?.absolutePath
+                    } else {
+                        "/storage/${vol.uuid}"
+                    } ?: return@mapNotNull null
+                    path to (vol.getDescription(ctx) ?: vol.uuid!!)
+                }
+
+            sdEntries + otgEntries
         }
 
-        // Labels the user sees
-        val labels = remember(dirs) {
-            dirs.map { dir ->
-                sm.getStorageVolume(dir)?.getDescription(ctx) ?: dir.name
-            }
-        }
         var useExternalStorage by rememberSaveable { mutableStateOf(PrefManager.useExternalStorage) }
+
+        // MANAGE_EXTERNAL_STORAGE is required to write to USB OTG volume roots on Android 11+.
+        // Re-checked on every ON_RESUME so the warning clears automatically after the user
+        // grants it in Android Settings and presses back — remember{} alone wouldn't recompute.
+        val lifecycleOwner = LocalLifecycleOwner.current
+        var hasAllFilesAccess by remember { mutableStateOf(
+            CustomGameScanner.hasStoragePermission(ctx, PrefManager.externalStoragePath)
+        ) }
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    hasAllFilesAccess = CustomGameScanner.hasStoragePermission(
+                        ctx, PrefManager.externalStoragePath
+                    )
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+
         SettingsSwitch(
             colors = settingsTileColorsAlt(),
-            enabled = dirs.isNotEmpty(),
+            enabled = volumes.isNotEmpty(),
             title = { Text(text = stringResource(R.string.settings_interface_external_storage_title)) },
             subtitle = {
-                if (dirs.isEmpty())
+                if (volumes.isEmpty())
                     Text(stringResource(R.string.settings_interface_no_external_storage))
                 else
                     Text(stringResource(R.string.settings_interface_external_storage_subtitle))
             },
-            state = useExternalStorage,
+            // Show as off when no volumes are present — preserves pref so it re-enables
+            // automatically when a drive is reconnected and the screen is re-entered.
+            state = useExternalStorage && volumes.isNotEmpty(),
             onCheckedChange = {
                 useExternalStorage = it
                 PrefManager.useExternalStorage = it
-                if (it && dirs.isNotEmpty()) {
-                    PrefManager.externalStoragePath = dirs[0].absolutePath
+                if (it && volumes.isNotEmpty()) {
+                    PrefManager.externalStoragePath = volumes[0].first
                 }
             },
         )
-        if (useExternalStorage) {
+        if (useExternalStorage && volumes.isNotEmpty()) {
             // Currently selected item
             var selectedIndex by rememberSaveable {
                 mutableStateOf(
-                    dirs.indexOfFirst { it.absolutePath == PrefManager.externalStoragePath }
+                    volumes.indexOfFirst { it.first == PrefManager.externalStoragePath }
                         .takeIf { it >= 0 } ?: 0,
                 )
             }
             SettingsListDropdown(
                 title = { Text(text = stringResource(R.string.settings_interface_storage_volume_title)) },
-                items = labels,
+                items = volumes.map { it.second },
                 value = selectedIndex,
                 onItemSelected = { idx ->
                     selectedIndex = idx
-                    PrefManager.externalStoragePath = dirs[idx].absolutePath
+                    PrefManager.externalStoragePath = volumes[idx].first
                 },
                 colors = settingsTileColorsAlt(),
             )
+            // USB OTG volume roots require MANAGE_EXTERNAL_STORAGE to write; app-scoped
+            // SD card paths do not. Show a prompt only when the permission is missing.
+            if (!hasAllFilesAccess) {
+                SettingsMenuLink(
+                    colors = settingsTileColorsAlt(),
+                    title = { Text(stringResource(R.string.settings_interface_external_storage_permission_title)) },
+                    subtitle = { Text(stringResource(R.string.settings_interface_external_storage_permission_subtitle)) },
+                    onClick = { CustomGameScanner.requestManageExternalStoragePermission(ctx) },
+                )
+            }
         }
         // Steam download server selection
         SettingsMenuLink(
