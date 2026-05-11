@@ -161,7 +161,10 @@ object StorageUtils {
                                 }
                             }
 
-                            targetChannel.force(true)
+                            // force(true) is intentionally omitted: game files can be
+                            // re-verified/re-downloaded, so deferring fsync to the OS
+                            // is acceptable in exchange for the large throughput gain on
+                            // USB drives, which have very high per-fsync latency.
                         }
                     }
 
