@@ -21,12 +21,15 @@ import java.nio.file.Path
 object StorageUtils {
 
     fun getAvailableSpace(path: String): Long {
-        val file = File(path)
-        if (!file.exists()) {
-            throw IllegalArgumentException("Invalid path: $path")
+        // StatFs uses statvfs() — a kernel-level filesystem metadata call that works on
+        // mounted volume roots without MANAGE_EXTERNAL_STORAGE. File.exists() is intentionally
+        // avoided here because FUSE denies stat() on external volume roots on Android 11+.
+        return try {
+            val stat = StatFs(path)
+            stat.blockSizeLong * stat.availableBlocksLong
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Invalid path: $path", e)
         }
-        val stat = StatFs(path)
-        return stat.blockSizeLong * stat.availableBlocksLong
     }
 
     fun getTotalSpace(path: String): Long {

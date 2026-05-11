@@ -30,6 +30,7 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import android.os.StatFs
 import java.io.File
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
@@ -199,9 +200,15 @@ object ContainerStorageManager {
     }
 
     fun isExternalStorageConfigured(): Boolean {
-        return PrefManager.useExternalStorage &&
-            PrefManager.externalStoragePath.isNotBlank() &&
-            File(PrefManager.externalStoragePath).exists()
+        val path = PrefManager.externalStoragePath
+        if (!PrefManager.useExternalStorage || path.isBlank()) return false
+        // StatFs uses statvfs() — works on OTG volume roots without MANAGE_EXTERNAL_STORAGE;
+        // File.exists() would return false for mount points on Android 11+ (FUSE restriction).
+        return try {
+            StatFs(path).blockCountLong > 0
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun getStorageLocation(context: Context, entry: Entry): StorageLocation {
