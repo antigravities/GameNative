@@ -365,7 +365,7 @@ class AmazonDownloadManager @Inject constructor(
                 // attempt deletes the partial below, matching the Rust engine.
                 response.body.byteStream().use { input ->
                     destFile.outputStream().use { output ->
-                        val buf = ByteArray(8192)
+                        val buf = ByteArray(256 * 1024)
                         var read: Int
                         var bytesSinceLastEmit = 0L
                         while (input.read(buf).also { read = it } != -1) {
