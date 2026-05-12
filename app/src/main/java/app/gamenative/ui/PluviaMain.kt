@@ -2186,6 +2186,17 @@ fun preLaunchApp(
             }
         }
 
+        // Download leaderboards
+        if (!isOffline && SteamService.isConnected && SteamService.isLoggedIn) {
+            setLoadingMessage("Syncing leaderboards")
+
+            try {
+                SteamService.syncLeaderboardsFromSteam(context, gameId)
+            } catch (e: Exception) {
+                Timber.tag("preLaunchApp").e(e, "Leaderboard sync failed for $appId, continuing with launch")
+            }
+        }
+
         setLoadingMessage("Syncing cloud saves")
         setLoadingProgress(-1f)
         val postSyncInfo = SteamService.beginLaunchApp(
