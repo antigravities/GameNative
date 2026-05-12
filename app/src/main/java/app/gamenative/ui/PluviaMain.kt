@@ -2128,6 +2128,14 @@ fun preLaunchApp(
             } catch (e: Exception) {
                 Timber.tag("preLaunchApp").e(e, "Achievement download sync failed for $appId, continuing with launch")
             }
+
+            setLoadingMessage("Syncing leaderboards")
+
+            try {
+                SteamService.syncLeaderboardsFromSteam(context, gameId)
+            } catch (e: Exception) {
+                Timber.tag("preLaunchApp").e(e, "Leaderboard sync failed for $appId, continuing with launch")
+            }
         }
 
         setLoadingMessage("Syncing cloud saves")
