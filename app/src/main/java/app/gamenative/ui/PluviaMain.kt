@@ -2343,6 +2343,17 @@ fun preLaunchApp(
             }
         }
 
+        // Download leaderboards (Wine/Goldberg only -- HTML5 has no Goldberg to sync into)
+        if (!isOffline && SteamService.isConnected && SteamService.isLoggedIn) {
+            setLoadingMessage("Syncing leaderboards")
+
+            try {
+                SteamService.syncLeaderboardsFromSteam(context, gameId)
+            } catch (e: Exception) {
+                Timber.tag("preLaunchApp").e(e, "Leaderboard sync failed for $appId, continuing with launch")
+            }
+        }
+
         runSteamCloudSyncAndHandleResult(
             context = context,
             appId = appId,
