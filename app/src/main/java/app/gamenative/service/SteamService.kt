@@ -111,8 +111,13 @@ import `in`.dragonbra.javasteam.steam.handlers.steamuser.SteamUser
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.callback.LoggedOffCallback
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.callback.LoggedOnCallback
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.callback.PlayingSessionStateCallback
+import `in`.dragonbra.javasteam.enums.ELeaderboardDataRequest
 import `in`.dragonbra.javasteam.steam.handlers.steamuserstats.Stats
 import `in`.dragonbra.javasteam.steam.handlers.steamuserstats.SteamUserStats
+import app.gamenative.statsgen.LeaderboardDefinition
+import app.gamenative.statsgen.LeaderboardScoreEntry
+import app.gamenative.statsgen.LeaderboardsGenerator
+import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesClientserverLbs.CMsgClientLBSSetScore
 import `in`.dragonbra.javasteam.steam.handlers.steamworkshop.SteamWorkshop
 import `in`.dragonbra.javasteam.steam.steamclient.AsyncJobFailedException
 import `in`.dragonbra.javasteam.steam.steamclient.SteamClient
@@ -324,6 +329,11 @@ class SteamService : Service(), IChallengeUrlChanged {
         const val INVALID_APP_ID: Int = Int.MAX_VALUE
         const val INVALID_PKG_ID: Int = Int.MAX_VALUE
         private const val STEAM_CONTROLLER_CONFIG_FILENAME = "steam_controller_config.vdf"
+
+        // Number of leaderboard entries fetched per request (Global top-N and ±N/2 around user).
+        // Each leaderboard issues 2 sequential network calls, so reduce this value to speed up
+        // syncs for games with many leaderboards. See the performance note in syncLeaderboardsFromSteam.
+        private const val LEADERBOARD_FETCH_COUNT = 50
 
         /**
          * Default timeout to use when making requests
@@ -2503,6 +2513,16 @@ class SteamService : Service(), IChallengeUrlChanged {
                             PluviaApp.events.emit(AndroidEvent.PostInstallSyncStatusChanged(appId, false))
                         }
                     }
+
+                    // Seed GBE Fork leaderboard definitions and score entries from Steam so the
+                    // game starts with real leaderboard data on its first launch.
+                    try {
+                        syncLeaderboardsFromSteam(svc.applicationContext, appId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Timber.e(e, "[PostInstallSync] Leaderboard sync failed for app $appId")
+                    }
                 }
             }
         }
@@ -3566,19 +3586,22 @@ class SteamService : Service(), IChallengeUrlChanged {
         }
 
         fun getGseSaveDirs(context: Context, appId: Int): List<File> {
-            val imageFs = ImageFs.find(context)
+            // Each game runs in its own container at {imageFs.rootDir}/home/xuser-STEAM_{appId}.
+            // The Wine prefix is {container.rootDir}/.wine — NOT the global ImageFs WINEPREFIX
+            // at home/xuser/.wine. Fall back to the global path if no container exists yet.
+            val wineRoot = try {
+                ContainerUtils.getContainer(context, "STEAM_$appId").rootDir
+            } catch (e: Exception) {
+                File(ImageFs.find(context).rootDir, ImageFs.HOME_PATH)
+            }
+
             val dirs = mutableListOf<File>()
-            dirs.add(File(
-                imageFs.rootDir,
-                "${ImageFs.WINEPREFIX}/drive_c/users/xuser/AppData/Roaming/GSE Saves/$appId"
-            ))
+            dirs.add(File(wineRoot, ".wine/drive_c/users/${ImageFs.USER}/AppData/Roaming/GSE Saves/$appId"))
+
             val accountId = userSteamId?.accountID?.toInt()
                 ?: PrefManager.steamUserAccountId.takeIf { it != 0 }
             if (accountId != null) {
-                dirs.add(File(
-                    imageFs.rootDir,
-                    "${ImageFs.WINEPREFIX}/drive_c/Program Files (x86)/Steam/userdata/$accountId/$appId"
-                ))
+                dirs.add(File(wineRoot, ".wine/drive_c/Program Files (x86)/Steam/userdata/$accountId/$appId"))
             }
             return dirs
         }
@@ -3771,6 +3794,306 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         }
 
+        /**
+         * Downloads leaderboard definitions and score entries from Steam and seeds GBE Fork's
+         * leaderboard files so the game starts with real scores on its first launch.
+         *
+         * Mirrors [downloadAchievementsFromSteam] in structure:
+         *   1. Resolve/create the steam_settings directory.
+         *   2. Load cached definitions (with numeric IDs) from steam_settings/leaderboards.json,
+         *      or fall back to the Steam Community public XML endpoint on first run.
+         *   3. Fetch score entries via the Steam client.
+         *   4. Write definitions and save files via [LeaderboardsGenerator].
+         */
+        suspend fun syncLeaderboardsFromSteam(context: Context, appId: Int) {
+            if (!isLoggedIn || !isConnected) {
+                Timber.tag("LeaderboardSync").d("Skipping for $appId — not connected/logged in")
+                return
+            }
+
+            // Resolve or create the steam_settings directory (same pattern as downloadAchievementsFromSteam).
+            var configDirectory = findSteamSettingsDir(context, appId)
+            if (configDirectory == null) {
+                val settingsDir = File(getAppDirPath(appId), "steam_settings")
+                settingsDir.mkdirs()
+                configDirectory = settingsDir.absolutePath
+            }
+
+            // --- Load or fetch leaderboard definitions ---
+            // If leaderboards.json already has entries with a numeric "id" field we cached from a
+            // previous sync, reuse them directly. This avoids a web API call on every launch.
+            val definitions = mutableListOf<LeaderboardDefinition>()
+            val defsFile = File(configDirectory, "leaderboards.json")
+            if (defsFile.exists()) {
+                try {
+                    val json = JSONObject(defsFile.readText(Charsets.UTF_8))
+                    for (name in json.keys()) {
+                        val entry = json.optJSONObject(name) ?: continue
+                        val id = entry.optInt("id", 0)
+                        if (id != 0) {
+                            definitions += LeaderboardDefinition(
+                                name        = name,
+                                id          = id,
+                                sortMethod  = entry.optInt("sort_method", 0),
+                                displayType = entry.optInt("display_type", 0),
+                            )
+                        }
+                        // id == 0 means old format without our cached id — fall through to web API
+                    }
+                } catch (e: Exception) {
+                    Timber.tag("LeaderboardSync").w(e, "Failed to parse cached leaderboards.json for $appId")
+                }
+            }
+
+            // Fall back to the public Steam Community XML endpoint to discover leaderboards.
+            // This endpoint requires no API key and returns names, IDs, sort methods, and display
+            // types for all leaderboards of an app.
+            Timber.tag("LeaderboardSync").d("Fetching leaderboard definitions from Steam Community")
+            definitions += fetchLeaderboardDefinitions(appId)
+
+            // Augment with non-public leaderboards whose names GBE Fork already knows from previous gameplay.
+            // Each unknown name costs one extra Steam network call; results are cached after this run.
+            Timber.tag("LeaderboardSync").d("Fetching leaderboard definitions from local file")
+            definitions += discoverLocalLeaderboards(context, appId, definitions)
+
+            if (definitions.isEmpty()) {
+                Timber.tag("LeaderboardSync").d("No leaderboards found for appId=$appId — skipping")
+                return
+            }
+
+            // --- Fetch score entries from the Steam client ---
+            val statsHandler = instance?._steamUserStats ?: return
+            val scores = mutableMapOf<String, List<LeaderboardScoreEntry>>()
+
+            // PERFORMANCE NOTE:
+            // Each leaderboard below issues 2 sequential Steam network round-trips:
+            //   1. getLeaderboardEntries(Global)          — top LEADERBOARD_FETCH_COUNT entries
+            //   2. getLeaderboardEntries(GlobalAroundUser) — entries centered on the current user
+            //      (returns empty list if the user has never submitted a score)
+            //
+            // For a game with N leaderboards this is 2N calls executed serially in this loop,
+            // meaning sync time scales linearly with both N and LEADERBOARD_FETCH_COUNT.
+            // Games with hundreds of leaderboards (e.g. daily/weekly boards) will be slow.
+            // Consider limiting the definitions list or parallelizing calls if that becomes an issue.
+            for (def in definitions) {
+                try {
+                    val globalCb = statsHandler.getLeaderboardEntries(
+                        appId, def.id, 1, LEADERBOARD_FETCH_COUNT,
+                        ELeaderboardDataRequest.Global,
+                    ).await()
+
+                    // GlobalAroundUser uses a symmetric ±range; half the constant on each side.
+                    val halfCount = LEADERBOARD_FETCH_COUNT / 2
+                    val aroundCb = statsHandler.getLeaderboardEntries(
+                        appId, def.id, -halfCount, halfCount,
+                        ELeaderboardDataRequest.GlobalAroundUser,
+                    ).await()
+
+                    if (globalCb.result != EResult.OK && aroundCb.result != EResult.OK) continue
+
+                    // Merge the two lists, deduplicating by SteamID.
+                    // Global entries come first so their rank order is preserved when deduplicated.
+                    val seen = mutableSetOf<Long>()
+                    val merged = mutableListOf<LeaderboardScoreEntry>()
+                    for (entry in (globalCb.entries.orEmpty() + aroundCb.entries.orEmpty())) {
+                        val id64 = entry.steamID.convertToUInt64()
+                        if (seen.add(id64)) {
+                            merged += LeaderboardScoreEntry(
+                                steamId = id64,
+                                score   = entry.score,
+                                details = entry.details ?: emptyList(),
+                            )
+                        }
+                    }
+                    if (merged.isNotEmpty()) scores[def.name] = merged
+
+                } catch (e: Exception) {
+                    Timber.tag("LeaderboardSync").w(e, "Failed to fetch entries for '${def.name}' (appId=$appId)")
+                }
+            }
+
+            // --- Write files via LeaderboardsGenerator ---
+            val generator = LeaderboardsGenerator()
+            // Always write definitions so the steam_settings file is up-to-date (and IDs are cached).
+            generator.generateDefinitions(definitions, configDirectory)
+            if (scores.isNotEmpty()) {
+                getGseSaveDirs(context, appId).forEach { dir ->
+                    generator.generateSaveFile(scores, dir.absolutePath)
+                }
+            }
+            Timber.tag("LeaderboardSync").i("Synced ${scores.size}/${definitions.size} leaderboards for appId=$appId")
+        }
+
+        /**
+         * Fetches leaderboard definitions for [appId] from the Steam Community public XML endpoint:
+         *   GET https://steamcommunity.com/stats/{appId}/leaderboards/?xml=1
+         *
+         * This endpoint requires no API key and returns all leaderboard definitions (name, numeric
+         * ID, sort method, display type). We use it on first sync when no cached IDs are available.
+         *
+         * Returns an empty list on network error (logged as a warning); the caller treats that as
+         * "nothing to sync" rather than a hard failure.
+         */
+        private fun fetchLeaderboardDefinitions(appId: Int): List<LeaderboardDefinition> {
+            return try {
+                val url = "https://steamcommunity.com/stats/$appId/leaderboards/?xml=1"
+                val request = Request.Builder().url(url).build()
+                val responseBody = OkHttpClient.Builder().build()
+                    .newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            Timber.tag("LeaderboardSync").w("HTTP ${response.code} fetching leaderboard definitions for $appId")
+                            return emptyList()
+                        }
+                        response.body?.string() ?: return emptyList()
+                    }
+
+                // Parse with the Android-bundled XmlPullParser — no extra dependencies needed.
+                val parser = android.util.Xml.newPullParser()
+                parser.setInput(responseBody.byteInputStream(), "UTF-8")
+
+                val results = mutableListOf<LeaderboardDefinition>()
+                var lbId = 0
+                var lbName = ""
+                var sortMethod = 0
+                var displayType = 0
+                var insideLeaderboard = false
+                var currentTag = ""
+
+                var eventType = parser.eventType
+                while (eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                    when (eventType) {
+                        org.xmlpull.v1.XmlPullParser.START_TAG -> {
+                            currentTag = parser.name ?: ""
+                            if (currentTag == "leaderboard") {
+                                insideLeaderboard = true
+                                lbId = 0; lbName = ""; sortMethod = 0; displayType = 0
+                            }
+                        }
+                        org.xmlpull.v1.XmlPullParser.TEXT -> {
+                            if (!insideLeaderboard) {
+                                eventType = parser.next(); continue
+                            }
+                            val text = parser.text?.trim() ?: ""
+                            when (currentTag) {
+                                "lbid"        -> lbId         = text.toIntOrNull() ?: 0
+                                "name"        -> lbName       = text
+                                "sortmethod"  -> sortMethod   = text.toIntOrNull() ?: 0
+                                "displaytype" -> displayType  = text.toIntOrNull() ?: 0
+                            }
+                        }
+                        org.xmlpull.v1.XmlPullParser.END_TAG -> {
+                            if (parser.name == "leaderboard" && insideLeaderboard) {
+                                if (lbId != 0 && lbName.isNotEmpty()) {
+                                    results += LeaderboardDefinition(
+                                        name        = lbName,
+                                        id          = lbId,
+                                        sortMethod  = sortMethod,
+                                        displayType = displayType,
+                                    )
+                                }
+                                insideLeaderboard = false
+                            }
+                        }
+                    }
+                    eventType = parser.next()
+                }
+
+                Timber.tag("LeaderboardSync").d("Fetched ${results.size} leaderboard definitions for appId=$appId")
+                results
+            } catch (e: Exception) {
+                Timber.tag("LeaderboardSync").w(e, "Failed to fetch leaderboard definitions for appId=$appId")
+                emptyList()
+            }
+        }
+
+        /**
+         * Scans existing GSE Saves leaderboards.json files for leaderboard names not already in
+         * [knownDefinitions], then calls [SteamUserStats.findLeaderBoard] for each to resolve their
+         * numeric ID. This catches non-public leaderboards that the Steam Community XML endpoint
+         * doesn't list but that GBE Fork has already written during previous gameplay sessions.
+         *
+         * Results are returned for inclusion in the definitions list; [syncLeaderboardsFromSteam]
+         * will write them to steam_settings/leaderboards.json so they're cached on subsequent syncs.
+         */
+        private suspend fun discoverLocalLeaderboards(
+            context: Context,
+            appId: Int,
+            knownDefinitions: List<LeaderboardDefinition>,
+        ): List<LeaderboardDefinition> {
+            val knownNames = knownDefinitions.mapTo(mutableSetOf()) { it.name }
+            val unknownNames = mutableSetOf<String>()
+
+            // Collect leaderboard names from binary files GBE Fork wrote during prior gameplay.
+            // Each file in the leaderboard/ subdir is named after the leaderboard (lowercased).
+            // "leaderboard" (no 's') matches Local_Storage::leaderboard_storage_folder.
+            val knownNamesLower = knownNames.mapTo(mutableSetOf()) { it.lowercase() }
+            for (dir in getGseSaveDirs(context, appId)) {
+                val lbDir = File(dir, "leaderboard")
+                if (!lbDir.isDirectory) continue
+                lbDir.listFiles()?.forEach { file ->
+                    if (file.isFile && file.name.lowercase() !in knownNamesLower) {
+                        unknownNames.add(file.name)
+                    }
+                }
+            }
+
+            if (unknownNames.isEmpty()){
+                Timber.tag("LeaderboardSync").w("Found no unknown leaderboard names")
+                return emptyList()
+            }
+
+            val statsHandler = instance?._steamUserStats ?: return emptyList()
+            val discovered = mutableListOf<LeaderboardDefinition>()
+
+            for (name in unknownNames) {
+                try {
+                    val cb = statsHandler.findLeaderBoard(appId, name).await()
+                    if (cb.result == EResult.OK && cb.id != 0) {
+                        discovered += LeaderboardDefinition(
+                            name        = name,
+                            id          = cb.id,
+                            sortMethod  = cb.sortMethod?.code() ?: 0,
+                            displayType = cb.displayType?.code() ?: 0,
+                        )
+
+                        Timber.tag("LeaderboardSync").d("Found leaderboard $name")
+                    } else {
+                        Timber.tag("LeaderboardSync").d("Couldn't find leaderboard matching $name")
+                    }
+                } catch (e: Exception) {
+                    Timber.tag("LeaderboardSync").w(e, "findLeaderBoard failed for '$name' (appId=$appId)")
+                }
+            }
+
+            Timber.tag("LeaderboardSync").d("Discovered ${discovered.size} non-public leaderboards for appId=$appId")
+            return discovered
+        }
+
+        /**
+         * Sends the player's score for a leaderboard to Steam (fire-and-forget).
+         *
+         * Uses ELeaderboardUploadScoreMethod.KeepBest (value 1) so Steam only accepts the
+         * new score if it beats the player's existing best per the leaderboard's sort method.
+         */
+        fun uploadLeaderboardScore(appId: Int, leaderboardId: Int, score: Int) {
+            val client = instance?.steamClient ?: run {
+                Timber.tag("leaderboards").w("No SteamService instance, skipping score upload lb=$leaderboardId")
+                return
+            }
+            val msg = ClientMsgProtobuf<CMsgClientLBSSetScore.Builder>(
+                CMsgClientLBSSetScore::class.java,
+                EMsg.ClientLBSSetScore,
+            ).apply {
+                // routing_appid must match the game so Steam routes the request correctly.
+                protoHeader.routingAppid = appId
+                body.appId = appId
+                body.leaderboardId = leaderboardId
+                body.score = score
+                body.uploadScoreMethod = 1 // KeepBest
+            }
+            client.send(msg)
+            Timber.tag("leaderboards").i("Sent score=$score to leaderboard=$leaderboardId for appId=$appId")
+        }
     }
 
     override fun onCreate() {

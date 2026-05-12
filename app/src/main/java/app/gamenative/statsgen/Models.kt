@@ -31,6 +31,24 @@ data class ProcessingResult(
     val nameToBlockBit: Map<String, Pair<Int, Int>> = emptyMap(),
 )
 
+// Describes one leaderboard as returned by the Steam Community web API or cached locally.
+// sortMethod and displayType mirror the ELeaderboardSortMethod / ELeaderboardDisplayType enum
+// integer values so they round-trip through JSON without needing enum conversions.
+data class LeaderboardDefinition(
+    val name: String,
+    val id: Int,          // Steam numeric leaderboard ID (stable; cache and reuse)
+    val sortMethod: Int,  // 1=Ascending, 2=Descending
+    val displayType: Int  // 1=Numeric, 2=TimeSeconds, 3=TimeMilliSeconds
+)
+
+// One entry in a leaderboard's score table, matching GBE Fork's leaderboards.json format.
+data class LeaderboardScoreEntry(
+    val steamId: Long,    // SteamID.convertToUInt64()
+    val score: Int,
+    val details: List<Int>,
+    val name: String = "" // display name; empty string is valid for GBE Fork
+)
+
 object StatType {
     const val STAT_TYPE_INT = "1"
     const val STAT_TYPE_FLOAT = "2"
