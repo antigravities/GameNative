@@ -93,6 +93,7 @@ import app.gamenative.externaldisplay.ExternalDisplayInputController
 import app.gamenative.externaldisplay.ExternalDisplaySwapController
 import app.gamenative.externaldisplay.SwapInputOverlayView
 import app.gamenative.service.AchievementWatcher
+import app.gamenative.service.LeaderboardWatcher
 import app.gamenative.service.SteamService
 import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGService
@@ -3523,6 +3524,22 @@ private fun setupXEnvironment(
                 iconUrlMap = iconUrlMap,
                 configDirectory = configDirectory,
             ).also { it.start() }
+        }
+
+        // Start the leaderboard watcher independently of achievement availability.
+        // Prefer the live SteamID; fall back to the persisted pref so the watcher
+        // works even if the Steam connection isn't fully established at launch time.
+        if (gameIdInt != null) {
+            val currentSteamId = SteamService.userSteamId?.convertToUInt64()
+                ?: PrefManager.steamUserSteamId64.takeIf { it != 0L }
+            if (currentSteamId != null) {
+                PluviaApp.leaderboardWatcher = LeaderboardWatcher(
+                    appId = gameIdInt,
+                    watchDirs = SteamService.getGseSaveDirs(context, gameIdInt),
+                    configDirectory = SteamService.findSteamSettingsDir(context, gameIdInt),
+                    currentSteamId = currentSteamId,
+                ).also { it.start() }
+            }
         }
     }
 
