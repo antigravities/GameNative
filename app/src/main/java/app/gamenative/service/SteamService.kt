@@ -2119,6 +2119,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                 )
             }
 
+            // One-time DB read for the display name used in notifications.
+            val appName = getAppInfoOf(appId)?.name ?: appId.toString()
+
             val info = DownloadInfo(selectedDepots.size, appId, downloadingAppIds).also { di ->
                 di.setPersistencePath(appDirPath)
                 // Set weights for each depot based on manifest sizes
@@ -2175,7 +2178,7 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                         // Create listeners for DLC apps
                         val depotIdToIndex = selectedDepots.keys.mapIndexed { index, depotId -> depotId to index }.toMap()
-                        val listener = AppDownloadListener(di, depotIdToIndex)
+                        val listener = AppDownloadListener(di, depotIdToIndex, appName)
                         depotDownloader.addListener(listener)
 
                         val branchPassword = instance?.steamUnlockedBranchDao
@@ -2387,7 +2390,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                             )
                         }
 
-                        // Remove the job here — Play button becomes visible after this
+                        // Remove the job here — Play button becomes visible after this.
+                        // Post the completion notification before removing the job so the
+                        // progress tile is immediately replaced by the "ready to play" banner.
+                        instance?.notificationHelper?.notifyDownloadComplete(appId, appName)
                         removeDownloadJob(appId)
                         PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(appId))
 
@@ -2404,12 +2410,14 @@ class SteamService : Service(), IChallengeUrlChanged {
                             di.setWeight(idx, 0)
                             di.setProgress(1f, idx)
                         }
+                        instance?.notificationHelper?.cancelDownloadNotification(appId)
                         removeDownloadJob(appId)
                     }
                 }
                 downloadJob.invokeOnCompletion { throwable ->
                     if (throwable is kotlinx.coroutines.CancellationException) {
                         Timber.d(throwable, "Download canceled for app $appId")
+                        instance?.notificationHelper?.cancelDownloadNotification(appId)
                         removeDownloadJob(appId)
                     }
                 }
@@ -2418,6 +2426,14 @@ class SteamService : Service(), IChallengeUrlChanged {
 
             downloadJobs[appId] = info
             notifyDownloadStarted(appId)
+            // Post a 0% notification immediately so the user sees feedback during the
+            // setup phase (manifest validation, CDN auth, depot key exchange) which can
+            // take 10–30 s before the first chunk — and therefore the first onChunkCompleted
+            // call — arrives.
+            instance?.notificationHelper?.notifyDownloadProgress(
+                appId, appName, 0, 0L, info.getTotalExpectedBytes(),
+                synchronized(downloadQueueLock) { downloadQueue.size },
+            )
             return info
             } finally {
                 // Once downloadJobs is set, future callers hit the first guard.
@@ -2553,6 +2569,7 @@ class SteamService : Service(), IChallengeUrlChanged {
         private class AppDownloadListener(
             private val downloadInfo: DownloadInfo,
             private val depotIdToIndex: Map<Int, Int>,
+            private val gameName: String,
         ) : IDownloadListener {
             // Track cumulative uncompressed bytes per depot to calculate deltas
             // (uncompressedBytes from onChunkCompleted is cumulative per depot)
@@ -2563,6 +2580,9 @@ class SteamService : Service(), IChallengeUrlChanged {
             @Volatile private var lastUiUpdateMs = 0L
             @Volatile private var lastPersistMs = 0L
             @Volatile private var lastSpeedSampleMs = 0L
+            // Separate throttle for OS notification updates: 2 s is coarse enough to
+            // avoid spamming the notification system while still feeling responsive.
+            @Volatile private var lastNotifUpdateMs = 0L
             override fun onItemAdded(item: DownloadItem) {
                 Timber.d("Item ${item.appId} added to queue")
             }
@@ -2578,6 +2598,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
                 Timber.e(error, "Item ${item.appId} failed to download")
                 downloadInfo.failedToDownload()
+                instance?.notificationHelper?.cancelDownloadNotification(downloadInfo.gameId)
 
                 // Remove the downloading app info
                 runBlocking {
@@ -2624,6 +2645,19 @@ class SteamService : Service(), IChallengeUrlChanged {
                     lastUiUpdateMs = nowMs
                     depotIdToIndex[depotId]?.let { index ->
                         downloadInfo.setProgress(depotPercentComplete, index)
+                    }
+
+                    // Update the OS notification at most once per 2 s — much coarser than
+                    // the UI throttle because notificationManager.notify() is heavier and
+                    // Android rate-limits notification updates per package.
+                    if (nowMs - lastNotifUpdateMs >= 2_000L) {
+                        lastNotifUpdateMs = nowMs
+                        val (downloaded, total) = downloadInfo.getBytesProgress()
+                        val pct = (downloadInfo.getProgress() * 100).toInt().coerceIn(0, 100)
+                        instance?.notificationHelper?.notifyDownloadProgress(
+                            downloadInfo.gameId, gameName, pct, downloaded, total,
+                            synchronized(downloadQueueLock) { downloadQueue.size },
+                        )
                     }
                 }
 

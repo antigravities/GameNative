@@ -587,6 +587,9 @@
     <string name="downloading">Downloading...</string>
     <string name="calculating_time">Calculating...</string>
     <string name="download_failed_try_again">Download failed. Please try again.</string>
+    <string name="notification_download_progress_title">Downloading %1$s</string>
+    <string name="notification_download_complete_title">Download complete</string>
+    <string name="notification_download_complete_text">%1$s is ready to play</string>
     <string name="update_available">Update Available</string>
     <string name="game_information">Game Information</string>
     <string name="status">Status</string>
