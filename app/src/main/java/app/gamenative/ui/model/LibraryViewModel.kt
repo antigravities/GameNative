@@ -238,6 +238,14 @@ class LibraryViewModel @Inject constructor(
             }
         }
 
+        // Mirror SteamService's PICS sync counter into LibraryState so the UI can show a banner
+        // while the library is still loading from Steam after login.
+        viewModelScope.launch(Dispatchers.IO) {
+            SteamService.picsSyncPending.collect { pending ->
+                _state.update { it.copy(picsSyncPending = pending) }
+            }
+        }
+
         // Collect GOG games
         viewModelScope.launch(Dispatchers.IO) {
             gogGameDao.getAll().collect { games ->
