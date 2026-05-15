@@ -156,13 +156,22 @@ class LibraryViewModel @Inject constructor(
                 }
                 .collect { apps ->
                     Timber.tag("LibraryViewModel").d("Collecting ${apps.size} apps")
-                    // Check if the list has actually changed before triggering a re-filter
-                    if (appList.size != apps.size) {
-                        appList = apps
-                        // Show the library immediately (sizeBytes = 0 until background job finishes).
-                        onFilterApps(paginationCurrentPage)
-                    }
+                    // Removed the `appList.size != apps.size` guard: it caused the browse view to
+                    // stay empty after re-login when the game count matched the pre-logout value
+                    // (e.g. 45k → 0 → 45k). The DAO's own distinctUntilChanged() already prevents
+                    // redundant emissions, so the guard was only harmful here.
+                    appList = apps
+                    // Show the library immediately (sizeBytes = 0 until background job finishes).
+                    onFilterApps(paginationCurrentPage)
                 }
+        }
+
+        // Mirror SteamService's PICS sync counter into LibraryState so the UI can show a banner
+        // while the library is still loading from Steam after login.
+        viewModelScope.launch(Dispatchers.IO) {
+            SteamService.picsSyncPending.collect { pending ->
+                _state.update { it.copy(picsSyncPending = pending) }
+            }
         }
 
         // Collect GOG games

@@ -564,6 +564,13 @@ class SteamService : Service(), IChallengeUrlChanged {
         // instead of a Boolean so concurrent on-demand calls are handled correctly — the
         // counter only reaches 0 once ALL callers finish, not just the first one.
         private val onDemandPicsCount = AtomicInteger(0)
+
+        // Tracks how many app PICS requests are queued to appPicsChannel but not yet
+        // processed and written to the DB. Incremented at each appPicsChannel.send() call
+        // site; decremented by the batch size once the collect{} block finishes. Reset to
+        // 0 in clearDatabase() so the UI clears the indicator on logout.
+        private val _picsSyncPending = MutableStateFlow(0)
+        val picsSyncPending = _picsSyncPending.asStateFlow()
         var isRunning: Boolean = false
             private set
         var isLoggingOut: Boolean = false
@@ -1023,6 +1030,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                     .chunked(MAX_PICS_BUFFER)
                     .forEach { chunk ->
                         val requests = chunk.map { PICSRequest(id = it) }
+                        _picsSyncPending.update { it + requests.size }
                         service.appPicsChannel.send(requests)
                     }
 
@@ -3328,6 +3336,8 @@ class SteamService : Service(), IChallengeUrlChanged {
                         downloadingAppInfoDao.deleteAll()
                         steamUnlockedBranchDao.deleteAll()
                     }
+                    // Reset sync counter so the banner doesn't linger after logout.
+                    _picsSyncPending.value = 0
                 }
             }
         }
@@ -5135,7 +5145,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                             .chunked(MAX_PICS_BUFFER)
                             .forEach { chunk ->
                                 ensureActive()
-                                appPicsChannel.send(chunk.map { PICSRequest(id = it) })
+                                val picsRequests = chunk.map { PICSRequest(id = it) }
+                                _picsSyncPending.update { it + picsRequests.size }
+                                appPicsChannel.send(picsRequests)
                             }
                     } else {
                         changesSince.appChanges.values
@@ -5149,6 +5161,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                             .forEach { chunk ->
                                 ensureActive()
                                 Timber.d("onPicsChanges: Queueing ${chunk.size} app(s) for PICS")
+                                _picsSyncPending.update { it + chunk.size }
                                 appPicsChannel.send(chunk)
                             }
                     }
@@ -5211,68 +5224,77 @@ class SteamService : Service(), IChallengeUrlChanged {
                 .buffer(capacity = MAX_PICS_BUFFER, onBufferOverflow = BufferOverflow.SUSPEND)
                 .collect { appRequests ->
                     Timber.d("Processing ${appRequests.size} app PICS requests")
-
-                    ensureActive()
-                    if (!isLoggedIn) return@collect
-                    val steamApps = instance?._steamApps ?: return@collect
-
-                    // Yield between bulk batches while any on-demand PICS request is active
-                    // (e.g. game page open or downloadApp retry). delay() suspends the coroutine
-                    // without blocking the thread, letting requestAppInfoNow complete faster.
-                    while (onDemandPicsCount.get() > 0) { delay(50) }
-
-                    val callback = steamApps.picsGetProductInfo(
-                        apps = appRequests,
-                        packages = emptyList(),
-                    ).await()
-
-                    callback.results.forEachIndexed { index, picsCallback ->
-                        Timber.d(
-                            "onPicsProduct: ${index + 1} of ${callback.results.size}" +
-                                "\n\tReceived PICS result of ${picsCallback.apps.size} app(s)." +
-                                "\n\tReceived PICS result of ${picsCallback.packages.size} package(s).",
-                        )
-
+                    // try/finally ensures _picsSyncPending is decremented even when we
+                    // return@collect early (e.g. not logged in, steamApps null) so the
+                    // counter never gets stuck at a non-zero value after a disconnect.
+                    try {
                         ensureActive()
-                        val steamAppsMap = picsCallback.apps.values.mapNotNull { app ->
-                            val appFromDb = appDao.findApp(app.id)
-                            val packageId = appFromDb?.packageId ?: INVALID_PKG_ID
-                            val packageFromDb = if (packageId != INVALID_PKG_ID) licenseDao.findLicense(packageId) else null
-                            val ownerAccountId = packageFromDb?.ownerAccountId ?: emptyList()
+                        if (!isLoggedIn) return@collect
+                        val steamApps = instance?._steamApps ?: return@collect
 
-                            // Apps with -1 for the ownerAccountId should be added.
-                            //  This can help with friend game names.
+                        // Yield between bulk batches while any on-demand PICS request is active
+                        // (e.g. game page open or downloadApp retry). delay() suspends the coroutine
+                        // without blocking the thread, letting requestAppInfoNow complete faster.
+                        while (onDemandPicsCount.get() > 0) { delay(50) }
 
-                            // TODO maybe apps with -1 for the ownerAccountId can be stripped with necessities and name.
+                        val callback = steamApps.picsGetProductInfo(
+                            apps = appRequests,
+                            packages = emptyList(),
+                        ).await()
 
-                            val ufsParseVersionOutdated = appFromDb != null && appFromDb.ufsParseVersion < CURRENT_UFS_PARSE_VERSION
+                        callback.results.forEachIndexed { index, picsCallback ->
+                            Timber.d(
+                                "onPicsProduct: ${index + 1} of ${callback.results.size}" +
+                                    "\n\tReceived PICS result of ${picsCallback.apps.size} app(s)." +
+                                    "\n\tReceived PICS result of ${picsCallback.packages.size} package(s).",
+                            )
 
-                            if (app.changeNumber != appFromDb?.lastChangeNumber || ufsParseVersionOutdated) {
-                                val newApp = app.keyValues.generateSteamApp().copy(
-                                    packageId = packageId,
-                                    ownerAccountId = ownerAccountId,
-                                    receivedPICS = true,
-                                    lastChangeNumber = app.changeNumber,
-                                    licenseFlags = packageFromDb?.licenseFlags ?: EnumSet.noneOf(ELicenseFlags::class.java),
-                                )
-                                if (ufsParseVersionOutdated && newApp.ufs.saveFilePatterns.any { it.uploadRoot != it.root || it.uploadPath != it.path }) {
-                                    // UFS path logic changed and this app has rootoverrides — clear
-                                    // the file cache so the next sync detects the mismatch and
-                                    // prompts the user to choose between local and cloud saves.
-                                    fileChangeListsDao.deleteByAppId(app.id)
+                            ensureActive()
+                            val steamAppsMap = picsCallback.apps.values.mapNotNull { app ->
+                                val appFromDb = appDao.findApp(app.id)
+                                val packageId = appFromDb?.packageId ?: INVALID_PKG_ID
+                                val packageFromDb = if (packageId != INVALID_PKG_ID) licenseDao.findLicense(packageId) else null
+                                val ownerAccountId = packageFromDb?.ownerAccountId ?: emptyList()
+
+                                // Apps with -1 for the ownerAccountId should be added.
+                                //  This can help with friend game names.
+
+                                // TODO maybe apps with -1 for the ownerAccountId can be stripped with necessities and name.
+
+                                val ufsParseVersionOutdated = appFromDb != null && appFromDb.ufsParseVersion < CURRENT_UFS_PARSE_VERSION
+
+                                if (app.changeNumber != appFromDb?.lastChangeNumber || ufsParseVersionOutdated) {
+                                    val newApp = app.keyValues.generateSteamApp().copy(
+                                        packageId = packageId,
+                                        ownerAccountId = ownerAccountId,
+                                        receivedPICS = true,
+                                        lastChangeNumber = app.changeNumber,
+                                        licenseFlags = packageFromDb?.licenseFlags ?: EnumSet.noneOf(ELicenseFlags::class.java),
+                                    )
+                                    if (ufsParseVersionOutdated && newApp.ufs.saveFilePatterns.any { it.uploadRoot != it.root || it.uploadPath != it.path }) {
+                                        // UFS path logic changed and this app has rootoverrides — clear
+                                        // the file cache so the next sync detects the mismatch and
+                                        // prompts the user to choose between local and cloud saves.
+                                        fileChangeListsDao.deleteByAppId(app.id)
+                                    }
+                                    newApp
+                                } else {
+                                    null
                                 }
-                                newApp
-                            } else {
-                                null
                             }
-                        }
 
-                        if (steamAppsMap.isNotEmpty()) {
-                            Timber.i("Inserting ${steamAppsMap.size} PICS apps to database")
-                            db.withTransaction {
-                                appDao.insertAll(steamAppsMap)
+                            if (steamAppsMap.isNotEmpty()) {
+                                Timber.i("Inserting ${steamAppsMap.size} PICS apps to database")
+                                db.withTransaction {
+                                    appDao.insertAll(steamAppsMap)
+                                }
                             }
                         }
+                    } finally {
+                        // Always decrement by the original batch size, regardless of how many
+                        // apps were actually changed/inserted. coerceAtLeast guards against any
+                        // race between increment and decrement on rapid reconnects.
+                        _picsSyncPending.update { (it - appRequests.size).coerceAtLeast(0) }
                     }
                 }
         }
@@ -5399,6 +5421,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                                     .chunked(MAX_PICS_BUFFER)
                                     .forEach { chunk ->
                                         Timber.d("bufferedPICSGetProductInfo: Queueing ${chunk.size} for PICS")
+                                        _picsSyncPending.update { it + chunk.size }
                                         appPicsChannel.send(chunk)
                                     }
                             }

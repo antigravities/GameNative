@@ -30,7 +30,10 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -988,33 +991,60 @@ private fun LibraryScreenContent(
                             .fillMaxWidth(),
                     )
                 } else {
-                    // Tab bar when not searching
-                    LibraryTabBar(
-                        currentTab = state.currentTab,
-                        tabCounts = mapOf(
-                            LibraryTab.ALL to state.allCount,
-                            LibraryTab.STEAM to state.steamCount,
-                            LibraryTab.GOG to state.gogCount,
-                            LibraryTab.EPIC to state.epicCount,
-                            LibraryTab.AMAZON to state.amazonCount,
-                            LibraryTab.LOCAL to state.localCount,
-                        ),
-                        onTabSelected = onTabChanged,
-                        onOptionsClick = { onOptionsPanelToggle(true) },
-                        onSearchClick = { onIsSearching(true) },
-                        onAddGameClick = onAddCustomGameClick,
-                        onMenuClick = { isSystemMenuOpen = true },
-                        onNavigateDownToGrid = {
-                            if (state.appInfoList.isNotEmpty()) {
-                                requestContentFocusOrDefer()
-                            }
-                        },
-                        onPreviousTab = onPreviousTab,
-                        onNextTab = onNextTab,
+                    // Tab bar + optional sync banner, stacked in a Column so the banner
+                    // appears directly below the tabs without affecting the scroll layout.
+                    Column(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .fillMaxWidth(),
-                    )
+                    ) {
+                        LibraryTabBar(
+                            currentTab = state.currentTab,
+                            tabCounts = mapOf(
+                                LibraryTab.ALL to state.allCount,
+                                LibraryTab.STEAM to state.steamCount,
+                                LibraryTab.GOG to state.gogCount,
+                                LibraryTab.EPIC to state.epicCount,
+                                LibraryTab.AMAZON to state.amazonCount,
+                                LibraryTab.LOCAL to state.localCount,
+                            ),
+                            onTabSelected = onTabChanged,
+                            onOptionsClick = { onOptionsPanelToggle(true) },
+                            onSearchClick = { onIsSearching(true) },
+                            onAddGameClick = onAddCustomGameClick,
+                            onMenuClick = { isSystemMenuOpen = true },
+                            onNavigateDownToGrid = {
+                                if (state.appInfoList.isNotEmpty()) {
+                                    requestContentFocusOrDefer()
+                                }
+                            },
+                            onPreviousTab = onPreviousTab,
+                            onNextTab = onNextTab,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        // Sync progress banner — fades in/out while PICS data is still loading.
+                        AnimatedVisibility(visible = state.picsSyncPending > 0) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.library_syncing_games, state.picsSyncPending),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         } else {

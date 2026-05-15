@@ -34,6 +34,10 @@ data class LibraryState(
     // Loading state for skeleton loaders
     val isLoading: Boolean = false,
 
+    // Number of app PICS requests queued but not yet written to the DB.
+    // Non-zero while the library is still syncing after login.
+    val picsSyncPending: Int = 0,
+
     // Refresh counter that increments when custom game images are fetched
     // Used to trigger UI recomposition to show newly downloaded images
     val imageRefreshCounter: Long = 0,
