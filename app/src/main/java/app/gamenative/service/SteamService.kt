@@ -550,6 +550,13 @@ class SteamService : Service(), IChallengeUrlChanged {
         // instead of a Boolean so concurrent on-demand calls are handled correctly — the
         // counter only reaches 0 once ALL callers finish, not just the first one.
         private val onDemandPicsCount = AtomicInteger(0)
+
+        // Tracks how many app PICS requests are queued to appPicsChannel but not yet
+        // processed and written to the DB. Incremented at each appPicsChannel.send() call
+        // site; decremented by the batch size once the collect{} block finishes. Reset to
+        // 0 in clearDatabase() so the UI clears the indicator on logout.
+        private val _picsSyncPending = MutableStateFlow(0)
+        val picsSyncPending = _picsSyncPending.asStateFlow()
         var isRunning: Boolean = false
             private set
         var isLoggingOut: Boolean = false
@@ -1502,6 +1509,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                     .chunked(MAX_PICS_BUFFER)
                     .forEach { chunk ->
                         val requests = chunk.map { PICSRequest(id = it, accessToken = accessTokens[it] ?: 0L) }
+                        _picsSyncPending.update { it + requests.size }
                         service.appPicsChannel.send(requests)
                     }
 
@@ -3670,6 +3678,8 @@ class SteamService : Service(), IChallengeUrlChanged {
                         downloadingAppInfoDao.deleteAll()
                         steamUnlockedBranchDao.deleteAll()
                     }
+                    // Reset sync counter so the banner doesn't linger after logout.
+                    _picsSyncPending.value = 0
                 }
             }
         }
@@ -5334,7 +5344,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                             .chunked(MAX_PICS_BUFFER)
                             .forEach { chunk ->
                                 ensureActive()
-                                appPicsChannel.send(chunk.map { PICSRequest(id = it) })
+                                val picsRequests = chunk.map { PICSRequest(id = it) }
+                                _picsSyncPending.update { it + picsRequests.size }
+                                appPicsChannel.send(picsRequests)
                             }
                     } else {
                         changesSince.appChanges.values
@@ -5348,6 +5360,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                             .forEach { chunk ->
                                 ensureActive()
                                 Timber.d("onPicsChanges: Queueing ${chunk.size} app(s) for PICS")
+                                _picsSyncPending.update { it + chunk.size }
                                 appPicsChannel.send(chunk)
                             }
                     }
@@ -5410,17 +5423,19 @@ class SteamService : Service(), IChallengeUrlChanged {
                 .buffer(capacity = MAX_PICS_BUFFER, onBufferOverflow = BufferOverflow.SUSPEND)
                 .collect { appRequests ->
                     Timber.d("Processing ${appRequests.size} app PICS requests")
-
-                    ensureActive()
-                    if (!isLoggedIn) return@collect
-                    val steamApps = instance?._steamApps ?: return@collect
-
-                    // Yield between bulk batches while any on-demand PICS request is active
-                    // (e.g. game page open or downloadApp retry). delay() suspends the coroutine
-                    // without blocking the thread, letting requestAppInfoNow complete faster.
-                    while (onDemandPicsCount.get() > 0) { delay(50) }
-
+                    // try/finally ensures _picsSyncPending is decremented even when we
+                    // return@collect early (e.g. not logged in, steamApps null) so the
+                    // counter never gets stuck at a non-zero value after a disconnect.
                     try {
+                        ensureActive()
+                        if (!isLoggedIn) return@collect
+                        val steamApps = instance?._steamApps ?: return@collect
+
+                        // Yield between bulk batches while any on-demand PICS request is active
+                        // (e.g. game page open or downloadApp retry). delay() suspends the coroutine
+                        // without blocking the thread, letting requestAppInfoNow complete faster.
+                        while (onDemandPicsCount.get() > 0) { delay(50) }
+
                         val callback = steamApps.picsGetProductInfo(
                             apps = appRequests,
                             packages = emptyList(),
@@ -5475,6 +5490,11 @@ class SteamService : Service(), IChallengeUrlChanged {
                         }
                     } catch (e: AsyncJobFailedException) {
                         Timber.w("Could not get PICS product info $e")
+                    } finally {
+                        // Always decrement by the original batch size, regardless of how many
+                        // apps were actually changed/inserted. coerceAtLeast guards against any
+                        // race between increment and decrement on rapid reconnects.
+                        _picsSyncPending.update { (it - appRequests.size).coerceAtLeast(0) }
                     }
                 }
         }
@@ -5630,6 +5650,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                                     .chunked(MAX_PICS_BUFFER)
                                     .forEach { chunk ->
                                         Timber.d("bufferedPICSGetProductInfo: Queueing ${chunk.size} for PICS")
+                                        _picsSyncPending.update { it + chunk.size }
                                         appPicsChannel.send(chunk)
                                     }
                             }
