@@ -193,6 +193,16 @@ class LibraryViewModel @Inject constructor(
     // Pairs a LibraryItem with its installed state for sorting and final list assembly.
     private data class LibraryEntry(val item: LibraryItem, val isInstalled: Boolean)
 
+    // Converts any-script game names to lowercase Latin for locale-invariant sorting (e.g. Cyrillic
+    // "А" sorts alongside Latin "A"). lazy{} defers construction to first use; getInstance() is
+    // thread-safe. The rule chain: transliterate script → Latin, NFD-decompose, strip diacritics,
+    // NFC-recompose, then lowercase.
+    private val nameTransliterator by lazy {
+        android.icu.text.Transliterator.getInstance(
+            "Any-Latin; NFD; [:Nonspacing Mark:] Remove; NFC; Lower",
+        )
+    }
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             if (gpuName != "Unknown GPU") {
@@ -839,7 +849,7 @@ class LibraryViewModel @Inject constructor(
                 .sortedWith(
                     compareByDescending<SteamAppSummary> {
                         isInDownloadDirectory(it)
-                    }.thenBy { it.name.lowercase() },
+                    }.thenBy { it.name.lowercase(java.util.Locale.ROOT) },
                 )
                 .toList()
 
@@ -1087,50 +1097,57 @@ class LibraryViewModel @Inject constructor(
                 ) &&
                 AmazonService.hasStoredCredentials(context)
 
-            // Combine both lists and apply sort option
-            val sortComparator: Comparator<LibraryEntry> = when (currentState.currentSortOption) {
-                SortOption.INSTALLED_FIRST -> compareBy<LibraryEntry> { entry ->
-                    if (entry.isInstalled) 0 else 1
-                }.thenBy { it.item.name.lowercase() }
-
-                SortOption.NAME_ASC -> compareBy { it.item.name.lowercase() }
-
-                SortOption.NAME_DESC -> compareByDescending { it.item.name.lowercase() }
-
-                SortOption.RECENTLY_PLAYED -> compareBy<LibraryEntry> { entry ->
-                    if (entry.isInstalled) 0 else 1
-                }.thenBy { it.item.name.lowercase() }
-
-                SortOption.SIZE_SMALLEST -> compareBy<LibraryEntry> { it.item.sizeBytes }
-                    .thenBy { it.item.name.lowercase() }
-
-                SortOption.SIZE_LARGEST -> compareByDescending<LibraryEntry> { it.item.sizeBytes }
-                    .thenBy { it.item.name.lowercase() }
-
-                SortOption.FPS_HIGH -> compareByDescending<LibraryEntry> {
-                    currentState.statsFor(it.item)?.fps ?: -1
-                }.thenBy { it.item.name.lowercase() }
-
-                SortOption.RUNS_HIGH -> compareByDescending<LibraryEntry> {
-                    currentState.statsFor(it.item)?.runsGpu ?: -1
-                }.thenBy { it.item.name.lowercase() }
-
-                SortOption.REVIEWS_HIGH -> compareByDescending<LibraryEntry> {
-                    currentState.statsFor(it.item)?.reviewsDevice ?: -1
-                }.thenBy { it.item.name.lowercase() }
-
-                SortOption.REVIEWS_GPU_HIGH -> compareByDescending<LibraryEntry> {
-                    currentState.statsFor(it.item)?.reviewsGpu ?: -1
-                }.thenBy { it.item.name.lowercase() }
-            }
-
             val combined = buildList {
                 if (includeSteam) addAll(steamEntries)
                 if (includeOpen) addAll(customEntries)
                 if (includeGOG) addAll(gogEntries)
                 if (includeEpic) addAll(epicEntries)
                 if (includeAmazon) addAll(amazonEntries)
-            }.sortedWith(sortComparator).mapIndexed { idx, entry ->
+            }
+
+            // Pre-compute one sort key per entry (transliterates script → Latin, strips diacritics,
+            // lowercases) so Cyrillic "А" sorts alongside Latin "A", etc.
+            val sortKeyOf = combined.associate { entry ->
+                entry.item.appId to nameTransliterator.transliterate(entry.item.name)
+            }
+
+            val sortComparator: Comparator<LibraryEntry> = when (currentState.currentSortOption) {
+                SortOption.INSTALLED_FIRST -> compareBy<LibraryEntry> { entry ->
+                    if (entry.isInstalled) 0 else 1
+                }.thenBy { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.NAME_ASC -> compareBy { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.NAME_DESC -> compareByDescending { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.RECENTLY_PLAYED -> compareBy<LibraryEntry> { entry ->
+                    if (entry.isInstalled) 0 else 1
+                }.thenBy { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.SIZE_SMALLEST -> compareBy<LibraryEntry> { it.item.sizeBytes }
+                        .thenBy { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.SIZE_LARGEST -> compareByDescending<LibraryEntry> { it.item.sizeBytes }
+                    .thenBy { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.FPS_HIGH -> compareByDescending<LibraryEntry> {
+                    currentState.statsFor(it.item)?.fps ?: -1
+                }.thenBy { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.RUNS_HIGH -> compareByDescending<LibraryEntry> {
+                    currentState.statsFor(it.item)?.runsGpu ?: -1
+                }.thenBy { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.REVIEWS_HIGH -> compareByDescending<LibraryEntry> {
+                    currentState.statsFor(it.item)?.reviewsDevice ?: -1
+                }.thenBy { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.REVIEWS_GPU_HIGH -> compareByDescending<LibraryEntry> {
+                    currentState.statsFor(it.item)?.reviewsGpu ?: -1
+                }.thenBy { sortKeyOf.getValue(it.item.appId) }
+            }
+
+            val sortedCombined = combined.sortedWith(sortComparator).mapIndexed { idx, entry ->
                 entry.item.copy(index = idx, isInstalled = entry.isInstalled)
             }
 
@@ -1149,14 +1166,14 @@ class LibraryViewModel @Inject constructor(
             val effectiveCombined = if (currentState.selectedCategories.isNotEmpty()) {
                 val allowedIds = currentState.selectedCategories
                     .flatMapTo(HashSet()) { app.gamenative.manager.CategoryManager.getAppsInCategory(it) }
-                combined.filter { item ->
+                sortedCombined.filter { item ->
                     item.appId in allowedIds &&
                     // Hidden games pass through only when the Hidden filter is explicitly selected.
                     (viewingHidden || item.appId !in hiddenIds)
                 }
             } else {
                 // No category filter active: silently exclude hidden games.
-                combined.filter { item -> item.appId !in hiddenIds }
+                sortedCombined.filter { item -> item.appId !in hiddenIds }
             }
 
             // Total count for the current filter
