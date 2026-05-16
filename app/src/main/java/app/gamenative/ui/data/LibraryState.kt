@@ -38,6 +38,14 @@ data class LibraryState(
     // Non-zero while the library is still syncing after login.
     val picsSyncPending: Int = 0,
 
+    // Total app count for a full refreshAllApps() run; 0 during normal incremental syncs.
+    // When non-zero the banner shows "N of M" instead of just "N".
+    val picsSyncTotal: Int = 0,
+
+    // Apps sent to the PICS channel so far during a full refreshAllApps() run.
+    // Increases 0 → picsSyncTotal in steps of 256; 0 during normal incremental syncs.
+    val picsSyncQueued: Int = 0,
+
     // Refresh counter that increments when custom game images are fetched
     // Used to trigger UI recomposition to show newly downloaded images
     val imageRefreshCounter: Long = 0,

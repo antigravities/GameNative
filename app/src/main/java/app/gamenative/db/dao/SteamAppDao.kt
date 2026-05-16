@@ -278,7 +278,7 @@ interface SteamAppDao {
     @Query("DELETE from steam_app")
     suspend fun deleteAll()
 
-    @Query("SELECT id FROM steam_app")
+    @Query("SELECT id FROM steam_app ORDER BY id ASC")
     suspend fun getAllAppIds(): List<Int>
 
     // Returns the subset of `ids` that already have a full PICS sync recorded

@@ -1038,7 +1038,13 @@ private fun LibraryScreenContent(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    text = stringResource(R.string.library_syncing_games, state.picsSyncPending),
+                                    text = if (state.picsSyncTotal > 0) {
+                                        // Full refresh: picsSyncQueued increases 0 → total in steps of 256
+                                        // as batches are sent, giving a visibly-moving progress counter.
+                                        stringResource(R.string.library_syncing_games_of_total, state.picsSyncQueued, state.picsSyncTotal)
+                                    } else {
+                                        stringResource(R.string.library_syncing_games, state.picsSyncPending)
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
