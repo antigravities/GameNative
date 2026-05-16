@@ -114,6 +114,7 @@
     <string name="tab_local">Custom</string>
     <string name="library_tab_with_count">%1$s (%2$d)</string>
     <string name="library_syncing_games">Syncing library… %1$d games remaining</string>
+    <string name="library_syncing_games_of_total">Syncing library… %1$d of %2$d games</string>
     <string name="library_search_close">Close search</string>
     <string name="default_user_name">User</string>
 
