@@ -31,6 +31,7 @@ interface AndroidEvent<T> : Event<T> {
     data object RecommendationToggleChanged : AndroidEvent<Unit>
     data class HiddenGamesSettingChanged(val showHiddenGamesByDefault: Boolean) : AndroidEvent<Unit>
     data class LibraryTabsChanged(val visibleTabs: List<LibraryTab>) : AndroidEvent<Unit>
+    data object LibraryFilterSettingChanged : AndroidEvent<Unit>
     data class GOGAuthCodeReceived(val authCode: String) : AndroidEvent<Unit>
     data class EpicAuthCodeReceived(val authCode: String) : AndroidEvent<Unit>
     data object ServiceReady : AndroidEvent<Unit>
