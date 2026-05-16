@@ -175,6 +175,7 @@ fun HomeLibraryScreen(
         onPreviousTab = viewModel::onPreviousTab,
         onNextTab = viewModel::onNextTab,
         onCategoryFilterToggled = viewModel::onCategoryFilterToggled,
+        onShowCategoryDialog = viewModel::onShowCategoryDialog,
         isOffline = isOffline,
     )
 }
@@ -205,6 +206,7 @@ private fun LibraryScreenContent(
     onPreviousTab: () -> Unit,
     onNextTab: () -> Unit,
     onCategoryFilterToggled: (String) -> Unit = {},
+    onShowCategoryDialog: (String) -> Unit = {},
     isOffline: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -354,6 +356,8 @@ private fun LibraryScreenContent(
 
     // Dialog state for add custom game prompt
     var showAddCustomGameDialog by remember { mutableStateOf(false) }
+    // Holds the game that the user long-pressed "Uninstall" on, pending confirmation.
+    var pendingUninstallItem by remember { mutableStateOf<LibraryItem?>(null) }
     var dontShowAgain by remember { mutableStateOf(false) }
     var previousAppCount by remember { mutableIntStateOf(state.appInfoList.size) }
     var controllerBootstrapNeeded by remember { mutableStateOf(true) }
@@ -949,6 +953,8 @@ private fun LibraryScreenContent(
                             firstCarouselItemFocusRequester = carouselFocusRequester,
                             focusTargetListIndex = currentCarouselFocusTargetIndex(),
                             onFocusedIndexChanged = { carouselFocusTargetListIndex = it },
+                            onAddToCategory = { item -> onShowCategoryDialog(item.appId) },
+                            onUninstall = { item -> pendingUninstallItem = item },
                         )
                     } else {
                         LibraryListPane(
@@ -964,6 +970,8 @@ private fun LibraryScreenContent(
                             },
                             onRefresh = onRefresh,
                             modifier = Modifier.fillMaxSize(),
+                            onAddToCategory = { item -> onShowCategoryDialog(item.appId) },
+                            onUninstall = { item -> pendingUninstallItem = item },
                         )
                     }
                 }
@@ -1194,6 +1202,30 @@ private fun LibraryScreenContent(
             )
         }
 
+        // Uninstall confirmation dialog — appears when the user long-presses "Uninstall" in icon view.
+        // pendingUninstallItem is set by the onUninstall callback from LibraryListPane.
+        pendingUninstallItem?.let { item ->
+            AlertDialog(
+                onDismissRequest = { pendingUninstallItem = null },
+                title = { Text(stringResource(R.string.library_uninstall_confirm_title, item.name)) },
+                text = { Text(stringResource(R.string.library_uninstall_confirm_message)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val target = item
+                            pendingUninstallItem = null
+                            lifecycleScope.launch { performLibraryUninstall(context, target) }
+                        },
+                    ) { Text(stringResource(R.string.library_context_uninstall)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingUninstallItem = null }) {
+                        Text(stringResource(android.R.string.cancel))
+                    }
+                },
+            )
+        }
+
         // Add custom game dialog
         if (showAddCustomGameDialog) {
             AlertDialog(
@@ -1242,6 +1274,59 @@ private fun LibraryScreenContent(
                     }
                 },
             )
+        }
+    }
+}
+
+/**
+ * Dispatches an uninstall request to the correct platform service based on [item.gameSource].
+ * This mirrors the per-platform patterns already used in SteamAppScreen / GOGAppScreen / etc.,
+ * calling each service's companion-object delete/uninstall method directly.
+ */
+private suspend fun performLibraryUninstall(context: android.content.Context, item: LibraryItem) {
+    when (item.gameSource) {
+        GameSource.STEAM -> {
+            // appId format: "STEAM_570" — strip prefix, convert to Int
+            val steamAppId = item.appId.removePrefix("${GameSource.STEAM.name}_").toIntOrNull()
+                ?: return
+            val success = SteamService.deleteApp(steamAppId)
+            PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(steamAppId))
+            if (success) {
+                SnackbarManager.show(context.getString(R.string.steam_uninstall_success, item.name))
+            } else {
+                SnackbarManager.show(context.getString(R.string.steam_uninstall_failed))
+            }
+        }
+
+        GameSource.GOG -> {
+            GOGService.deleteGame(context, item).fold(
+                onSuccess = { SnackbarManager.show(context.getString(R.string.steam_uninstall_success, item.name)) },
+                onFailure = { SnackbarManager.show(context.getString(R.string.steam_uninstall_failed)) },
+            )
+        }
+
+        GameSource.EPIC -> {
+            // appId format: "EPIC_<int>" — strip prefix, convert to Int
+            val epicAppId = item.appId.removePrefix("${GameSource.EPIC.name}_").toIntOrNull()
+                ?: return
+            EpicService.deleteGame(context, epicAppId).fold(
+                onSuccess = { SnackbarManager.show(context.getString(R.string.steam_uninstall_success, item.name)) },
+                onFailure = { SnackbarManager.show(context.getString(R.string.steam_uninstall_failed)) },
+            )
+        }
+
+        GameSource.AMAZON -> {
+            // appId format: "AMAZON_<productId>" — strip prefix, keep as String
+            val productId = item.appId.removePrefix("AMAZON_")
+            AmazonService.deleteGame(context, productId).fold(
+                onSuccess = { SnackbarManager.show(context.getString(R.string.steam_uninstall_success, item.name)) },
+                onFailure = { SnackbarManager.show(context.getString(R.string.steam_uninstall_failed)) },
+            )
+        }
+
+        GameSource.CUSTOM_GAME -> {
+            // Custom games are just folder references; no delete-from-device semantics here.
+            // Uninstall is intentionally a no-op for custom games in this menu.
         }
     }
 }
