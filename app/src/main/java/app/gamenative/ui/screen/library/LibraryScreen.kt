@@ -177,6 +177,8 @@ fun HomeLibraryScreen(
         onNextTab = viewModel::onNextTab,
         onCategoryFilterToggled = viewModel::onCategoryFilterToggled,
         onShowCategoryDialog = viewModel::onShowCategoryDialog,
+        onToggleFavorite = viewModel::onToggleFavorite,
+        onToggleHidden = viewModel::onToggleHidden,
         isOffline = isOffline,
     )
 }
@@ -208,6 +210,8 @@ private fun LibraryScreenContent(
     onNextTab: () -> Unit,
     onCategoryFilterToggled: (String) -> Unit = {},
     onShowCategoryDialog: (String) -> Unit = {},
+    onToggleFavorite: (String) -> Unit = {},
+    onToggleHidden: (String) -> Unit = {},
     isOffline: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -956,6 +960,8 @@ private fun LibraryScreenContent(
                             onFocusedIndexChanged = { carouselFocusTargetListIndex = it },
                             onAddToCategory = { item -> onShowCategoryDialog(item.appId) },
                             onUninstall = { item -> pendingUninstallItem = item },
+                            onToggleFavorite = { item -> onToggleFavorite(item.appId) },
+                            onToggleHidden = { item -> onToggleHidden(item.appId) },
                         )
                     } else {
                         LibraryListPane(
@@ -973,6 +979,8 @@ private fun LibraryScreenContent(
                             modifier = Modifier.fillMaxSize(),
                             onAddToCategory = { item -> onShowCategoryDialog(item.appId) },
                             onUninstall = { item -> pendingUninstallItem = item },
+                            onToggleFavorite = { item -> onToggleFavorite(item.appId) },
+                            onToggleHidden = { item -> onToggleHidden(item.appId) },
                         )
                     }
                 }

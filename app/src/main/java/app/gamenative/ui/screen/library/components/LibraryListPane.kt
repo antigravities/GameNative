@@ -124,6 +124,8 @@ internal fun LibraryListPane(
     modifier: Modifier = Modifier,
     onAddToCategory: ((LibraryItem) -> Unit)? = null,
     onUninstall: ((LibraryItem) -> Unit)? = null,
+    onToggleFavorite: ((LibraryItem) -> Unit)? = null,
+    onToggleHidden: ((LibraryItem) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val snackBarHost = remember { SnackbarHostState() }
@@ -283,6 +285,8 @@ internal fun LibraryListPane(
                                 // lambda itself is null so AppItem knows to skip the menu entirely.
                                 val onAddToCategoryStable = remember(item.appId) { onAddToCategory?.let { cb -> { cb(item) } } }
                                 val onUninstallStable = remember(item.appId) { onUninstall?.let { cb -> { cb(item) } } }
+                                val onToggleFavoriteStable = remember(item.appId) { onToggleFavorite?.let { cb -> { cb(item) } } }
+                                val onToggleHiddenStable = remember(item.appId) { onToggleHidden?.let { cb -> { cb(item) } } }
 
                                 var isVisible by remember(item.index) { mutableStateOf(false) }
                                 val alpha by animateFloatAsState(
@@ -316,6 +320,8 @@ internal fun LibraryListPane(
                                         modifier = appItemModifier,
                                         appInfo = item,
                                         onClick = onClick,
+                                        onToggleFavorite = onToggleFavoriteStable,
+                                        onToggleHidden = onToggleHiddenStable,
                                         paneType = currentLayout,
                                         onFocus = onFocus,
                                         imageRefreshCounter = state.imageRefreshCounter,
