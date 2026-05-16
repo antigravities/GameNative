@@ -40,6 +40,9 @@ import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import timber.log.Timber
@@ -173,8 +176,12 @@ object ContainerStorageManager {
             installedGames.size,
         )
 
-        val containerEntries = dirs.map { dir ->
-            buildContainerEntry(context, dir, prefix, installedGames, claimedInstallPaths)
+        // Walk each container dir concurrently — each does a full Files.walkFileTree
+        // to compute its size, so the IO-bound work parallelises well on Dispatchers.IO.
+        val containerEntries = coroutineScope {
+            dirs.map { dir ->
+                async { buildContainerEntry(context, dir, prefix, installedGames, claimedInstallPaths) }
+            }.awaitAll()
         }
         val coveredInstalledIds = containerEntries
             .mapTo(mutableSetOf()) { normalizeContainerId(it.containerId) }
@@ -584,7 +591,48 @@ object ContainerStorageManager {
         val appInfosById = appInfoDao.getAll().associateBy { it.id }
         val recoveredAppInfos = mutableListOf<AppInfo>()
 
-        val ownerByPath = steamAppDao.getAllOwnedAppsAsList()
+        // Phase 1: load only the SteamApp rows for apps that the downloader recorded as
+        // installed (i.e. have an AppInfo entry). This replaces getAllOwnedAppsAsList(),
+        // which would deserialise all ~45k owned-app rows and stat the filesystem for each.
+        val phase1Apps = if (appInfosById.isNotEmpty()) {
+            steamAppDao.findSteamAppWithAppIds(appInfosById.keys.toList())
+        } else emptyList()
+
+        // Phase 2: enumerate actual subdirectories in the Steam install roots to catch any
+        // game dirs that exist on disk without a matching AppInfo entry — e.g. from a
+        // partial/failed download, or an older install predating AppInfo tracking.
+        // Because install dir names are predictable (config.installDir or app.name), we can
+        // reverse-lookup the SteamApp from the dir name without loading all 45k rows.
+        val phase1AppIds = phase1Apps.mapTo(HashSet()) { it.id }
+        val phase2Apps = mutableListOf<SteamApp>()
+
+        val searchRoots = buildList {
+            add(SteamService.internalAppInstallPath)
+            add(SteamService.externalAppInstallPath)
+            addAll(
+                DownloadService.externalVolumePaths.map { volumePath ->
+                    Paths.get(volumePath, "Steam", "steamapps", "common").toString()
+                },
+            )
+        }.distinct()
+
+        for (root in searchRoots) {
+            val rootFile = File(root)
+            if (!rootFile.isDirectory) continue
+            for (dir in rootFile.listFiles() ?: emptyArray()) {
+                if (!dir.isDirectory) continue
+                // Look up the SteamApp whose install dir matches this directory name.
+                val app = steamAppDao.findSteamAppByDirName(dir.name) ?: continue
+                if (app.id in phase1AppIds) continue  // already covered by Phase 1
+                phase2Apps += app
+                phase1AppIds += app.id  // prevent double-adding within Phase 2
+            }
+        }
+
+        // Combine both phases and deduplicate using the same tie-breaking logic as before.
+        // minWith prefers game-type rows over tools/DLCs, then prefers rows that have
+        // downloaded depots, then falls back to app ID ordering.
+        val ownerByPath = (phase1Apps + phase2Apps)
             .mapNotNull { app -> resolveSteamInstallPath(app)?.let { app to it } }
             .groupBy { (_, path) -> normalizePath(path) }
             .mapValues { (_, group) ->
