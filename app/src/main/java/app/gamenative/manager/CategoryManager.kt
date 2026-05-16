@@ -16,6 +16,9 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object CategoryManager {
 
+    /** Magic category name: games in this category are hidden from the library by default. */
+    const val HIDDEN_CATEGORY = "Hidden"
+
     private lateinit var categoriesDir: File
 
     // Maps category name → thread-safe set of composite app IDs
