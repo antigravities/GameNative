@@ -255,6 +255,8 @@ fun SettingsGroupDebug() {
         SettingsMenuLink(
             modifier = Modifier.combinedClickable(
                 onLongClick = {
+                    PrefManager.refreshAllAppsOffset = 0  // force fresh start, not stale resume
+                    PrefManager.refreshAllAppsPending = true
                     SteamService.refreshAllApps()
                     SnackbarManager.show("Queued all apps for PICS refresh")
                 },
