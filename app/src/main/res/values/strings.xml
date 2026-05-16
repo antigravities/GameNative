@@ -1211,6 +1211,10 @@
     <string name="library_installed">Installed</string>
     <string name="library_installing">Installing</string>
     <string name="library_not_installed">Not installed</string>
+    <string name="library_context_add_to_category">Add to Category</string>
+    <string name="library_context_uninstall">Uninstall</string>
+    <string name="library_uninstall_confirm_title">Uninstall \"%1$s\"?</string>
+    <string name="library_uninstall_confirm_message">This will remove the game files from your device.</string>
     <string name="library_family_shared">Family Shared</string>
     <string name="library_shared_short">Shared</string>
     <string name="library_compatible">Compatible</string>
