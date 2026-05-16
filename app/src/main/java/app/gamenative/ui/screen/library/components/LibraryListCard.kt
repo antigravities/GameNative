@@ -49,6 +49,7 @@ import app.gamenative.R
 import app.gamenative.data.GameCompatibilityStatus
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
+import app.gamenative.manager.CategoryManager
 import app.gamenative.service.SteamService
 import app.gamenative.ui.component.CompatibilityBadge
 import app.gamenative.ui.util.ListItemImage
@@ -73,6 +74,8 @@ internal fun ListViewCard(
     context: Context,
     onAddToCategory: (() -> Unit)? = null,
     onUninstall: (() -> Unit)? = null,
+    onToggleFavorite: (() -> Unit)? = null,
+    onToggleHidden: (() -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isItemFocused by interactionSource.collectIsFocusedAsState()
@@ -92,7 +95,7 @@ internal fun ListViewCard(
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = {
-                    if (onAddToCategory != null || onUninstall != null) showContextMenu = true
+                    if (onToggleFavorite != null || onToggleHidden != null || onAddToCategory != null || onUninstall != null) showContextMenu = true
                 },
                 interactionSource = interactionSource,
                 indication = null,
@@ -215,6 +218,36 @@ internal fun ListViewCard(
         expanded = showContextMenu,
         onDismissRequest = { showContextMenu = false },
     ) {
+        // Quick-access Favorites toggle: label flips based on current membership
+        if (onToggleFavorite != null) {
+            val inFavorites = CategoryManager.isAppInCategory(appInfo.appId, CategoryManager.FAVORITES_CATEGORY)
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(
+                            if (inFavorites) R.string.library_context_remove_from_favorites
+                            else R.string.library_context_add_to_favorites
+                        )
+                    )
+                },
+                onClick = { showContextMenu = false; onToggleFavorite() },
+            )
+        }
+        // Quick-access Hidden toggle: label flips based on current membership
+        if (onToggleHidden != null) {
+            val inHidden = CategoryManager.isAppInCategory(appInfo.appId, CategoryManager.HIDDEN_CATEGORY)
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(
+                            if (inHidden) R.string.library_context_remove_from_hidden
+                            else R.string.library_context_add_to_hidden
+                        )
+                    )
+                },
+                onClick = { showContextMenu = false; onToggleHidden() },
+            )
+        }
         if (onAddToCategory != null) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.library_context_add_to_category)) },
