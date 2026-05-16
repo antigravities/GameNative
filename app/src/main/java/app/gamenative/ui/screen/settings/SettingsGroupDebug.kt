@@ -255,6 +255,22 @@ fun SettingsGroupDebug() {
         SettingsMenuLink(
             modifier = Modifier.combinedClickable(
                 onLongClick = {
+                    SteamService.refreshAllApps()
+                    SnackbarManager.show("Queued all apps for PICS refresh")
+                },
+                onClick = {
+                    SnackbarManager.show("Long click to activate")
+                },
+            ),
+            colors = settingsTileColorsDebug(),
+            title = { Text(text = stringResource(R.string.settings_debug_refresh_pics_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_debug_refresh_pics_subtitle)) },
+            onClick = {},
+        )
+
+        SettingsMenuLink(
+            modifier = Modifier.combinedClickable(
+                onLongClick = {
                     SteamService.logOut()
                     (context as ComponentActivity).finishAffinity()
                 },

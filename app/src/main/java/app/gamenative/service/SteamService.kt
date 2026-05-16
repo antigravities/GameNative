@@ -3275,6 +3275,22 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         }
 
+        fun refreshAllApps() {
+            val service = instance ?: return
+            service.scope.launch {
+                Timber.w("refreshAllApps: Force re-queuing all known apps for PICS refresh")
+                service.appDao.getAllAppIds()
+                    .chunked(MAX_PICS_BUFFER)
+                    .forEach { chunk ->
+                        val requests = chunk.map { PICSRequest(id = it) }
+                        // Increment the pending counter so the UI sync indicator reflects
+                        // these requests (same pattern as every other appPicsChannel.send site).
+                        _picsSyncPending.update { it + requests.size }
+                        service.appPicsChannel.send(requests)
+                    }
+            }
+        }
+
         fun logOut() {
             CoroutineScope(Dispatchers.Default).launch {
                 // isConnected = false
