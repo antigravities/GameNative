@@ -82,6 +82,8 @@ import app.gamenative.data.GameSource
 import app.gamenative.gamefixes.GameFixesRegistry
 import app.gamenative.data.LaunchInfo
 import app.gamenative.data.LibraryItem
+import app.gamenative.data.PatchInstallTask
+import app.gamenative.data.PendingPatchWork
 import app.gamenative.data.SteamApp
 import app.gamenative.events.AndroidEvent
 import app.gamenative.events.SteamEvent
@@ -175,6 +177,7 @@ import com.winlator.xserver.WindowManager
 import com.winlator.xserver.XServer
 import com.winlator.xserver.extensions.PresentExtension
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -188,6 +191,7 @@ import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
 import java.io.IOException
+import java.util.zip.ZipInputStream
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
@@ -195,6 +199,7 @@ import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.util.Arrays
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.name
 import kotlin.math.roundToInt
 import kotlin.text.lowercase
@@ -206,6 +211,8 @@ private const val ALWAYS_REEXTRACT = true
 
 // Guard to prevent duplicate game_exited events when multiple exit triggers fire simultaneously
 private val isExiting = AtomicBoolean(false)
+// Watcher coroutine that polls Wine process list during installer-type patch tasks
+private val patchExitWatcherRef = AtomicReference<Job?>(null)
 
 private const val EXIT_PROCESS_TIMEOUT_MS = 30_000L
 private const val EXIT_PROCESS_POLL_INTERVAL_MS = 1_000L
@@ -439,6 +446,7 @@ fun XServerScreen(
             physicalControllerHandler = null
             exitWatchJob?.cancel()
             exitWatchJob = null
+            patchExitWatcherRef.getAndSet(null)?.cancel()
         }
     }
     var isKeyboardVisible = false
@@ -3172,6 +3180,7 @@ private fun setupXEnvironment(
 
     var preInstallCommands: List<PreInstallSteps.PreInstallCommand> = emptyList()
     var gameExecutable = ""
+    var pendingPatchWork: PendingPatchWork? = null
 
     if (container != null) {
         try {
@@ -3210,6 +3219,25 @@ private fun setupXEnvironment(
             xServer.screenInfo.toString(),
             containerVariantChanged,
         )
+
+        // Read any patch work queued by preLaunchApp during the pre-launch flow.
+        // The file is deleted once all tasks complete (see chainPatchTasks below).
+        pendingPatchWork = run {
+            val patchFile = File(container.rootDir, "pending_patches.json")
+            if (patchFile.exists()) {
+                try {
+                    Json { ignoreUnknownKeys = true }.decodeFromString<PendingPatchWork>(patchFile.readText())
+                } catch (e: Exception) {
+                    Timber.tag("Patches").e(e, "Failed to read pending_patches.json; skipping patches")
+                    null
+                }
+            } else null
+        }
+        Timber.tag("Patches").i(
+            if (pendingPatchWork != null) "Loaded ${pendingPatchWork!!.tasks.size} pending patch task(s)"
+            else "No pending_patches.json found"
+        )
+
         guestProgramLauncherComponent.guestExecutable =
             preInstallCommands.firstOrNull()?.executable ?: gameExecutable
         guestProgramLauncherComponent.isWoW64Mode = wow64Mode
@@ -3254,6 +3282,9 @@ private fun setupXEnvironment(
             )
             if (preInstallCommands.isNotEmpty()) {
                 PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing prerequisites..."))
+            } else if (pendingPatchWork != null) {
+                // First Wine start is a patch task, not the game itself
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
             } else {
                 PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Launching game..."))
             }
@@ -3331,10 +3362,292 @@ private fun setupXEnvironment(
         PluviaApp.events.emit(AndroidEvent.GuestProgramTerminated)
     }
 
-    fun chainPreInstallSteps(remaining: List<PreInstallSteps.PreInstallCommand>) {
+    // Translates a Windows path (e.g. "C:\Games\Foo") to the corresponding Android path inside
+    // the container's Wine prefix. Strips the drive letter+colon (C: → .wine/drive_c) and
+    // converts backslashes to forward slashes.
+    fun windowsToAndroidPath(winPath: String): File {
+        val normalized = winPath.replace('\\', '/')
+        val relative = if (normalized.length >= 2 && normalized[1] == ':') {
+            ".wine/drive_c" + normalized.substring(2)
+        } else {
+            normalized
+        }
+        return File(container.rootDir, relative)
+    }
+
+    // Set to true by any task that fails; prevents pending_patches.json from being deleted
+    // so the next launch can retry (see chainPatchTasks base case below).
+    var patchFailed = false
+
+    // Processes patch install tasks in order, then sets up the game launch.
+    // Mirrors chainPreInstallSteps: sets up the first task and returns; the caller is responsible
+    // for calling guestProgramLauncherComponent.start() to fire it.  Subsequent tasks are chained
+    // via termination callbacks (execute) or synchronous recursion (unzip).
+    fun chainPatchTasks(remaining: List<PatchInstallTask>, work: PendingPatchWork) {
+        Timber.tag("Patches").i("chainPatchTasks: ${remaining.size} task(s) remaining")
         if (remaining.isEmpty()) {
+            patchExitWatcherRef.getAndSet(null)?.cancel()
+            if (!patchFailed) {
+                // All tasks succeeded — clean up so patches don't re-run next launch
+                File(container.rootDir, "pending_patches.json").delete()
+                val stagingDir = File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging")
+                if (stagingDir.exists() && stagingDir.list()?.isEmpty() == true) stagingDir.delete()
+            } else {
+                // At least one task failed — delete the marker so runPatchFlowIfNeeded
+                // re-downloads missing staged files and chainPatchTasks can retry next launch.
+                File(container.rootDir, ".patches_offered").delete()
+                Timber.tag("Patches").w("Patch application had failures; will retry on next launch")
+            }
             guestProgramLauncherComponent.setGuestExecutable(gameExecutable)
             guestProgramLauncherComponent.setTerminationCallback(gameTerminationCallback)
+            return
+        }
+
+        val task = remaining.first()
+        val nextRemaining = remaining.drop(1)
+
+        when (task.type) {
+            "execute" -> {
+                val workDir = task.startIn ?: work.gameDataDir
+                // Stage path is C:\Windows\Temp\patchstaging\{file} inside Wine
+                val patchWinPath = "C:\\Windows\\Temp\\patchstaging\\${task.file}"
+                val executable = "wine explorer /desktop=shell,${xServer.screenInfo} " +
+                    "winhandler.exe cmd /c \"cd /d \\\"$workDir\\\" & \\\"$patchWinPath\\\"\""
+                Timber.tag("Patches").i("chainPatchTasks: starting execute task: $executable")
+                guestProgramLauncherComponent.setGuestExecutable(executable)
+                guestProgramLauncherComponent.setTerminationCallback { _ ->
+                    // isExiting is set to true before shutdownEnvironment() kills Wine, so if we
+                    // see it here the user chose to exit — don't start a new Wine process.
+                    if (isExiting.get()) {
+                        Timber.tag("Patches").i("Container exiting; aborting patch chain after execute task")
+                        return@setTerminationCallback
+                    }
+                    guestProgramLauncherComponent.setPreUnpack(null)
+                    try {
+                        guestProgramLauncherComponent.execShellCommand("wineserver -k")
+                    } catch (e: Exception) {
+                        Timber.w(e, "wineserver -k after patch execute task (non-fatal)")
+                    }
+                    // Free staging space after the task that used this file completes
+                    File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging/${task.file}").delete()
+                    PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+                    chainPatchTasks(nextRemaining, work)
+                    guestProgramLauncherComponent.start()
+                }
+                // winhandler.exe won't call wineserver -k on its own when the installer closes —
+                // start a poller that watches the Wine process list and stops proot once only
+                // essential processes remain, which fires terminationCallback above.
+                // Phase 1 waits for the installer exe to appear (prevents false-positive exit
+                // before Wine has even started it). Phase 2 waits for all non-essential processes
+                // to disappear, which handles bootstrapper installers that spawn child processes.
+                patchExitWatcherRef.getAndSet(null)?.cancel()
+                val winHandlerForPatch = xServer.winHandler
+                val installerBasename = normalizeProcessName(task.file.substringBeforeLast('.'))
+                patchExitWatcherRef.set(CoroutineScope(Dispatchers.IO).launch {
+                    val allowlist = buildEssentialProcessAllowlist()
+                    val lock = Any()
+                    var pendingSnapshot: CompletableDeferred<List<ProcessInfo>?>? = null
+                    var currentList = mutableListOf<ProcessInfo>()
+                    var expectedCount = 0
+                    val listener = OnGetProcessInfoListener { index, count, processInfo ->
+                        synchronized(lock) {
+                            val deferred = pendingSnapshot ?: return@synchronized
+                            if (count == 0 && processInfo == null) {
+                                if (!deferred.isCompleted) deferred.complete(null)
+                                return@synchronized
+                            }
+                            if (index == 0) { currentList = mutableListOf(); expectedCount = count }
+                            if (processInfo != null) currentList.add(processInfo)
+                            if (currentList.size >= expectedCount && !deferred.isCompleted)
+                                deferred.complete(currentList.toList())
+                        }
+                    }
+                    winHandlerForPatch.setOnGetProcessInfoListener(listener)
+                    try {
+                        val startTime = System.currentTimeMillis()
+                        // Phase 1: wait for the installer process to appear
+                        var installerSeen = false
+                        while (!installerSeen &&
+                            System.currentTimeMillis() - startTime < EXIT_PROCESS_TIMEOUT_MS) {
+                            if (isExiting.get()) return@launch
+                            val deferred = CompletableDeferred<List<ProcessInfo>?>()
+                            synchronized(lock) { pendingSnapshot = deferred }
+                            winHandlerForPatch.listProcesses()
+                            val snapshot = withTimeoutOrNull(EXIT_PROCESS_RESPONSE_TIMEOUT_MS) { deferred.await() }
+                            if (snapshot != null &&
+                                snapshot.any { normalizeProcessName(it.name) == installerBasename })
+                                installerSeen = true
+                            else
+                                delay(EXIT_PROCESS_POLL_INTERVAL_MS)
+                        }
+                        Timber.tag("Patches").i("Installer process '$installerBasename' seen; watching for exit")
+                        // Phase 2: wait for all non-essential processes to exit.
+                        // No timeout — the installer may take arbitrarily long. Cancellation happens
+                        // via isExiting (user backs out), coroutine cancellation (DisposableEffect
+                        // dispose), or patchExitWatcherRef.cancel() when the next task starts.
+                        while (!isExiting.get()) {
+                            val deferred = CompletableDeferred<List<ProcessInfo>?>()
+                            synchronized(lock) { pendingSnapshot = deferred }
+                            winHandlerForPatch.listProcesses()
+                            val snapshot = withTimeoutOrNull(EXIT_PROCESS_RESPONSE_TIMEOUT_MS) { deferred.await() }
+                            if (snapshot != null &&
+                                snapshot.none { !allowlist.contains(normalizeProcessName(it.name)) }) {
+                                Timber.tag("Patches").i("No non-essential processes remain; stopping Wine")
+                                guestProgramLauncherComponent.stop()
+                                break
+                            }
+                            delay(EXIT_PROCESS_POLL_INTERVAL_MS)
+                        }
+                    } finally {
+                        winHandlerForPatch.setOnGetProcessInfoListener(null)
+                        synchronized(lock) { pendingSnapshot = null }
+                    }
+                })
+                // Returns here; caller must call guestProgramLauncherComponent.start()
+            }
+
+            "executeCmd" -> {
+                // Run a raw command from the game's install directory — no staged file needed.
+                val workDir = task.startIn ?: work.gameDataDir
+                val rawCmd = task.cmd
+                if (rawCmd == null) {
+                    Timber.tag("Patches").w("executeCmd task has no cmd field, skipping")
+                    chainPatchTasks(nextRemaining, work)
+                    return
+                }
+                val executable = "wine explorer /desktop=shell,${xServer.screenInfo} " +
+                    "winhandler.exe cmd /c \"cd /d \\\"$workDir\\\" & $rawCmd\""
+                Timber.tag("Patches").i("chainPatchTasks: starting executeCmd task: $executable")
+                guestProgramLauncherComponent.setGuestExecutable(executable)
+                guestProgramLauncherComponent.setTerminationCallback { _ ->
+                    if (isExiting.get()) {
+                        Timber.tag("Patches").i("Container exiting; aborting patch chain after executeCmd task")
+                        return@setTerminationCallback
+                    }
+                    guestProgramLauncherComponent.setPreUnpack(null)
+                    try {
+                        guestProgramLauncherComponent.execShellCommand("wineserver -k")
+                    } catch (e: Exception) {
+                        Timber.w(e, "wineserver -k after executeCmd patch task (non-fatal)")
+                    }
+                    PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+                    chainPatchTasks(nextRemaining, work)
+                    guestProgramLauncherComponent.start()
+                }
+                // Same exit-watcher as execute, but no known filename — phase 1 simply waits
+                // for any non-essential process to appear before watching for them all to go.
+                patchExitWatcherRef.getAndSet(null)?.cancel()
+                val winHandlerForPatchCmd = xServer.winHandler
+                patchExitWatcherRef.set(CoroutineScope(Dispatchers.IO).launch {
+                    val allowlist = buildEssentialProcessAllowlist()
+                    val lock = Any()
+                    var pendingSnapshot: CompletableDeferred<List<ProcessInfo>?>? = null
+                    var currentList = mutableListOf<ProcessInfo>()
+                    var expectedCount = 0
+                    val listener = OnGetProcessInfoListener { index, count, processInfo ->
+                        synchronized(lock) {
+                            val deferred = pendingSnapshot ?: return@synchronized
+                            if (count == 0 && processInfo == null) {
+                                if (!deferred.isCompleted) deferred.complete(null)
+                                return@synchronized
+                            }
+                            if (index == 0) { currentList = mutableListOf(); expectedCount = count }
+                            if (processInfo != null) currentList.add(processInfo)
+                            if (currentList.size >= expectedCount && !deferred.isCompleted)
+                                deferred.complete(currentList.toList())
+                        }
+                    }
+                    winHandlerForPatchCmd.setOnGetProcessInfoListener(listener)
+                    try {
+                        val startTime = System.currentTimeMillis()
+                        // Phase 1: wait for any non-essential process to appear
+                        var anySeen = false
+                        while (!anySeen &&
+                            System.currentTimeMillis() - startTime < EXIT_PROCESS_TIMEOUT_MS) {
+                            if (isExiting.get()) return@launch
+                            val deferred = CompletableDeferred<List<ProcessInfo>?>()
+                            synchronized(lock) { pendingSnapshot = deferred }
+                            winHandlerForPatchCmd.listProcesses()
+                            val snapshot = withTimeoutOrNull(EXIT_PROCESS_RESPONSE_TIMEOUT_MS) { deferred.await() }
+                            if (snapshot != null &&
+                                snapshot.any { !allowlist.contains(normalizeProcessName(it.name)) })
+                                anySeen = true
+                            else
+                                delay(EXIT_PROCESS_POLL_INTERVAL_MS)
+                        }
+                        Timber.tag("Patches").i("executeCmd process seen; watching for exit")
+                        // Phase 2: no timeout — same reasoning as the execute watcher above.
+                        while (!isExiting.get()) {
+                            val deferred = CompletableDeferred<List<ProcessInfo>?>()
+                            synchronized(lock) { pendingSnapshot = deferred }
+                            winHandlerForPatchCmd.listProcesses()
+                            val snapshot = withTimeoutOrNull(EXIT_PROCESS_RESPONSE_TIMEOUT_MS) { deferred.await() }
+                            if (snapshot != null &&
+                                snapshot.none { !allowlist.contains(normalizeProcessName(it.name)) }) {
+                                Timber.tag("Patches").i("No non-essential processes remain; stopping Wine")
+                                guestProgramLauncherComponent.stop()
+                                break
+                            }
+                            delay(EXIT_PROCESS_POLL_INTERVAL_MS)
+                        }
+                    } finally {
+                        winHandlerForPatchCmd.setOnGetProcessInfoListener(null)
+                        synchronized(lock) { pendingSnapshot = null }
+                    }
+                })
+                // Returns here; caller must call guestProgramLauncherComponent.start()
+            }
+
+            "unzip" -> {
+                // Unzip is Android-side extraction — no Wine process needed.
+                // Run synchronously so the chain can proceed without coroutine plumbing.
+                // This is safe because Wine has already exited and we're on a background thread.
+                val targetDir = windowsToAndroidPath(task.startIn ?: work.gameDataDir)
+                val stagedFile = File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging/${task.file}")
+                Timber.tag("Patches").i("chainPatchTasks: unzipping $stagedFile to $targetDir")
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+                try {
+                    targetDir.mkdirs()
+                    ZipInputStream(stagedFile.inputStream().buffered()).use { zis ->
+                        var entry = zis.nextEntry
+                        while (entry != null) {
+                            if (!entry.isDirectory) {
+                                val outFile = File(targetDir, entry.name)
+                                outFile.parentFile?.mkdirs()
+                                outFile.outputStream().use { out -> zis.copyTo(out) }
+                            }
+                            zis.closeEntry()
+                            entry = zis.nextEntry
+                        }
+                    }
+                } catch (e: Exception) {
+                    Timber.tag("Patches").e(e, "Failed to unzip ${task.file}")
+                    patchFailed = true
+                }
+                stagedFile.delete()
+                // Recurse synchronously — eventually sets up an execute or game executable
+                chainPatchTasks(nextRemaining, work)
+                // Returns here; caller must call guestProgramLauncherComponent.start()
+            }
+
+            else -> {
+                Timber.tag("Patches").w("Unknown patch task type '${task.type}' for '${task.file}', skipping")
+                chainPatchTasks(nextRemaining, work)
+            }
+        }
+    }
+
+    fun chainPreInstallSteps(remaining: List<PreInstallSteps.PreInstallCommand>) {
+        if (remaining.isEmpty()) {
+            // All prerequisites done. Run patches next (if any), then the game.
+            if (pendingPatchWork != null && pendingPatchWork.tasks.isNotEmpty()) {
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+                chainPatchTasks(pendingPatchWork.tasks, pendingPatchWork)
+                // chainPatchTasks sets up the first executable; caller's start() fires it
+            } else {
+                guestProgramLauncherComponent.setGuestExecutable(gameExecutable)
+                guestProgramLauncherComponent.setTerminationCallback(gameTerminationCallback)
+            }
             return
         }
         guestProgramLauncherComponent.setGuestExecutable(remaining.first().executable)
@@ -3348,8 +3661,11 @@ private fun setupXEnvironment(
                 Timber.w(e, "wineserver -k between pre-install steps (non-fatal)")
             }
             val nextRemaining = remaining.drop(1)
-            if (nextRemaining.isEmpty()) {
+            if (nextRemaining.isEmpty() && pendingPatchWork == null) {
                 PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Launching game..."))
+            } else if (nextRemaining.isEmpty()) {
+                // Patches follow the last prerequisite — skip the "Launching game..." flash
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
             } else {
                 PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing prerequisites..."))
             }
@@ -3360,6 +3676,10 @@ private fun setupXEnvironment(
 
     if (preInstallCommands.isNotEmpty()) {
         chainPreInstallSteps(preInstallCommands)
+    } else if (pendingPatchWork != null && pendingPatchWork.tasks.isNotEmpty()) {
+        // No prerequisites — jump straight to patches, then game
+        PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+        chainPatchTasks(pendingPatchWork.tasks, pendingPatchWork)
     } else {
         guestProgramLauncherComponent.setTerminationCallback(gameTerminationCallback)
     }
@@ -3512,7 +3832,17 @@ private fun getWineStartCommand(
     gameSource: GameSource,
 ): String {
     val tempDir = File(container.getRootDir(), ".wine/drive_c/windows/temp")
-    FileUtils.clear(tempDir)
+    // Preserve patchstaging across the temp wipe if patch work is queued for this launch.
+    // chainPatchTasks (called later in setupXEnvironment) needs these files; they are
+    // deleted individually after each task completes.
+    val hasPendingPatches = File(container.getRootDir(), "pending_patches.json").exists()
+    if (hasPendingPatches) {
+        tempDir.listFiles()?.forEach { child ->
+            if (child.name != "patchstaging") FileUtils.delete(child)
+        }
+    } else {
+        FileUtils.clear(tempDir)
+    }
 
     Timber.tag("XServerScreen").d("appLaunchInfo is $appLaunchInfo")
 

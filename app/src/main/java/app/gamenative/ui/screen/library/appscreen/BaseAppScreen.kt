@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.net.toUri
 import app.gamenative.PluviaApp
+import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
@@ -905,6 +906,22 @@ abstract class BaseAppScreen {
             getTestGraphicsOption(context, libraryItem, onTestGraphics)?.let { menuOptions.add(it) }
             getResetContainerOption(context, libraryItem)?.let { menuOptions.add(it) }
             getExportContainerOption(context, libraryItem, exportFrontendLauncher)?.let { menuOptions.add(it) }
+
+            // Show "Install Patches" only when a patch database URL is configured
+            if (PrefManager.patchDatabaseUrl.isNotBlank()) {
+                menuOptions.add(
+                    AppMenuOption(
+                        optionType = AppOptionMenuType.InstallPatches,
+                        onClick = {
+                            // Reset the first-launch marker so the patch dialog shows again,
+                            // then trigger the patch flow which returns here (not to XServerScreen)
+                            val container = ContainerUtils.getContainer(context, libraryItem.appId)
+                            java.io.File(container.rootDir, ".patches_offered").delete()
+                            PluviaApp.events.emit(AndroidEvent.TriggerInstallPatches(libraryItem.appId))
+                        },
+                    ),
+                )
+            }
         }
 
         // Always available: categorize this game. Emits an event caught in LibraryScreen
