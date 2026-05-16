@@ -570,6 +570,14 @@ class SteamService : Service(), IChallengeUrlChanged {
         // 0 in clearDatabase() so the UI clears the indicator on logout.
         private val _picsSyncPending = MutableStateFlow(0)
         val picsSyncPending = _picsSyncPending.asStateFlow()
+        // Total app count set by refreshAllApps() before its loop; 0 when no full refresh is active.
+        // Used by the UI to show "N of M" progress instead of just the sliding window count.
+        private val _picsSyncTotal = MutableStateFlow(0)
+        val picsSyncTotal = _picsSyncTotal.asStateFlow()
+        // Monotonically-increasing count of apps sent to appPicsChannel during a refreshAllApps() run.
+        // Increments by chunk size after each send; 0 during normal incremental syncs.
+        private val _picsSyncQueued = MutableStateFlow(0)
+        val picsSyncQueued = _picsSyncQueued.asStateFlow()
         var isRunning: Boolean = false
             private set
         var isLoggingOut: Boolean = false
@@ -3279,15 +3287,35 @@ class SteamService : Service(), IChallengeUrlChanged {
             val service = instance ?: return
             service.scope.launch {
                 Timber.w("refreshAllApps: Force re-queuing all known apps for PICS refresh")
-                service.appDao.getAllAppIds()
-                    .chunked(MAX_PICS_BUFFER)
+                // ORDER BY id ASC ensures the list is stable across restarts so drop(offset) is correct.
+                val allIds = service.appDao.getAllAppIds()
+                val savedOffset = PrefManager.refreshAllAppsOffset
+                _picsSyncTotal.value = allIds.size
+                // Seed queued counter with already-done work so the UI shows "43k of 65k" on resume.
+                _picsSyncQueued.value = savedOffset
+                var offset = savedOffset
+                allIds.drop(offset).chunked(MAX_PICS_BUFFER)
                     .forEach { chunk ->
+                        // Wait until fewer than 2 batches are in-flight before queuing the next
+                        // one. _picsSyncPending is decremented after each batch is fully processed
+                        // by the consumer, so this limits memory to ~2 batches at a time instead
+                        // of all ~176 (for a 45k library) flooding the channel at once and OOMing.
+                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2) { delay(500) }
                         val requests = chunk.map { PICSRequest(id = it) }
-                        // Increment the pending counter so the UI sync indicator reflects
-                        // these requests (same pattern as every other appPicsChannel.send site).
                         _picsSyncPending.update { it + requests.size }
                         service.appPicsChannel.send(requests)
+                        offset += chunk.size
+                        // Persist after send (fire-and-forget). If we crash before DataStore commits,
+                        // we'll re-send the last chunk — harmless since the consumer is idempotent.
+                        PrefManager.refreshAllAppsOffset = offset
+                        _picsSyncQueued.update { it + chunk.size }
                     }
+                // All batches sent — clear resume state and progress counters.
+                PrefManager.refreshAllAppsPending = false
+                PrefManager.refreshAllAppsOffset = 0
+                _picsSyncTotal.value = 0
+                _picsSyncQueued.value = 0
+                Timber.i("refreshAllApps: All batches queued at offset $offset; resume flag cleared")
             }
         }
 
@@ -3343,8 +3371,11 @@ class SteamService : Service(), IChallengeUrlChanged {
                         downloadingAppInfoDao.deleteAll()
                         steamUnlockedBranchDao.deleteAll()
                     }
-                    // Reset sync counter so the banner doesn't linger after logout.
+                    // Reset sync counters so the banner doesn't linger after logout.
                     _picsSyncPending.value = 0
+                    _picsSyncTotal.value = 0
+                    _picsSyncQueued.value = 0
+                    PrefManager.refreshAllAppsOffset = 0
                 }
             }
         }
@@ -4646,6 +4677,14 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                 picsChangesCheckerJob = continuousPICSChangesChecker()
                 picsGetProductInfoJob = continuousPICSGetProductInfo()
+
+                // If a full refresh was requested (or interrupted by a crash), resume it now
+                // that the PICS pipeline is running. The consumer skips apps whose
+                // lastChangeNumber hasn't changed, so restarting from the beginning is cheap.
+                if (PrefManager.refreshAllAppsPending) {
+                    Timber.w("refreshAllApps: Resuming interrupted full PICS refresh after login")
+                    refreshAllApps()
+                }
 
                 // Tell steam we're online, this allows friends to update.
                 // If the app is currently backgrounded, use Away instead of the user's preferred
