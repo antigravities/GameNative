@@ -1052,6 +1052,13 @@ object PrefManager {
             setPref(SHOW_AMAZON_IN_LIBRARY, value)
         }
 
+    private val HIDE_ADULT_CONTENT = booleanPreferencesKey("hide_adult_content")
+    var hideAdultContent: Boolean
+        get() = getPref(HIDE_ADULT_CONTENT, false)   // default OFF — opt-in filter
+        set(value) {
+            setPref(HIDE_ADULT_CONTENT, value)
+        }
+
     // Game counts for skeleton loaders
     private val CUSTOM_GAMES_COUNT = intPreferencesKey("custom_games_count")
     var customGamesCount: Int

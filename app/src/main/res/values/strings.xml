@@ -1542,6 +1542,8 @@
     <string name="lsfg_performance_mode_desc">Reduces quality for higher throughput</string>
     <string name="settings_interface_show_recommendations_title">Show game recommendations</string>
     <string name="settings_interface_show_recommendations_subtitle">Show curated indie game picks in your library. Keeping this on helps support indie developers and GameNative.</string>
+    <string name="settings_hide_adult_content_title">Hide adult content</string>
+    <string name="settings_hide_adult_content_subtitle">Hides games with mature or explicit content descriptors from your library</string>
     <!-- Game Launch Tips -->
     <string name="game_launch_tip_1">Booting may take a few minutes on first launch</string>
     <string name="game_launch_tip_2">Tip: You can view the game files by pressing \"%s\" in the game settings.</string>
