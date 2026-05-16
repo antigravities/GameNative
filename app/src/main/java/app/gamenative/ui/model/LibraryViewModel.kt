@@ -961,11 +961,14 @@ class LibraryViewModel @Inject constructor(
                 if (includeAmazon) addAll(amazonEntries)
             }
 
-            // Pre-compute one sort key per entry. trim() removes leading/trailing whitespace so a
-            // name like " Devil's Dungeon" sorts with the Ds rather than at the top. Transliteration
-            // then converts any script to lowercase Latin so Cyrillic "А" sorts alongside "A", etc.
+            // Pre-compute one sort key per entry. trim() removes surrounding whitespace;
+            // trimStart strips leading punctuation/symbols so titles like "!AnyWay!" sort at A and
+            // ""Glow Ball"" sorts at G, matching Steam's behaviour. Transliteration then converts
+            // any script to lowercase Latin so Cyrillic "А" sorts alongside Latin "A", etc.
             val sortKeyOf = combined.associate { entry ->
-                entry.item.appId to nameTransliterator.transliterate(entry.item.name.trim())
+                entry.item.appId to nameTransliterator.transliterate(
+                    entry.item.name.trim().trimStart { !it.isLetterOrDigit() }
+                )
             }
 
             val sortComparator: Comparator<LibraryEntry> = when (currentState.currentSortOption) {
