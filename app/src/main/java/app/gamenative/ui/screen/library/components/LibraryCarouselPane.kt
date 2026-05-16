@@ -211,6 +211,8 @@ internal fun LibraryCarouselPane(
     firstCarouselItemFocusRequester: FocusRequester? = null,
     focusTargetListIndex: Int? = null,
     onFocusedIndexChanged: (Int) -> Unit = {},
+    onAddToCategory: ((LibraryItem) -> Unit)? = null,
+    onUninstall: ((LibraryItem) -> Unit)? = null,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val pullToRefreshState = rememberPullToRefreshState()
@@ -504,6 +506,10 @@ internal fun LibraryCarouselPane(
                                         val carouselOnFocus = remember(item.appId) {
                                             { onFocusedIndexChanged(latestListIndex) }
                                         }
+                                        // Same stable-lambda pattern as LibraryListPane — capture item
+                                        // at composition time so the lambda is stable across reorders.
+                                        val carouselOnAddToCategory = remember(item.appId) { onAddToCategory?.let { cb -> { cb(item) } } }
+                                        val carouselOnUninstall = remember(item.appId) { onUninstall?.let { cb -> { cb(item) } } }
 
                                         AppItem(
                                             modifier = appItemModifier,
@@ -516,6 +522,8 @@ internal fun LibraryCarouselPane(
                                             gameStats = state.statsFor(item),
                                             showFocusGlow = false,
                                             enableFocusScale = false,
+                                            onAddToCategory = carouselOnAddToCategory,
+                                            onUninstall = carouselOnUninstall,
                                         )
                                     }
                                 }
