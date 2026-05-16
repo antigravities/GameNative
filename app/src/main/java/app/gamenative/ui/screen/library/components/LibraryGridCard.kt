@@ -2,10 +2,14 @@ package app.gamenative.ui.screen.library.components
 
 import android.content.Context
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,6 +76,7 @@ import kotlinx.coroutines.withContext
 /**
  * Grid card for Hero/Capsule layout views.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun GridViewCard(
     modifier: Modifier,
@@ -90,6 +95,8 @@ internal fun GridViewCard(
     gameStats: GameCardStats?,
     showFocusGlow: Boolean,
     context: Context,
+    onAddToCategory: (() -> Unit)? = null,
+    onUninstall: (() -> Unit)? = null,
 ) {
     val aspectRatio = if (paneType == PaneType.GRID_CAPSULE) 2f / 3f else 460f / 215f
     val isCapsule = paneType == PaneType.GRID_CAPSULE
@@ -134,6 +141,7 @@ internal fun GridViewCard(
     ) {
         val interactionSource = remember { MutableInteractionSource() }
         val isItemFocused by interactionSource.collectIsFocusedAsState()
+        var showContextMenu by remember { mutableStateOf(false) }
 
         LaunchedEffect(isItemFocused) {
             onFocusChanged(isItemFocused)
@@ -144,8 +152,11 @@ internal fun GridViewCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(aspectRatio)
-                .clickable(
+                .combinedClickable(
                     onClick = onClick,
+                    onLongClick = {
+                        if (onAddToCategory != null || onUninstall != null) showContextMenu = true
+                    },
                     interactionSource = interactionSource,
                     indication = null,
                 ),
@@ -313,6 +324,24 @@ internal fun GridViewCard(
                         iconSize = if (isCapsule) 14 else 12,
                     )
                 }
+            }
+        }
+
+        DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false },
+        ) {
+            if (onAddToCategory != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.library_context_add_to_category)) },
+                    onClick = { showContextMenu = false; onAddToCategory() },
+                )
+            }
+            if (appInfo.isInstalled && onUninstall != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.library_context_uninstall)) },
+                    onClick = { showContextMenu = false; onUninstall() },
+                )
             }
         }
     }
