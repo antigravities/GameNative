@@ -4,6 +4,8 @@ import android.content.res.Configuration
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import app.gamenative.R
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -87,6 +91,8 @@ internal fun AppItem(
     compatibilityStatus: GameCompatibilityStatus? = null,
     showFocusGlow: Boolean = true,
     enableFocusScale: Boolean = true,
+    onAddToCategory: (() -> Unit)? = null,
+    onUninstall: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var hideText by remember { mutableStateOf(true) }
@@ -137,6 +143,8 @@ internal fun AppItem(
             isRefreshing = isRefreshing,
             compatibilityStatus = compatibilityStatus,
             context = context,
+            onAddToCategory = onAddToCategory,
+            onUninstall = onUninstall,
         )
 
         PaneType.GRID_ICON -> IconViewCard(
@@ -144,6 +152,8 @@ internal fun AppItem(
             appInfo = appInfo,
             onClick = onClick,
             onFocus = onFocus,
+            onAddToCategory = onAddToCategory,
+            onUninstall = onUninstall,
         )
 
         else -> GridViewCard(
@@ -165,6 +175,8 @@ internal fun AppItem(
             compatibilityStatus = compatibilityStatus,
             showFocusGlow = showFocusGlow,
             context = context,
+            onAddToCategory = onAddToCategory,
+            onUninstall = onUninstall,
         )
     }
 }
@@ -172,56 +184,102 @@ internal fun AppItem(
 /**
  * Compact icon-grid item: 60 dp square icon + 2-line centered name label.
  * Mirrors the SteamPeek "Games Like This" widget exactly — just in a vertical grid.
+ *
+ * Long-pressing opens a context menu with "Add to Category" and (when installed) "Uninstall".
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun IconViewCard(
     modifier: Modifier = Modifier,
     appInfo: LibraryItem,
     onClick: () -> Unit,
     onFocus: () -> Unit,
+    onAddToCategory: (() -> Unit)? = null,
+    onUninstall: (() -> Unit)? = null,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(modifier = Modifier.size(60.dp)) {
-            CoilImage(
-                modifier = Modifier
-                    .size(60.dp)
-                    .clip(RoundedCornerShape(8.dp)),
-                // clientIconUrl is the per-platform 60×60 icon; fall back to header art
-                imageModel = { appInfo.clientIconUrl.ifEmpty { appInfo.headerImageUrl } },
-                imageOptions = ImageOptions(contentScale = ContentScale.Crop),
-            )
-            if (appInfo.isInstalled) {
-                Box(
+    var showContextMenu by remember { mutableStateOf(false) }
+
+    // Box anchors the DropdownMenu to this item's position in the grid.
+    Box {
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                // combinedClickable handles both tap (onClick) and long-press (opens menu).
+                // The onLongClick lambda only fires when at least one menu callback is wired up,
+                // so in contexts where no callbacks are passed the long-press is a no-op.
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        if (onAddToCategory != null || onUninstall != null) {
+                            showContextMenu = true
+                        }
+                    },
+                )
+                .padding(vertical = 6.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(modifier = Modifier.size(60.dp)) {
+                CoilImage(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(18.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.Check,
-                        contentDescription = stringResource(R.string.library_installed),
-                        tint = PluviaTheme.colors.statusInstalled,
-                        modifier = Modifier.size(10.dp),
-                    )
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                    // clientIconUrl is the per-platform 60×60 icon; fall back to header art
+                    imageModel = { appInfo.clientIconUrl.ifEmpty { appInfo.headerImageUrl } },
+                    imageOptions = ImageOptions(contentScale = ContentScale.Crop),
+                )
+                if (appInfo.isInstalled) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.6f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = stringResource(R.string.library_installed),
+                            tint = PluviaTheme.colors.statusInstalled,
+                            modifier = Modifier.size(10.dp),
+                        )
+                    }
                 }
             }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = appInfo.name,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = appInfo.name,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
+
+        DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false },
+        ) {
+            // "Add to Category" is always available when the callback is wired
+            if (onAddToCategory != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.library_context_add_to_category)) },
+                    onClick = {
+                        showContextMenu = false
+                        onAddToCategory()
+                    },
+                )
+            }
+            // "Uninstall" only appears for installed games
+            if (appInfo.isInstalled && onUninstall != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.library_context_uninstall)) },
+                    onClick = {
+                        showContextMenu = false
+                        onUninstall()
+                    },
+                )
+            }
+        }
     }
 }
 
