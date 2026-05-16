@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Face4
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -278,7 +279,8 @@ internal fun GridViewCard(
                                 blurRadius = 2f,
                             ),
                         ),
-                        color = Color.White,
+                        // Amber for favorites; white otherwise (text sits on top of artwork).
+                        color = if (appInfo.isFavorite) Color(0xFFFFB300) else Color.White,
                         maxLines = if (paneType == PaneType.GRID_CAPSULE) 2 else 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -400,6 +402,14 @@ private fun GridStatusIcons(appInfo: LibraryItem) {
                     modifier = Modifier.size(12.dp),
                 )
             }
+        }
+        if (appInfo.isFavorite) {
+            Icon(
+                Icons.Filled.Star,
+                contentDescription = null,
+                tint = Color(0xFFFFB300), // amber-700
+                modifier = Modifier.size(14.dp),
+            )
         }
         if (appInfo.isShared) {
             Box(
