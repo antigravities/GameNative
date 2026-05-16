@@ -73,6 +73,9 @@ data class SteamApp(
     val reviewPercentage: Byte = 0,
     @ColumnInfo("controller_support")
     val controllerSupport: ControllerSupport = ControllerSupport.none,
+    // Steam content rating IDs from PICS common/content_descriptors (e.g. 1=NudityOrSexualContent, 3=AdultOnlySexualContent, 4=GratuitousSexualContent)
+    @ColumnInfo("content_descriptors", defaultValue = "[]")
+    val contentDescriptors: List<Int> = emptyList(),
 
     // Extended
     @ColumnInfo("demo_of_app_id")
