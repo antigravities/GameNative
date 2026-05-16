@@ -122,6 +122,8 @@ internal fun LibraryListPane(
     onNavigate: (String) -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
+    onAddToCategory: ((LibraryItem) -> Unit)? = null,
+    onUninstall: ((LibraryItem) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val snackBarHost = remember { SnackbarHostState() }
@@ -276,6 +278,11 @@ internal fun LibraryListPane(
                                 val onClick = remember(item.appId) { { onNavigate(item.appId) } }
                                 val latestIndex by rememberUpdatedState(item.index)
                                 val onFocus = remember(item.appId) { { targetOfScroll = latestIndex } }
+                                // Context-menu callbacks follow the same stable-lambda pattern.
+                                // The outer callback is captured at composition time; if null the
+                                // lambda itself is null so AppItem knows to skip the menu entirely.
+                                val onAddToCategoryStable = remember(item.appId) { onAddToCategory?.let { cb -> { cb(item) } } }
+                                val onUninstallStable = remember(item.appId) { onUninstall?.let { cb -> { cb(item) } } }
 
                                 var isVisible by remember(item.index) { mutableStateOf(false) }
                                 val alpha by animateFloatAsState(
@@ -314,6 +321,8 @@ internal fun LibraryListPane(
                                         imageRefreshCounter = state.imageRefreshCounter,
                                         compatibilityStatus = state.compatibilityMap[item.name],
                                         gameStats = state.statsFor(item),
+                                        onAddToCategory = onAddToCategoryStable,
+                                        onUninstall = onUninstallStable,
                                     )
                                 }
                             }
