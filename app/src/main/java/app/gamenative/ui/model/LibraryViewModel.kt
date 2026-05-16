@@ -238,11 +238,21 @@ class LibraryViewModel @Inject constructor(
             }
         }
 
-        // Mirror SteamService's PICS sync counter into LibraryState so the UI can show a banner
+        // Mirror SteamService's PICS sync counters into LibraryState so the UI can show a banner
         // while the library is still loading from Steam after login.
         viewModelScope.launch(Dispatchers.IO) {
             SteamService.picsSyncPending.collect { pending ->
                 _state.update { it.copy(picsSyncPending = pending) }
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            SteamService.picsSyncTotal.collect { total ->
+                _state.update { it.copy(picsSyncTotal = total) }
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            SteamService.picsSyncQueued.collect { queued ->
+                _state.update { it.copy(picsSyncQueued = queued) }
             }
         }
 

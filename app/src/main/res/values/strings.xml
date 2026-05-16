@@ -1,4 +1,4 @@
-﻿<resources>
+<resources>
     <string name="app_name">GameNative</string>
     <string name="login_user">User Login</string>
     <string name="login_2fa">Two Factor</string>
@@ -117,6 +117,7 @@
     <string name="tab_local">Custom</string>
     <string name="library_tab_with_count">%1$s (%2$d)</string>
     <string name="library_syncing_games">Syncing library… %1$d games remaining</string>
+    <string name="library_syncing_games_of_total">Syncing library… %1$d of %2$d games</string>
     <string name="library_search_close">Close search</string>
     <string name="steam_collections_removed">A saved collection was removed in Steam and is no longer filtered.</string>
     <string name="steam_collections_title">Steam collections</string>
@@ -1051,6 +1052,8 @@
     <string name="settings_debug_view_log_subtitle">Shows the latest Wine/Box64 debug log</string>
     <string name="settings_debug_no_wine_logs">No Wine debug logs found</string>
     <string name="settings_debug_no_channels_selected">No channels selected</string>
+    <string name="settings_debug_refresh_pics_title">Refresh All Apps (PICS)</string>
+    <string name="settings_debug_refresh_pics_subtitle">Re-queues all known apps for PICS metadata sync</string>
     <string name="settings_debug_clear_prefs_title">Clear Preferences</string>
     <string name="settings_debug_clear_prefs_subtitle">[Closes App] Logs out the client and wipes local preference data.</string>
     <string name="settings_debug_clear_db_title">Clear Local Database</string>
