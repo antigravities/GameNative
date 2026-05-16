@@ -213,6 +213,8 @@ internal fun LibraryCarouselPane(
     onFocusedIndexChanged: (Int) -> Unit = {},
     onAddToCategory: ((LibraryItem) -> Unit)? = null,
     onUninstall: ((LibraryItem) -> Unit)? = null,
+    onToggleFavorite: ((LibraryItem) -> Unit)? = null,
+    onToggleHidden: ((LibraryItem) -> Unit)? = null,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val pullToRefreshState = rememberPullToRefreshState()
@@ -508,6 +510,8 @@ internal fun LibraryCarouselPane(
                                         // at composition time so the lambda is stable across reorders.
                                         val carouselOnAddToCategory = remember(item.appId) { onAddToCategory?.let { cb -> { cb(item) } } }
                                         val carouselOnUninstall = remember(item.appId) { onUninstall?.let { cb -> { cb(item) } } }
+                                        val carouselOnToggleFavorite = remember(item.appId) { onToggleFavorite?.let { cb -> { cb(item) } } }
+                                        val carouselOnToggleHidden = remember(item.appId) { onToggleHidden?.let { cb -> { cb(item) } } }
 
                                         AppItem(
                                             modifier = appItemModifier,
@@ -522,6 +526,8 @@ internal fun LibraryCarouselPane(
                                             enableFocusScale = false,
                                             onAddToCategory = carouselOnAddToCategory,
                                             onUninstall = carouselOnUninstall,
+                                            onToggleFavorite = carouselOnToggleFavorite,
+                                            onToggleHidden = carouselOnToggleHidden,
                                         )
                                     }
                                 }
