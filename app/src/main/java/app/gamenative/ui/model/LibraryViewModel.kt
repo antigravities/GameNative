@@ -99,6 +99,10 @@ class LibraryViewModel @Inject constructor(
         onFilterApps(paginationCurrentPage)
     }
 
+    // Steam content descriptor IDs considered adult-only:
+    // 1 = NudityOrSexualContent, 3 = AdultOnlySexualContent, 4 = GratuitousSexualContent
+    private val adultDescriptorIds = setOf(1, 3, 4)
+
     // How many items loaded on one page of results
     @Volatile private var paginationCurrentPage: Int = 0
     @Volatile private var lastPageInCurrentFilter: Int = 0
@@ -656,6 +660,11 @@ class LibraryViewModel @Inject constructor(
                             .filter { ownerMatches(it) }
                             .filter { sharedMatches(it) }
                             .filter { installedMatches(it) }
+                            .filter { item ->
+                                // When hide adult content is on, exclude games with any adult descriptor ID.
+                                !PrefManager.hideAdultContent ||
+                                    item.contentDescriptors.none { it in adultDescriptorIds }
+                            }
                             .toList()
                     }
                 } else {
@@ -667,6 +676,11 @@ class LibraryViewModel @Inject constructor(
                         .filter { item -> currentFilter.any { item.type == it } }
                         .filter { sharedMatches(it) }
                         .filter { installedMatches(it) }
+                        .filter { item ->
+                            // When hide adult content is on, exclude games with any adult descriptor ID.
+                            !PrefManager.hideAdultContent ||
+                                item.contentDescriptors.none { it in adultDescriptorIds }
+                        }
                         .toList()
                 }
 
