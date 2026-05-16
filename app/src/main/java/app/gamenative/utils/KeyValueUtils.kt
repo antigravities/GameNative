@@ -104,6 +104,9 @@ fun KeyValue.generateSteamApp(): SteamApp {
         reviewScore = this["common"]["review_score"].asByte(),
         reviewPercentage = this["common"]["review_percentage"].asByte(),
         controllerSupport = ControllerSupport.from(this["common"]["controller_support"].value),
+        // Each child's name is an index ("0", "1", …) and its value is the descriptor ID string.
+        contentDescriptors = this["common"]["content_descriptors"].children
+            .mapNotNull { it.value?.toIntOrNull() },
         demoOfAppId = this["common"]["extended"]["demoofappid"].asInteger(),
         developer = this["extended"]["developer"].value.orEmpty(),
         publisher = this["extended"]["publisher"].value.orEmpty(),
