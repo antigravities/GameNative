@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.painterResource
 import app.gamenative.PrefManager
 import app.gamenative.data.GameCompatibilityStatus
+import app.gamenative.manager.CategoryManager
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
 import app.gamenative.ui.enums.PaneType
@@ -93,6 +94,8 @@ internal fun AppItem(
     enableFocusScale: Boolean = true,
     onAddToCategory: (() -> Unit)? = null,
     onUninstall: (() -> Unit)? = null,
+    onToggleFavorite: (() -> Unit)? = null,
+    onToggleHidden: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var hideText by remember { mutableStateOf(true) }
@@ -145,6 +148,8 @@ internal fun AppItem(
             context = context,
             onAddToCategory = onAddToCategory,
             onUninstall = onUninstall,
+            onToggleFavorite = onToggleFavorite,
+            onToggleHidden = onToggleHidden,
         )
 
         PaneType.GRID_ICON -> IconViewCard(
@@ -154,6 +159,8 @@ internal fun AppItem(
             onFocus = onFocus,
             onAddToCategory = onAddToCategory,
             onUninstall = onUninstall,
+            onToggleFavorite = onToggleFavorite,
+            onToggleHidden = onToggleHidden,
         )
 
         else -> GridViewCard(
@@ -177,6 +184,8 @@ internal fun AppItem(
             context = context,
             onAddToCategory = onAddToCategory,
             onUninstall = onUninstall,
+            onToggleFavorite = onToggleFavorite,
+            onToggleHidden = onToggleHidden,
         )
     }
 }
@@ -196,6 +205,8 @@ private fun IconViewCard(
     onFocus: () -> Unit,
     onAddToCategory: (() -> Unit)? = null,
     onUninstall: (() -> Unit)? = null,
+    onToggleFavorite: (() -> Unit)? = null,
+    onToggleHidden: (() -> Unit)? = null,
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
 
@@ -210,7 +221,7 @@ private fun IconViewCard(
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = {
-                        if (onAddToCategory != null || onUninstall != null) {
+                        if (onToggleFavorite != null || onToggleHidden != null || onAddToCategory != null || onUninstall != null) {
                             showContextMenu = true
                         }
                     },
@@ -260,6 +271,36 @@ private fun IconViewCard(
             expanded = showContextMenu,
             onDismissRequest = { showContextMenu = false },
         ) {
+            // Quick-access Favorites toggle: label flips based on current membership
+            if (onToggleFavorite != null) {
+                val inFavorites = CategoryManager.isAppInCategory(appInfo.appId, CategoryManager.FAVORITES_CATEGORY)
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(
+                                if (inFavorites) R.string.library_context_remove_from_favorites
+                                else R.string.library_context_add_to_favorites
+                            )
+                        )
+                    },
+                    onClick = { showContextMenu = false; onToggleFavorite() },
+                )
+            }
+            // Quick-access Hidden toggle: label flips based on current membership
+            if (onToggleHidden != null) {
+                val inHidden = CategoryManager.isAppInCategory(appInfo.appId, CategoryManager.HIDDEN_CATEGORY)
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(
+                                if (inHidden) R.string.library_context_remove_from_hidden
+                                else R.string.library_context_add_to_hidden
+                            )
+                        )
+                    },
+                    onClick = { showContextMenu = false; onToggleHidden() },
+                )
+            }
             // "Add to Category" is always available when the callback is wired
             if (onAddToCategory != null) {
                 DropdownMenuItem(
