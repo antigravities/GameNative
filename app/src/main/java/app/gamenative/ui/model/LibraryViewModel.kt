@@ -974,14 +974,29 @@ class LibraryViewModel @Inject constructor(
                 entry.item.copy(index = idx, isInstalled = entry.isInstalled)
             }
 
+            // Pre-fetch the set of hidden app IDs once — O(1) ConcurrentHashMap lookup that
+            // returns the live Set reference stored in CategoryManager's in-memory cache.
+            val hiddenIds = app.gamenative.manager.CategoryManager
+                .getAppsInCategory(app.gamenative.manager.CategoryManager.HIDDEN_CATEGORY)
+
+            // When the user explicitly selects the "Hidden" filter we lift the exclusion so they
+            // can browse their hidden games.  Without it, hidden games are always suppressed.
+            val viewingHidden = app.gamenative.manager.CategoryManager.HIDDEN_CATEGORY in
+                currentState.selectedCategories
+
             // If any categories are selected, narrow the list to games in at least one of them.
             // Category lookup is O(1) per game via the in-memory ConcurrentHashMap in CategoryManager.
             val effectiveCombined = if (currentState.selectedCategories.isNotEmpty()) {
                 val allowedIds = currentState.selectedCategories
                     .flatMapTo(HashSet()) { app.gamenative.manager.CategoryManager.getAppsInCategory(it) }
-                combined.filter { it.appId in allowedIds }
+                combined.filter { item ->
+                    item.appId in allowedIds &&
+                    // Hidden games pass through only when the Hidden filter is explicitly selected.
+                    (viewingHidden || item.appId !in hiddenIds)
+                }
             } else {
-                combined
+                // No category filter active: silently exclude hidden games.
+                combined.filter { item -> item.appId !in hiddenIds }
             }
 
             // Total count for the current filter
