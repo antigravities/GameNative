@@ -97,6 +97,12 @@ import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ManifestInstaller
 import app.gamenative.utils.GameFeedbackUtils
 import app.gamenative.utils.IntentLaunchManager
+import app.gamenative.api.ApiResult
+import app.gamenative.api.PatchApi
+import app.gamenative.data.PatchEntry
+import app.gamenative.data.PatchInstallTask
+import app.gamenative.data.PendingPatchWork
+import app.gamenative.ui.component.dialog.PatchSelectionDialog
 import app.gamenative.utils.SteamUtils
 import app.gamenative.utils.UpdateChecker
 import app.gamenative.utils.UpdateInfo
@@ -117,9 +123,10 @@ import java.io.File
 import java.util.Locale
 import java.util.Date
 import java.util.EnumSet
-import kotlin.reflect.KFunction2
+import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.Dispatchers
@@ -132,6 +139,14 @@ private const val PENDING_LAUNCH_TIMEOUT_MS = 10_000L
 
 /** Used to suspend preLaunchApp while the user decides on large workshop updates. */
 private var workshopUpdateDeferred: CompletableDeferred<Boolean>? = null
+
+/**
+ * Bridges the patch selection dialog (Compose UI) and the preLaunchApp coroutine.
+ * preLaunchApp sets patchSelectionPatches to show the dialog, then awaits this deferred.
+ * The dialog's callbacks complete the deferred with the user's selected patches (empty = skip).
+ */
+private var patchSelectionDeferred: CompletableDeferred<List<PatchEntry>>? = null
+private val patchSelectionPatches = mutableStateOf<List<PatchEntry>?>(null)
 
 private fun NavHostController.navigateFromLoginIfNeeded(
     targetRoute: String,
@@ -724,15 +739,36 @@ fun PluviaMain(
         )
     }
 
+    // Listen for "Install Patches" requests from the game detail menu.
+    // Runs the patch flow (skipCloudSync = true) with a no-op onSuccess so it returns to
+    // the detail page instead of launching the game.
+    val onTriggerInstallPatches: (AndroidEvent.TriggerInstallPatches) -> Unit = { event ->
+        scope.launch(Dispatchers.IO) {
+            preLaunchApp(
+                context = context,
+                appId = event.appId,
+                skipCloudSync = true,
+                setLoadingDialogVisible = viewModel::setLoadingDialogVisible,
+                setLoadingProgress = viewModel::setLoadingDialogProgress,
+                setLoadingMessage = viewModel::setLoadingDialogMessage,
+                setMessageDialogState = setMessageDialogState,
+                onSuccess = { _, _ -> },
+                isOffline = !NetworkMonitor.hasInternet.value,
+            )
+        }
+    }
+
     LaunchedEffect(Unit) {
         PluviaApp.events.on<AndroidEvent.PromptSaveContainerConfig, Unit>(onPromptSaveConfig)
         PluviaApp.events.on<AndroidEvent.ShowGameFeedback, Unit>(onShowGameFeedback)
+        PluviaApp.events.on<AndroidEvent.TriggerInstallPatches, Unit>(onTriggerInstallPatches)
     }
 
     DisposableEffect(Unit) {
         onDispose {
             PluviaApp.events.off<AndroidEvent.PromptSaveContainerConfig, Unit>(onPromptSaveConfig)
             PluviaApp.events.off<AndroidEvent.ShowGameFeedback, Unit>(onShowGameFeedback)
+            PluviaApp.events.off<AndroidEvent.TriggerInstallPatches, Unit>(onTriggerInstallPatches)
         }
     }
 
@@ -1118,6 +1154,21 @@ fun PluviaMain(
                 title = msgDialogState.title,
                 message = msgDialogState.message,
             )
+
+            // Patch selection dialog: shown when preLaunchApp has fetched patches for a game
+            patchSelectionPatches.value?.let { patches ->
+                PatchSelectionDialog(
+                    patches = patches,
+                    onInstall = { selected ->
+                        patchSelectionDeferred?.complete(selected)
+                        patchSelectionPatches.value = null
+                    },
+                    onSkip = {
+                        patchSelectionDeferred?.complete(emptyList())
+                        patchSelectionPatches.value = null
+                    },
+                )
+            }
 
             val scope = rememberCoroutineScope()
             var containerConfigForDialog by remember(openContainerConfigForAppId) { mutableStateOf<ContainerData?>(null) }
@@ -1620,7 +1671,7 @@ fun preLaunchApp(
     setLoadingProgress: (Float) -> Unit,
     setLoadingMessage: (String) -> Unit,
     setMessageDialogState: (MessageDialogState) -> Unit,
-    onSuccess: KFunction2<Context, String, Unit>,
+    onSuccess: (Context, String) -> Unit,
     retryCount: Int = 0,
     isOffline: Boolean = false,
     bootToContainer: Boolean = false,
@@ -1672,17 +1723,19 @@ fun preLaunchApp(
             return@launch
         }
 
-        // When "Open container" is used we boot to desktop/file manager only — skip executable check
+        // When "Open container" is used we boot to desktop/file manager only — skip executable check.
+        // savedLaunchExe is hoisted so runPatchFlowIfNeeded() can derive gameDataDir from it.
+        var savedLaunchExe = ""
         if (!bootToContainer) {
             // Verify we have a launch executable for all platforms before proceeding (fail fast, avoid black screen)
-            val effectiveExe = when (gameSource) {
+            savedLaunchExe = when (gameSource) {
                 GameSource.STEAM -> SteamService.getLaunchExecutable(appId, container)
                 GameSource.GOG -> GOGService.getLaunchExecutable(appId, container)
                 GameSource.EPIC -> EpicService.getLaunchExecutable(appId)
                 GameSource.CUSTOM_GAME -> CustomGameScanner.getLaunchExecutable(container)
                 GameSource.AMAZON -> AmazonService.getLaunchExecutable(appId)
             }
-            if (effectiveExe.isBlank()) {
+            if (savedLaunchExe.isBlank()) {
                 Timber.tag("preLaunchApp").w("Cannot launch $appId: no executable found (game source: $gameSource)")
                 setLoadingDialogVisible(false)
                 setMessageDialogState(
@@ -1877,10 +1930,177 @@ fun preLaunchApp(
             } catch (_: Exception) { /* ignore persona read errors */ }
         }
 
+        /**
+         * Fetches patches for the current game, shows the selection dialog, downloads the
+         * selected files, and writes pending_patches.json for XServerScreen to pick up.
+         *
+         * No-ops if:
+         *  - patchDatabaseUrl is blank (feature disabled)
+         *  - device is offline
+         *  - bootToContainer is true (launching to desktop, no game to patch)
+         *  - .patches_offered marker file already exists (not the first launch)
+         *
+         * Must be called AFTER setLoadingDialogVisible(false) so the loading overlay
+         * does not obscure the patch selection dialog.
+         */
+        suspend fun runPatchFlowIfNeeded() {
+            if (bootToContainer) return
+            val baseUrl = PrefManager.patchDatabaseUrl
+            if (baseUrl.isBlank() || isOffline) return
+
+            // Write this marker to skip the dialog on all subsequent launches.
+            // Defined here so both the "no patches" and "user skipped" paths can set it.
+            val markerFile = File(container.rootDir, ".patches_offered")
+            if (markerFile.exists()) {
+                // Patches were already offered. But if a prior launch failed mid-patch, the staged
+                // files may be gone while pending_patches.json still exists. Re-download any missing
+                // files so chainPatchTasks can retry without showing the dialog again.
+                val pendingFile = File(container.rootDir, "pending_patches.json")
+                if (pendingFile.exists()) {
+                    val pendingWork = try {
+                        Json { ignoreUnknownKeys = true }.decodeFromString<PendingPatchWork>(pendingFile.readText())
+                    } catch (e: Exception) { null }
+                    if (pendingWork != null && pendingWork.stagingDownloads.isNotEmpty()) {
+                        val stagingDir = File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging")
+                        // Use the recorded stagingFiles names (parallel to stagingDownloads) so that
+                        // entries with a saveTo override are found under the right filename.
+                        val missingIndices = pendingWork.stagingDownloads.indices.filter { i ->
+                            val filename = pendingWork.stagingFiles.getOrNull(i)
+                                ?: pendingWork.stagingDownloads[i].substringAfterLast('/')
+                            !File(stagingDir, filename).exists()
+                        }
+                        if (missingIndices.isNotEmpty()) {
+                            Timber.tag("Patches").i("Re-downloading ${missingIndices.size} missing staged file(s) for retry")
+                            stagingDir.mkdirs()
+                            setLoadingMessage(context.getString(R.string.patch_downloading))
+                            withContext(Dispatchers.Main.immediate) { setLoadingDialogVisible(true) }
+                            for (i in missingIndices) {
+                                val url = pendingWork.stagingDownloads[i]
+                                val filename = pendingWork.stagingFiles.getOrNull(i)
+                                    ?: url.substringAfterLast('/')
+                                try {
+                                    PatchApi.downloadFile(url, File(stagingDir, filename))
+                                    Timber.tag("Patches").d("Re-downloaded $url")
+                                } catch (e: Exception) {
+                                    Timber.tag("Patches").e(e, "Re-download failed for $url")
+                                }
+                            }
+                            withContext(Dispatchers.Main.immediate) { setLoadingDialogVisible(false) }
+                        }
+                    }
+                }
+                return
+            }
+
+            // Resolve the store's native string ID used in the patch URL path
+            val storeId = when (gameSource) {
+                GameSource.STEAM -> gameId.toString()
+                GameSource.GOG -> appId.removePrefix("GOG_")
+                GameSource.EPIC -> EpicService.getEpicGameOf(gameId)?.catalogId ?: gameId.toString()
+                GameSource.AMAZON -> AmazonService.getAmazonGameByAppId(gameId)?.productId ?: gameId.toString()
+                GameSource.CUSTOM_GAME -> return
+            }
+
+            Timber.tag("Patches").i("Fetching patches for $gameSource/$storeId")
+            val result = PatchApi.fetchPatches(baseUrl, gameSource, storeId)
+            val patches = if (result is ApiResult.Success) result.data else {
+                Timber.tag("Patches").w("Patch fetch failed: $result")
+                emptyList()
+            }
+
+            // Always mark offered so subsequent launches skip the fetch entirely
+            markerFile.createNewFile()
+
+            if (patches.isEmpty()) {
+                SnackbarManager.show(context.getString(R.string.patch_none_available))
+                return
+            }
+
+            // Show the patch selection dialog and wait for the user's choice.
+            // The loading dialog must already be hidden at this point.
+            val deferred = CompletableDeferred<List<PatchEntry>>()
+            patchSelectionDeferred = deferred
+            withContext(Dispatchers.Main.immediate) {
+                patchSelectionPatches.value = patches
+            }
+            val selected = deferred.await()
+            patchSelectionDeferred = null
+
+            if (selected.isEmpty()) return // user tapped Skip
+
+            // Download all files for the selected patches into the Wine staging area
+            val stagingDir = File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging")
+            stagingDir.mkdirs()
+            setLoadingMessage(context.getString(R.string.patch_downloading))
+            setLoadingProgress(-1f)
+            withContext(Dispatchers.Main.immediate) { setLoadingDialogVisible(true) }
+
+            val allTasks = mutableListOf<PatchInstallTask>()
+            val stagedFiles = mutableListOf<String>()
+            val stagedUrls = mutableListOf<String>()
+            for (patch in selected) {
+                for (dl in patch.download) {
+                    try {
+                        val filename = dl.saveTo ?: dl.url.substringAfterLast('/')
+                        PatchApi.downloadFile(dl.url, File(stagingDir, filename))
+                        stagedFiles.add(filename)
+                        stagedUrls.add(dl.url)
+                        Timber.tag("Patches").d("Downloaded ${dl.url} to $stagingDir/$filename")
+                    } catch (e: Exception) {
+                        Timber.tag("Patches").e(e, "Failed to download ${dl.url}")
+                        SnackbarManager.show("Couldn't download patch " + dl.url + " for " + patch.name + ", aborting")
+                        return
+                    }
+                }
+                allTasks.addAll(patch.install)
+            }
+
+            withContext(Dispatchers.Main.immediate) { setLoadingDialogVisible(false) }
+
+            if (allTasks.isEmpty()) return
+
+            // Derive the Windows path to the game's data folder from the launch executable.
+            // savedLaunchExe is ideally a full Windows path like C:\...\game.exe, but some games
+            // (e.g. Dead Space 2) return just a bare filename with no directory component. In that
+            // case we fall back to deriving the path from the Steam install location.
+            val launchExeNormalized = savedLaunchExe.replace('/', '\\')
+            val gameDataDir = if (launchExeNormalized.contains('\\')) {
+                launchExeNormalized.substringBeforeLast('\\').ifBlank { "C:\\" }
+            } else if (gameSource == GameSource.STEAM) {
+                val appDirPath = SteamService.getAppDirPath(gameId)
+                if (container.isUseLegacyDRM) {
+                    // Game is bound to a dedicated drive — locate the drive letter via the drives string.
+                    val drives = container.drives
+                    val driveIndex = drives.indexOf(appDirPath)
+                    val driveLetter = if (driveIndex > 1) drives[driveIndex - 2] else 'D'
+                    "$driveLetter:\\"
+                } else {
+                    // ColdClientLoader: game lives under Steam's steamapps/common directory.
+                    val gameFolderName = appDirPath.trimEnd('/').substringAfterLast('/')
+                    "C:\\Program Files (x86)\\Steam\\steamapps\\common\\$gameFolderName"
+                }
+            } else {
+                "C:\\"
+            }
+
+            val pendingWork = PendingPatchWork(
+                gameDataDir = gameDataDir,
+                tasks = allTasks,
+                stagingFiles = stagedFiles,
+                stagingDownloads = stagedUrls,
+            )
+            File(container.rootDir, "pending_patches.json").writeText(
+                Json.encodeToString(pendingWork),
+            )
+            // Let the user know patches are queued; they run automatically on next launch.
+            SnackbarManager.show(context.getString(R.string.patch_queued_for_launch))
+        }
+
         // For Custom Games, bypass Steam Cloud operations entirely and proceed to launch
         if (isCustomGame) {
             Timber.tag("preLaunchApp").i("Custom Game detected for $appId — skipping Steam Cloud sync and launching container")
             setLoadingDialogVisible(false)
+            runPatchFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -1909,6 +2129,7 @@ fun preLaunchApp(
             }
 
             setLoadingDialogVisible(false)
+            runPatchFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -1918,6 +2139,7 @@ fun preLaunchApp(
         if (isAmazonGame) {
             Timber.tag("preLaunchApp").i("Amazon Game detected for $appId — skipping cloud sync and launching container")
             setLoadingDialogVisible(false)
+            runPatchFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -1950,6 +2172,7 @@ fun preLaunchApp(
             EpicService.cleanupLaunchTokens(context, container)
 
             setLoadingDialogVisible(false)
+            runPatchFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -1961,6 +2184,7 @@ fun preLaunchApp(
                 Timber.tag("preLaunchApp").w("Skipping Steam Cloud sync for $appId by user request")
             }
             setLoadingDialogVisible(false)
+            runPatchFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -2349,7 +2573,10 @@ fun preLaunchApp(
 
             SyncResult.UpToDate,
             SyncResult.Success,
-            -> onSuccess(context, appId)
+            -> {
+                runPatchFlowIfNeeded()
+                onSuccess(context, appId)
+            }
         }
     }
 }
