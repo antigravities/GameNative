@@ -92,6 +92,9 @@ import app.gamenative.service.amazon.AmazonAuthManager
 import app.gamenative.utils.PlatformOAuthHandlers
 import app.gamenative.ui.util.PlatformAuthUiHelpers
 import app.gamenative.ui.util.SnackbarManager
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 
 @Composable
 fun SettingsGroupInterface(
@@ -580,6 +583,51 @@ fun SettingsGroupInterface(
             },
             onClick = { openRegionDialog = true },
         )
+
+        // Patch database URL — tapping opens a text-entry dialog
+        var showPatchUrlDialog by remember { mutableStateOf(false) }
+        var patchDatabaseUrl by rememberSaveable { mutableStateOf(PrefManager.patchDatabaseUrl) }
+        SettingsMenuLink(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_patch_database_url_title)) },
+            subtitle = {
+                Text(
+                    text = if (patchDatabaseUrl.isBlank())
+                        stringResource(R.string.settings_patch_database_url_subtitle)
+                    else
+                        patchDatabaseUrl
+                )
+            },
+            onClick = { showPatchUrlDialog = true },
+        )
+        if (showPatchUrlDialog) {
+            var editingUrl by remember { mutableStateOf(patchDatabaseUrl) }
+            AlertDialog(
+                onDismissRequest = { showPatchUrlDialog = false },
+                title = { Text(stringResource(R.string.settings_patch_database_url_title)) },
+                text = {
+                    OutlinedTextField(
+                        value = editingUrl,
+                        onValueChange = { editingUrl = it },
+                        label = { Text("URL") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        patchDatabaseUrl = editingUrl.trim()
+                        PrefManager.patchDatabaseUrl = editingUrl.trim()
+                        showPatchUrlDialog = false
+                    }) { Text(stringResource(android.R.string.ok)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showPatchUrlDialog = false }) {
+                        Text(stringResource(android.R.string.cancel))
+                    }
+                },
+            )
+        }
     }
 
     SettingsGroup(

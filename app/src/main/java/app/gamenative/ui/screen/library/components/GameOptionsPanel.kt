@@ -349,6 +349,7 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
         AppOptionMenuType.ManageWorkshop -> Icons.Default.Build
         AppOptionMenuType.ChangeBranch -> Icons.AutoMirrored.Filled.CallSplit
         AppOptionMenuType.AddToCategory -> Icons.Default.BookmarkAdd
+        AppOptionMenuType.InstallPatches -> Icons.Default.CloudDownload
     }
 }
 
@@ -376,6 +377,7 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             AppOptionMenuType.MoveToExternalStorage,
             AppOptionMenuType.MoveToInternalStorage,
             AppOptionMenuType.ChangeBranch,
+            AppOptionMenuType.InstallPatches,
             -> gameManagement.add(option)
 
             // Container Settings
