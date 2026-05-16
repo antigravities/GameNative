@@ -50,6 +50,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -203,11 +204,12 @@ fun LibraryOptionsPanel(
                                         text = name,
                                         selected = selectedCategories.contains(name),
                                         onClick = { onCategoryFilterToggled(name) },
-                                        // Hidden is a magic category — use a distinct icon so it reads as "visibility off"
-                                        icon = if (name == app.gamenative.manager.CategoryManager.HIDDEN_CATEGORY)
-                                            Icons.Default.VisibilityOff
-                                        else
-                                            Icons.Default.Bookmark,
+                                        // Magic categories get distinct icons; Hidden → eye-slash, Favorites → star.
+                                        icon = when (name) {
+                                            app.gamenative.manager.CategoryManager.HIDDEN_CATEGORY -> Icons.Default.VisibilityOff
+                                            app.gamenative.manager.CategoryManager.FAVORITES_CATEGORY -> Icons.Default.Star
+                                            else -> Icons.Default.Bookmark
+                                        },
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }

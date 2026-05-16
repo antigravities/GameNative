@@ -252,6 +252,7 @@ private fun IconViewCard(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
+                color = if (appInfo.isFavorite) Color(0xFFFFB300) else Color.White
             )
         }
 
