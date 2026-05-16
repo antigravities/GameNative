@@ -332,4 +332,16 @@ interface SteamAppDao {
 
     @Query("SELECT * FROM steam_app WHERE id IN (:appIds)")
     suspend fun findSteamAppWithAppIds(appIds: List<Int>): List<SteamApp>
+
+    // Reverse-lookup by on-disk directory name — used by the Storage tab to identify
+    // game dirs that exist without a corresponding AppInfo entry (recovery path).
+    // install_dir mirrors config.installDir; when blank, the game is installed under
+    // app.name instead (matching SteamService.getAppDirName() logic).
+    @Query("""
+        SELECT * FROM steam_app
+        WHERE install_dir = :dirName
+           OR (install_dir = '' AND name = :dirName)
+        LIMIT 1
+    """)
+    suspend fun findSteamAppByDirName(dirName: String): SteamApp?
 }
