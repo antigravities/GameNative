@@ -563,7 +563,7 @@ object PrefManager {
         set(value) {
             setPref(EPIC_OFFLINE_MODE, value)
         }
-    
+
 
     private val USE_LEGACY_DRM = booleanPreferencesKey("use_legacy_drm")
     var useLegacyDRM: Boolean
@@ -1258,6 +1258,15 @@ object PrefManager {
             GameSource.CUSTOM_GAME -> frontendSyncDirCustom = path
         }
     }
+
+    // Base URL for the automatic patch database (e.g. https://example.com/patches/).
+    // Empty string means the feature is disabled.
+    private val PATCH_DATABASE_URL = stringPreferencesKey("patch_database_url")
+    var patchDatabaseUrl: String
+        get() = getPref(PATCH_DATABASE_URL, "")
+        set(value) {
+            setPref(PATCH_DATABASE_URL, value)
+        }
 
     // Custom Games root (additional paths). Default path is provided by the app at runtime and isn't stored here.
     private val CUSTOM_GAME_PATHS = stringPreferencesKey("custom_game_paths")

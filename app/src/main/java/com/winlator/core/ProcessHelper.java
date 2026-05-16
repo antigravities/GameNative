@@ -516,15 +516,21 @@ public abstract class ProcessHelper {
             char quoteChar = '"';
 
             if (startedQuotes) {
-                if (currChar == quoteChar) {
+                nextChar = i < count-1 ? command.charAt(i+1) : '\0';
+                if (currChar == '\\' && nextChar == quoteChar) {
+                    // \" inside a quoted token is an escaped quote — stay in quote mode
+                    value += quoteChar;
+                    i++;
+                } else if (currChar == quoteChar) {
                     startedQuotes = false;
                     if (!value.isEmpty()) {
                         value += quoteChar;
                         result.add(value);
                         value = "";
                     }
+                } else {
+                    value += currChar;
                 }
-                else value += currChar;
             }
             else if (currChar == '"' || currChar == '\'') {
                 if (currChar == '\'') quoteChar = '\'';

@@ -979,6 +979,16 @@
     <string name="settings_interface_external_storage_subtitle">Save games to external storage</string>
     <string name="settings_interface_storage_volume_title">Storage volume</string>
     <string name="settings_interface_download_server_title">Steam Download Server</string>
+    <string name="settings_patch_database_url_title">Patch Database URL</string>
+    <string name="settings_patch_database_url_subtitle">Base URL for automatic game patches. Leave blank to disable.</string>
+    <string name="patch_selection_title">Available Patches</string>
+    <string name="patch_selection_install">Install Selected</string>
+    <string name="patch_selection_skip">Skip</string>
+    <string name="patch_downloading">Downloading patch files…</string>
+    <string name="patch_installing">Installing patches…</string>
+    <string name="patch_none_available">No patches are available for this game.</string>
+    <string name="patch_queued_for_launch">Patches downloaded. They will be applied the next time you launch the game.</string>
+    <string name="option_install_patches">Install Patches</string>
     <string name="settings_interface_restart_required_title">Restart Required</string>
 
     <!-- Settings: Downloads Group -->
