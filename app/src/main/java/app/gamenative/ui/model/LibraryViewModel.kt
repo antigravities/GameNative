@@ -451,6 +451,30 @@ class LibraryViewModel @Inject constructor(
         onFilterApps()
     }
 
+    /** Toggles the game's membership in the Favorites special category, then re-filters. */
+    fun onToggleFavorite(appId: String) {
+        if (app.gamenative.manager.CategoryManager.isAppInCategory(appId, app.gamenative.manager.CategoryManager.FAVORITES_CATEGORY)) {
+            app.gamenative.manager.CategoryManager.removeAppFromCategory(appId, app.gamenative.manager.CategoryManager.FAVORITES_CATEGORY)
+            app.gamenative.ui.util.SnackbarManager.show("Removed from Favorites")
+        } else {
+            app.gamenative.manager.CategoryManager.addAppToCategory(appId, app.gamenative.manager.CategoryManager.FAVORITES_CATEGORY)
+            app.gamenative.ui.util.SnackbarManager.show("Added to Favorites")
+        }
+        onFilterApps()
+    }
+
+    /** Toggles the game's membership in the Hidden special category, then re-filters. */
+    fun onToggleHidden(appId: String) {
+        if (app.gamenative.manager.CategoryManager.isAppInCategory(appId, app.gamenative.manager.CategoryManager.HIDDEN_CATEGORY)) {
+            app.gamenative.manager.CategoryManager.removeAppFromCategory(appId, app.gamenative.manager.CategoryManager.HIDDEN_CATEGORY)
+            app.gamenative.ui.util.SnackbarManager.show("Removed from Hidden")
+        } else {
+            app.gamenative.manager.CategoryManager.addAppToCategory(appId, app.gamenative.manager.CategoryManager.HIDDEN_CATEGORY)
+            app.gamenative.ui.util.SnackbarManager.show("Added to Hidden")
+        }
+        onFilterApps()
+    }
+
     fun dismissCategoryDialog() {
         _state.update { s ->
             s.copy(categoryDialogState = app.gamenative.ui.component.dialog.state.CategoryDialogState())

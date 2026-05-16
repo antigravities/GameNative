@@ -1211,6 +1211,10 @@
     <string name="library_installed">Installed</string>
     <string name="library_installing">Installing</string>
     <string name="library_not_installed">Not installed</string>
+    <string name="library_context_add_to_favorites">Add to Favorites</string>
+    <string name="library_context_remove_from_favorites">Remove from Favorites</string>
+    <string name="library_context_add_to_hidden">Add to Hidden</string>
+    <string name="library_context_remove_from_hidden">Remove from Hidden</string>
     <string name="library_context_add_to_category">Add to Category</string>
     <string name="library_context_uninstall">Uninstall</string>
     <string name="library_uninstall_confirm_title">Uninstall \"%1$s\"?</string>
