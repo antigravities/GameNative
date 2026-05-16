@@ -55,7 +55,7 @@ const val DATABASE_NAME = "pluvia.db"
         DownloadingAppInfo::class,
         SteamUnlockedBranch::class,
     ],
-    version = 22,
+    version = 23,
     // For db migration, visit https://developer.android.com/training/data-storage/room/migrating-db-versions for more information
     exportSchema = true, // It is better to handle db changes carefully, as GN is getting much more users.
     autoMigrations = [
@@ -75,8 +75,11 @@ const val DATABASE_NAME = "pluvia.db"
         AutoMigration(from = 17, to = 18), // Added workshop_mods, enabled_workshop_item_ids, workshop_download_pending to steam_app
         AutoMigration(from = 18, to = 19), // Added recovered_install_size_bytes to app_info
         AutoMigration(from = 19, to = 20), // Added custom_install_path to app_info
-        AutoMigration(from = 20, to = 21), // Added steam_file_hash_cache table
-        AutoMigration(from = 21, to = 22), // Added GOG vertical_cover_url column
+        // v20→v23 and v21→v23 are non-defensive manual migrations (ROOM_MIGRATION_V20_to_V23 /
+        // _V21_to_V23) covering steam_file_hash_cache, content_descriptors, and vertical_cover_url
+        // together. No AutoMigration references 21 or 22: any device still on a real v21/v22 has
+        // no migration path and falls back to fallbackToDestructiveMigration(true) (an accepted
+        // data wipe) instead of crashing on a duplicate-column error. See docs/migrations.md.
     ]
 )
 @TypeConverters(

@@ -1755,6 +1755,9 @@
     <string name="debug_clear_cloud_success">Cleared %1$d cloud file(s) for %2$s</string>
     <string name="debug_clear_cloud_failed">Clear cloud failed: %1$s</string>
 
+    <string name="settings_hide_adult_content_title">Hide adult content</string>
+    <string name="settings_hide_adult_content_subtitle">Hides games with mature or explicit content descriptors from your library</string>
+
     <!-- Game Launch Tips -->
     <string name="game_launch_tip_1">Booting may take a few minutes on first launch</string>
     <string name="game_launch_tip_2">Tip: You can view the game files by pressing \"%s\" in the game settings.</string>
