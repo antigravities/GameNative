@@ -95,6 +95,16 @@ class LibraryViewModel @Inject constructor(
         onFilterApps(paginationCurrentPage)
     }
 
+    private val onLibraryFilterSettingChanged: (AndroidEvent.LibraryFilterSettingChanged) -> Unit = {
+        viewModelScope.launch(Dispatchers.IO) {
+            // The DAO flow only re-emits on count changes, so reload appList manually
+            // to pick up content_descriptors written by PICS since the last count change.
+            val includeExpired = if (_state.value.appInfoSortType.contains(AppFilter.EXPIRED)) 1 else 0
+            appList = steamAppDao._getAllOwnedAppSummariesPaged(includeExpired = includeExpired)
+            onFilterApps(paginationCurrentPage)
+        }
+    }
+
     // Steam content descriptor IDs considered adult-only:
     // 1 = NudityOrSexualContent, 3 = AdultOnlySexualContent, 4 = GratuitousSexualContent
     private val adultDescriptorIds = setOf(1, 3, 4)
@@ -170,11 +180,21 @@ class LibraryViewModel @Inject constructor(
                 }
         }
 
-        // Mirror SteamService's PICS sync counter into LibraryState so the UI can show a banner
+        // Mirror SteamService's PICS sync counters into LibraryState so the UI can show a banner
         // while the library is still loading from Steam after login.
         viewModelScope.launch(Dispatchers.IO) {
             SteamService.picsSyncPending.collect { pending ->
                 _state.update { it.copy(picsSyncPending = pending) }
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            SteamService.picsSyncTotal.collect { total ->
+                _state.update { it.copy(picsSyncTotal = total) }
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            SteamService.picsSyncQueued.collect { queued ->
+                _state.update { it.copy(picsSyncQueued = queued) }
             }
         }
 
@@ -217,6 +237,7 @@ class LibraryViewModel @Inject constructor(
         PluviaApp.events.on<AndroidEvent.LibraryInstallStatusChanged, Unit>(onInstallStatusChanged)
         PluviaApp.events.on<AndroidEvent.CustomGameImagesFetched, Unit>(onCustomGameImagesFetched)
         PluviaApp.events.on<AndroidEvent.RecommendationToggleChanged, Unit>(onRecommendationToggleChanged)
+        PluviaApp.events.on<AndroidEvent.LibraryFilterSettingChanged, Unit>(onLibraryFilterSettingChanged)
 
         viewModelScope.launch(Dispatchers.IO) {
             cachedRecommendation = RecommendationRepository.getCurrentRecommendation(context)
@@ -247,6 +268,7 @@ class LibraryViewModel @Inject constructor(
         PluviaApp.events.off<AndroidEvent.LibraryInstallStatusChanged, Unit>(onInstallStatusChanged)
         PluviaApp.events.off<AndroidEvent.CustomGameImagesFetched, Unit>(onCustomGameImagesFetched)
         PluviaApp.events.off<AndroidEvent.RecommendationToggleChanged, Unit>(onRecommendationToggleChanged)
+        PluviaApp.events.off<AndroidEvent.LibraryFilterSettingChanged, Unit>(onLibraryFilterSettingChanged)
         super.onCleared()
     }
 

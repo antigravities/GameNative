@@ -160,6 +160,18 @@ object PrefManager {
             setPref(LAST_PICS_CHANGE_NUMBER, value)
         }
 
+    private val REFRESH_ALL_APPS_PENDING = booleanPreferencesKey("refresh_all_apps_pending")
+    var refreshAllAppsPending: Boolean
+        get() = getPref(REFRESH_ALL_APPS_PENDING, false)
+        set(value) { setPref(REFRESH_ALL_APPS_PENDING, value) }
+
+    // How many apps have been successfully sent to the PICS channel in the current refresh run.
+    // On resume after crash, refreshAllApps() drops this many IDs from the front of the list.
+    private val REFRESH_ALL_APPS_OFFSET = intPreferencesKey("refresh_all_apps_offset")
+    var refreshAllAppsOffset: Int
+        get() = getPref(REFRESH_ALL_APPS_OFFSET, 0)
+        set(value) { setPref(REFRESH_ALL_APPS_OFFSET, value) }
+
     /* Container Default Settings */
     private val SCREEN_SIZE = stringPreferencesKey("screen_size")
     var screenSize: String
