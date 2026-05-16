@@ -334,6 +334,18 @@ fun SettingsGroupInterface(
             onClick = { openLanguageDialog = true },
         )
 
+        var hideAdultContent by rememberSaveable { mutableStateOf(PrefManager.hideAdultContent) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_hide_adult_content_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_hide_adult_content_subtitle)) },
+            state = hideAdultContent,
+            onCheckedChange = {
+                hideAdultContent = it
+                PrefManager.hideAdultContent = it
+            },
+        )
+
         // Unified visual icon picker (affects app and notification icons)
         var selectedVariant by rememberSaveable { mutableStateOf(if (PrefManager.useAltLauncherIcon || PrefManager.useAltNotificationIcon) 1 else 0) }
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
