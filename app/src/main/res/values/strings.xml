@@ -920,6 +920,8 @@
     <string name="settings_debug_view_log_subtitle">Shows the latest Wine/Box64 debug log</string>
     <string name="settings_debug_no_wine_logs">No Wine debug logs found</string>
     <string name="settings_debug_no_channels_selected">No channels selected</string>
+    <string name="settings_debug_refresh_pics_title">Refresh All Apps (PICS)</string>
+    <string name="settings_debug_refresh_pics_subtitle">Re-queues all known apps for PICS metadata sync</string>
     <string name="settings_debug_clear_prefs_title">Clear Preferences</string>
     <string name="settings_debug_clear_prefs_subtitle">[Closes App] Logs out the client and wipes local preference data.</string>
     <string name="settings_debug_clear_db_title">Clear Local Database</string>
