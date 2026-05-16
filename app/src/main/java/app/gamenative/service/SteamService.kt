@@ -297,6 +297,10 @@ class SteamService : Service(), IChallengeUrlChanged {
     private val pendingSyncAppIds: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val pendingSyncFileLock = Any()
     private val pendingSyncFile by lazy { File(applicationContext.filesDir, "pending_achievement_sync.txt") }
+  
+    // Debounce fields for onLicenseList — coalesces rapid callback bursts into one processing run.
+    private var licenseListDebounceJob: Job? = null
+    @Volatile private var pendingLicenseCallback: LicenseListCallback? = null
 
     private val onEndProcess: (AndroidEvent.EndProcess) -> Unit = {
         Companion.stop()
@@ -5030,15 +5034,22 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         Timber.i("Received License List ${callback.result}, size: ${callback.licenseList.size}")
 
-        scope.launch {
+        // Coalesce rapid callbacks (e.g. bulk activations) so only the last in a burst triggers
+        // the expensive DB + PICS work, preventing parallel in-flight coroutines from OOMing.
+        pendingLicenseCallback = callback
+        licenseListDebounceJob?.cancel()
+        licenseListDebounceJob = scope.launch {
+            delay(5.seconds)
+            val pending = pendingLicenseCallback ?: return@launch
+
             // Set in-memory field immediately — DepotDownloader uses this for auth
             // during the current session; the DB write below is for persistence across restarts.
-            licenses = callback.licenseList
+            licenses = pending.licenseList
 
             // --- CPU work BEFORE acquiring any write lock ---
             // Previously this groupBy/map ran inside withTransaction, holding the write
             // lock during expensive CPU work on 59k+ license entries.
-            val licensesToAdd = callback.licenseList
+            val licensesToAdd = pending.licenseList
                 .groupBy { it.packageID }
                 .map { licensesEntry ->
                     val preferred = licensesEntry.value.firstOrNull {
@@ -5131,7 +5142,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             // --- Transaction 2: raw license persistence for DepotDownloader ---
             // JSON serialization of 59k License objects happens here (outside T1) so T1's
             // lock window stays short. Runs after PICS is queued so it doesn't delay the pipeline.
-            val cachedLicenses = callback.licenseList.map { license ->
+            val cachedLicenses = pending.licenseList.map { license ->
                 CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
             }
             db.withTransaction {
