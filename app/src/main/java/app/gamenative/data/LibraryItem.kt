@@ -43,6 +43,8 @@ data class LibraryItem(
     // Phase 2 of GamePageViewModel produces a structurally different LibraryItem
     // when the flag changes, bypassing StateFlow's equality deduplication.
     val hasWorkshop: Boolean = false,
+    // True when the app is in the Favorites magic category; drives sort priority and amber highlight.
+    val isFavorite: Boolean = false,
 ) {
     val clientIconUrl: String
         get() = when (gameSource) {
