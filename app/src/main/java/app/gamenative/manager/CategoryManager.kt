@@ -19,6 +19,9 @@ object CategoryManager {
     /** Magic category name: games in this category are hidden from the library by default. */
     const val HIDDEN_CATEGORY = "Hidden"
 
+    /** Magic category name: games in this category are sorted first and highlighted in amber. */
+    const val FAVORITES_CATEGORY = "Favorites"
+
     private lateinit var categoriesDir: File
 
     // Maps category name → thread-safe set of composite app IDs

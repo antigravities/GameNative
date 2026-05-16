@@ -875,7 +875,11 @@ class LibraryViewModel @Inject constructor(
                 )
             }
 
-            val sortComparator: Comparator<LibraryEntry> = when (currentState.currentSortOption) {
+            // Pre-fetch favorites set once — O(1) ConcurrentHashMap lookup on the live Set reference.
+            val favoriteIds = app.gamenative.manager.CategoryManager
+                .getAppsInCategory(app.gamenative.manager.CategoryManager.FAVORITES_CATEGORY)
+
+            val baseSortComparator: Comparator<LibraryEntry> = when (currentState.currentSortOption) {
                 SortOption.INSTALLED_FIRST -> compareBy<LibraryEntry> { entry ->
                     if (entry.isInstalled) 0 else 1
                 }.thenBy { sortKeyOf.getValue(it.item.appId) }
@@ -889,8 +893,21 @@ class LibraryViewModel @Inject constructor(
                 }.thenBy { sortKeyOf.getValue(it.item.appId) }
             }
 
+            // Prepend favorites-first tier only when there are favorites; avoids an extra
+            // comparison pass on every item for users who haven't favorited anything.
+            val sortComparator = if (favoriteIds.isNotEmpty()) {
+                compareBy<LibraryEntry> { if (it.item.appId in favoriteIds) 0 else 1 }
+                    .then(baseSortComparator)
+            } else {
+                baseSortComparator
+            }
+
             val sortedCombined = combined.sortedWith(sortComparator).mapIndexed { idx, entry ->
-                entry.item.copy(index = idx, isInstalled = entry.isInstalled)
+                entry.item.copy(
+                    index = idx,
+                    isInstalled = entry.isInstalled,
+                    isFavorite = entry.item.appId in favoriteIds,
+                )
             }
 
             // Pre-fetch the set of hidden app IDs once — O(1) ConcurrentHashMap lookup that
