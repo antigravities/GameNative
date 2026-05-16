@@ -2,10 +2,14 @@ package app.gamenative.ui.screen.library.components
 
 import android.content.Context
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +58,7 @@ import kotlinx.coroutines.withContext
 /**
  * List view card with compact layout.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ListViewCard(
     modifier: Modifier,
@@ -65,21 +70,29 @@ internal fun ListViewCard(
     isRefreshing: Boolean,
     compatibilityStatus: GameCompatibilityStatus?,
     context: Context,
+    onAddToCategory: (() -> Unit)? = null,
+    onUninstall: (() -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isItemFocused by interactionSource.collectIsFocusedAsState()
+    var showContextMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(isItemFocused) {
         onFocusChanged(isItemFocused)
         if (isItemFocused) onFocus()
     }
 
+    // Box anchors the DropdownMenu to this item so it appears near the long-pressed row.
+    Box {
     Card(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .clickable(
+            .combinedClickable(
                 onClick = onClick,
+                onLongClick = {
+                    if (onAddToCategory != null || onUninstall != null) showContextMenu = true
+                },
                 interactionSource = interactionSource,
                 indication = null,
             ),
@@ -195,6 +208,25 @@ internal fun ListViewCard(
             }
         }
     }
+
+    DropdownMenu(
+        expanded = showContextMenu,
+        onDismissRequest = { showContextMenu = false },
+    ) {
+        if (onAddToCategory != null) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.library_context_add_to_category)) },
+                onClick = { showContextMenu = false; onAddToCategory() },
+            )
+        }
+        if (appInfo.isInstalled && onUninstall != null) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.library_context_uninstall)) },
+                onClick = { showContextMenu = false; onUninstall() },
+            )
+        }
+    }
+    } // end Box
 }
 
 /**
