@@ -343,6 +343,7 @@ fun SettingsGroupInterface(
             onCheckedChange = {
                 hideAdultContent = it
                 PrefManager.hideAdultContent = it
+                PluviaApp.events.emit(AndroidEvent.LibraryFilterSettingChanged)
             },
         )
 
