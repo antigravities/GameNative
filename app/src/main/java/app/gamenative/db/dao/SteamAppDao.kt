@@ -49,7 +49,7 @@ private const val OWNED_APPS_WHERE =
     "  ) " +
     ") "
 
-private const val PAGE_SIZE = 50
+private const val PAGE_SIZE = 500
 
 @Dao
 interface SteamAppDao {
@@ -140,6 +140,20 @@ interface SteamAppDao {
         includeExpired: Int = 0,
     ): List<SteamAppSummary>
 
+    // Fetches SteamAppSummary rows for a specific set of app IDs.
+    // Caller must guard against empty [ids] — Room generates invalid SQL for IN ().
+    @Query(
+        "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
+            "owner_account_id, install_dir, content_descriptors " +
+            "FROM steam_app AS app " + OWNED_APPS_WHERE +
+            "AND app.id IN (:ids)",
+    )
+    suspend fun _getOwnedAppSummariesByIds(
+        ids: List<Int>,
+        invalidPkgId: Int = INVALID_PKG_ID,
+        includeExpired: Int = 0,
+    ): List<SteamAppSummary>
+
     @Transaction
     suspend fun _getAllOwnedAppSummariesPaged(
         invalidPkgId: Int = INVALID_PKG_ID,
@@ -169,12 +183,29 @@ interface SteamAppDao {
     fun getAllOwnedAppSummaries(
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Boolean = false,
+        priorityIds: List<Int> = emptyList(),
+        fastFirstRender: Boolean = false,
     ): Flow<List<SteamAppSummary>> {
         val includeExpiredFlag = if (includeExpired) 1 else 0
+        // Scoped to this flow instance: getAndSet(true) returns false exactly once,
+        // so the priority batch is emitted only on the first inner-flow execution.
+        // Without this, every _observeOwnedAppCount re-fire (e.g. a game is added)
+        // would re-emit favorites and replace the full list with favorites-only.
+        val didFastRender = java.util.concurrent.atomic.AtomicBoolean(false)
         return _observeOwnedAppCount(invalidPkgId, includeExpiredFlag)
             .distinctUntilChanged()
             .flatMapLatest {
-                flow { emit(_getAllOwnedAppSummariesPaged(invalidPkgId, includeExpiredFlag)) }
+                flow {
+                    if (fastFirstRender && !didFastRender.getAndSet(true) && priorityIds.isNotEmpty()) {
+                        // Emit favorited rows immediately so the user can launch a game
+                        // before the full ~30-second load of all 45k rows completes.
+                        val priorityBatch = _getOwnedAppSummariesByIds(
+                            priorityIds, invalidPkgId, includeExpiredFlag,
+                        )
+                        if (priorityBatch.isNotEmpty()) emit(priorityBatch)
+                    }
+                    emit(_getAllOwnedAppSummariesPaged(invalidPkgId, includeExpiredFlag))
+                }
             }
     }
 
