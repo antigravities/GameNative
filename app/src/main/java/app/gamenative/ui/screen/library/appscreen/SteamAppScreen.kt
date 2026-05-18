@@ -817,6 +817,26 @@ class SteamAppScreen : BaseAppScreen() {
                     context.startActivity(browserIntent)
                 },
             ),
+            AppMenuOption(
+                AppOptionMenuType.ViewOnSteam,
+                onClick = {
+                    val browserIntent = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://store.steampowered.com/app/$gameId"),
+                    )
+                    context.startActivity(browserIntent)
+                },
+            ),
+            AppMenuOption(
+                AppOptionMenuType.ViewOnSteamDB,
+                onClick = {
+                    val browserIntent = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://www.steamdb.info/app/$gameId"),
+                    )
+                    context.startActivity(browserIntent)
+                },
+            ),
         )
 
         if (!isInstalled || isDownloadInProgress) {
