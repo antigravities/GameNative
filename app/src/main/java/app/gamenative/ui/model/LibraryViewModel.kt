@@ -176,7 +176,20 @@ class LibraryViewModel @Inject constructor(
                 .map { it.appInfoSortType.contains(AppFilter.EXPIRED) }
                 .distinctUntilChanged()
                 .flatMapLatest { includeExpired ->
-                    steamAppDao.getAllOwnedAppSummaries(includeExpired = includeExpired)
+                    // Parse "STEAM_570" → 570; non-Steam IDs (e.g. "GOG_1234") produce null.
+                    val favIds = app.gamenative.manager.CategoryManager
+                        .getAppsInCategory(app.gamenative.manager.CategoryManager.FAVORITES_CATEGORY)
+                        .mapNotNull { it.removePrefix("${GameSource.STEAM.name}_").toIntOrNull() }
+                    steamAppDao.getAllOwnedAppSummaries(
+                        includeExpired = includeExpired,
+                        priorityIds = favIds,
+                        // isFirstLoad flips false after the first onFilterApps() completes,
+                        // so fastFirstRender is true exactly once per ViewModel lifetime.
+                        // appList.isEmpty() was wrong: the favorites batch populates appList
+                        // before the full list arrives, causing game-add events to re-trigger
+                        // the fast-path and wipe the full list.
+                        fastFirstRender = isFirstLoad,
+                    )
                 }
                 .collect { apps ->
                     Timber.tag("LibraryViewModel").d("Collecting ${apps.size} apps")
