@@ -350,6 +350,8 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
         AppOptionMenuType.ChangeBranch -> Icons.AutoMirrored.Filled.CallSplit
         AppOptionMenuType.AddToCategory -> Icons.Default.BookmarkAdd
         AppOptionMenuType.InstallPatches -> Icons.Default.CloudDownload
+        AppOptionMenuType.ViewOnSteam -> Icons.AutoMirrored.Filled.OpenInNew
+        AppOptionMenuType.ViewOnSteamDB -> Icons.AutoMirrored.Filled.OpenInNew
     }
 }
 
@@ -404,7 +406,9 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             AppOptionMenuType.FetchSteamGridDBImages,
             AppOptionMenuType.TestGraphics,
             AppOptionMenuType.ManageGameContent,
-            AppOptionMenuType.ManageWorkshop
+            AppOptionMenuType.ManageWorkshop,
+            AppOptionMenuType.ViewOnSteam,
+            AppOptionMenuType.ViewOnSteamDB,
             -> helpInfo.add(option)
 
             // Quick Actions
