@@ -84,7 +84,7 @@ public class XEnvironment implements Iterable<EnvironmentComponent> {
             try {
                 environmentComponent.stop();
             }
-            catch (Throwable e) {
+            catch (Exception e) {
                 Log.e("XEnvironment", "Failed to stop component " + environmentComponent.getClass().getSimpleName(), e);
             }
         }
