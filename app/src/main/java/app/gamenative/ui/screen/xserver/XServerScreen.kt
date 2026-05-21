@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Color
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -1508,7 +1510,11 @@ fun XServerScreen(
         }
         val onGuestProgramTerminated: (AndroidEvent.GuestProgramTerminated) -> Unit = {
             Timber.i("onGuestProgramTerminated")
-            exit(xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
+            // The termination callback fires on a background waitFor thread. Compose
+            // navigation (navigateBack) must run on the main thread, so dispatch there.
+            Handler(Looper.getMainLooper()).post {
+                exit(xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
+            }
         }
         val onForceCloseApp: (SteamEvent.ForceCloseApp) -> Unit = {
             Timber.i("onForceCloseApp")
@@ -4509,12 +4515,12 @@ private fun exit(
     } catch (e: Exception) {
         Timber.e(e, "winHandler.stop() failed during exit")
     }
-    PluviaApp.shutdownEnvironment()
 
-    // Bionic-Steam mode brought up libsteamclient.so inside this Android process
-    // (see BionicProgramLauncherComponent.bootstrapNativeSteamClient). Tear it
-    // down so the next launch can stand up a fresh pipe / user instead of
-    // inheriting the previous session's half-dead state.
+    // Shut down libsteamclient.so BEFORE killing Wine. nativeShutdown() communicates
+    // over the same IPC socket pair that Wine holds; if Wine is SIGKILLed first the
+    // socket is already gone and nativeShutdown() crashes with a native signal
+    // (uncatchable from Kotlin), taking the whole process down. Calling stop() while
+    // Wine is still alive lets the IPC tear down cleanly.
     if (container.isLaunchBionicSteam) {
         // Launch async to avoid ANR if nativeShutdown() takes >5s
         CoroutineScope(Dispatchers.IO).launch {
@@ -4527,6 +4533,8 @@ private fun exit(
             }
         }
     }
+
+    PluviaApp.shutdownEnvironment()
 
     // empty Wine/XDG trash in background after container stops
     CoroutineScope(Dispatchers.IO).launch {

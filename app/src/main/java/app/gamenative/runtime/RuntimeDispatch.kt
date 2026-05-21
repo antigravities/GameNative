@@ -26,11 +26,13 @@ fun dispatchLaunchByRuntime(
 // exit-side counterpart to dispatchLaunchByRuntime. XServerScreen and WebViewScreen pass
 // this as their navigateBack callback. expectedRoute guards against acting on a back that
 // fired after the user already navigated elsewhere; the route equality check mirrors the
-// in-line block this replaced. external-intent launches finish() the activity instead of
-// popping the back stack so the caller's task stack stays intact.
+// in-line block this replaced. we ALWAYS pop back to the library, regardless of how the
+// session was launched -- finish() on an external-intent launch (home-screen shortcut /
+// deep link) would close the whole app instead of returning to the library.
 //
-// finishActivity / popBackStack are passed as lambdas so the function stays
-// android.app.Activity / NavController-free for unit testability.
+// finishActivity / wasLaunchedViaExternalIntent are retained in the signature for the
+// call sites + test seam even though the body no longer finishes; popBackStack is passed
+// as a lambda so the function stays NavController-free for unit testability.
 @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
 fun dispatchNavigateBack(
     expectedRoute: String,
@@ -41,11 +43,8 @@ fun dispatchNavigateBack(
     clearExternalIntentFlag: () -> Unit,
 ) {
     if (currentRoute != expectedRoute) return
-    if (wasLaunchedViaExternalIntent) {
-        Timber.d("[IntentLaunch]: Finishing activity to return to external launcher ($expectedRoute)")
-        clearExternalIntentFlag()
-        finishActivity()
-    } else {
-        popBackStack()
-    }
+    // Always pop back to the library. clear the external-intent flag first so a later
+    // genuine back doesn't mis-fire on a stale flag.
+    clearExternalIntentFlag()
+    popBackStack()
 }
