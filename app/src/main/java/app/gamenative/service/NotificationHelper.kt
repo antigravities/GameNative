@@ -31,7 +31,18 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
         private const val DOWNLOAD_CHANNEL_ID = "pluvia_downloads"
         private const val DOWNLOAD_CHANNEL_NAME = "Downloads"
 
+        // High-importance channel so game invites appear as heads-up banners.
+        private const val INVITE_CHANNEL_ID = "game_invites"
+        private const val INVITE_CHANNEL_NAME = "Game Invites"
+
         const val ACTION_EXIT = "com.oxgames.pluvia.EXIT"
+
+        // Intent action + extras for the "tap to join" notification.
+        const val ACTION_GAME_INVITE_ACCEPT  = "app.gamenative.GAME_INVITE_ACCEPT"
+        const val EXTRA_INVITE_APP_ID        = "invite_app_id"
+        const val EXTRA_INVITE_LOBBY_ID      = "invite_lobby_id"
+        const val EXTRA_INVITE_SENDER_NAME   = "invite_sender_name"
+        const val EXTRA_INVITE_GAME_NAME     = "invite_game_name"
     }
 
     private val notificationManager: NotificationManager =
@@ -40,6 +51,7 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
     init {
         createNotificationChannel()
         createDownloadNotificationChannel()
+        createInviteNotificationChannel()
     }
 
     private fun createNotificationChannel() {
@@ -151,6 +163,61 @@ class NotificationHelper @Inject constructor(@ApplicationContext private val con
      */
     fun cancelDownloadNotification(appId: Int) {
         notificationManager.cancel(appId)
+    }
+
+    private fun createInviteNotificationChannel() {
+        val channel = NotificationChannel(
+            INVITE_CHANNEL_ID,
+            INVITE_CHANNEL_NAME,
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "Steam game lobby invites from friends"
+        }
+        notificationManager.createNotificationChannel(channel)
+    }
+
+    /**
+     * Derives a stable notification ID from (appId, lobbyId) so that simultaneous invites
+     * from different friends or for different games each get their own notification tile.
+     */
+    private fun inviteNotificationId(appId: Int, lobbyId: Long): Int =
+        (appId.toLong() xor lobbyId).toInt()
+
+    /**
+     * Shows a heads-up notification for an incoming Steam lobby invite.
+     * Tapping the notification starts MainActivity with ACTION_GAME_INVITE_ACCEPT,
+     * which triggers the install/bionic/launch flow.
+     */
+    fun notifyGameInvite(appId: Int, lobbyId: Long, gameName: String, senderName: String) {
+        val notifId = inviteNotificationId(appId, lobbyId)
+        val acceptIntent = Intent(ACTION_GAME_INVITE_ACCEPT, null, context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_INVITE_APP_ID, appId)
+            putExtra(EXTRA_INVITE_LOBBY_ID, lobbyId)
+            putExtra(EXTRA_INVITE_SENDER_NAME, senderName)
+            putExtra(EXTRA_INVITE_GAME_NAME, gameName)
+        }
+        // Use notifId as the request code so each (appId, lobbyId) pair gets an independent PI.
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notifId,
+            acceptIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(context, INVITE_CHANNEL_ID)
+            .setContentTitle(context.getString(R.string.notification_game_invite_title, senderName, gameName))
+            .setContentText(context.getString(R.string.notification_game_invite_text))
+            .setSmallIcon(smallIconRes())
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        notificationManager.notify(notifId, notification)
+    }
+
+    /** Dismisses the invite notification for a specific (appId, lobbyId) pair. */
+    fun cancelGameInviteNotification(appId: Int, lobbyId: Long) {
+        notificationManager.cancel(inviteNotificationId(appId, lobbyId))
     }
 
     fun createForegroundNotification(content: String): Notification {
