@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -48,6 +49,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navDeepLink
 import app.gamenative.BuildConfig
 import app.gamenative.Constants
@@ -63,6 +65,7 @@ import app.gamenative.enums.PathType
 import app.gamenative.enums.SaveLocation
 import app.gamenative.enums.SyncResult
 import app.gamenative.events.AndroidEvent
+import app.gamenative.events.SteamEvent
 import app.gamenative.service.SteamService
 import app.gamenative.service.amazon.AmazonService
 import com.posthog.PostHog
@@ -131,8 +134,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.snapshotFlow
 import timber.log.Timber
 
 private const val PENDING_LAUNCH_TIMEOUT_MS = 10_000L
@@ -147,6 +152,12 @@ private var workshopUpdateDeferred: CompletableDeferred<Boolean>? = null
  */
 private var patchSelectionDeferred: CompletableDeferred<List<PatchEntry>>? = null
 private val patchSelectionPatches = mutableStateOf<List<PatchEntry>?>(null)
+
+/** Bridges the bionic-steam prompt dialog and the invite-accept coroutine. */
+private var inviteBionicDeferred: CompletableDeferred<Boolean>? = null
+
+/** Bridges the close-running-game prompt dialog and the invite-accept coroutine. */
+private var inviteCloseGameDeferred: CompletableDeferred<Boolean>? = null
 
 private fun NavHostController.navigateFromLoginIfNeeded(
     targetRoute: String,
@@ -328,6 +339,14 @@ fun PluviaMain(
     // Track previous connection state to detect actual changes (not just recomposition)
     val previousConnectionState = remember { mutableStateOf(state.connectionState) }
 
+    // Pending lobby invite from notification tap; drives the step-by-step accept flow below.
+    val pendingInvite by viewModel.pendingLobbyInvite.collectAsStateWithLifecycle()
+
+    // True when XServerScreen is the active destination (i.e. a game is running).
+    val isGameRunning by rememberUpdatedState(
+        navController.currentBackStackEntryAsState().value?.destination?.route == PluviaScreen.XServer.route
+    )
+
     // Reset dismissed state only when connection state actually changes
     LaunchedEffect(state.connectionState) {
         if (previousConnectionState.value != state.connectionState) {
@@ -419,6 +438,102 @@ fun PluviaMain(
                 }
             }
         }
+    }
+
+    // Consume cold-start game invite stored in MainActivity companion (no event-bus replay).
+    // Emitting the event here routes it through MainViewModel.onGameInviteAccepted,
+    // which sets pendingLobbyInvite and triggers the step-machine LaunchedEffect below.
+    LaunchedEffect(Unit) {
+        MainActivity.consumePendingGameInvite()?.let { event ->
+            PluviaApp.events.emit(event)
+        }
+    }
+
+    // Lobby-invite accept flow: runs each time pendingInvite becomes non-null.
+    // Steps: (1) check installed, (2) check bionic steam, (3) close running game, (4) launch.
+    // Each yes/no dialog suspends the coroutine via CompletableDeferred until the user acts.
+    LaunchedEffect(pendingInvite) {
+        val invite = pendingInvite ?: return@LaunchedEffect
+
+        // Step 1 — Installation check (IO: getAppInfoOf does a DB query)
+        val isInstalled = withContext(Dispatchers.IO) { SteamService.isAppInstalled(invite.appId) }
+        if (!isInstalled) {
+            msgDialogState = MessageDialogState(
+                visible = true,
+                type = DialogType.INVITE_NOT_INSTALLED,
+                title = context.getString(R.string.dialog_game_invite_not_installed_title),
+                message = context.getString(R.string.dialog_game_invite_not_installed_body, invite.gameName),
+                dismissBtnText = context.getString(R.string.close),
+            )
+            viewModel.setPendingLobbyInvite(null)
+            return@LaunchedEffect
+        }
+
+        // Step 2 — Bionic Steam check (IO: ContainerManager reads from disk)
+        val hasBionic = withContext(Dispatchers.IO) { viewModel.isLaunchBionicSteam(context, invite.appId) }
+        if (!hasBionic) {
+            val deferred = CompletableDeferred<Boolean>()
+            inviteBionicDeferred = deferred
+            msgDialogState = MessageDialogState(
+                visible = true,
+                type = DialogType.INVITE_NEEDS_BIONIC,
+                title = context.getString(R.string.dialog_game_invite_needs_bionic_title),
+                message = context.getString(R.string.dialog_game_invite_needs_bionic_body, invite.gameName),
+                confirmBtnText = context.getString(R.string.dialog_game_invite_needs_bionic_enable),
+                dismissBtnText = context.getString(R.string.close),
+            )
+            val enabled = deferred.await()
+            inviteBionicDeferred = null
+            msgDialogState = MessageDialogState(false)
+            if (!enabled) {
+                viewModel.setPendingLobbyInvite(null)
+                return@LaunchedEffect
+            }
+            withContext(Dispatchers.IO) { viewModel.enableLaunchBionicSteam(context, invite.appId) }
+        }
+
+        // Step 3 — If a game is running, prompt to close it, then wait for XServer to exit
+        if (isGameRunning) {
+            val deferred = CompletableDeferred<Boolean>()
+            inviteCloseGameDeferred = deferred
+            msgDialogState = MessageDialogState(
+                visible = true,
+                type = DialogType.INVITE_CLOSE_GAME,
+                title = context.getString(R.string.dialog_game_invite_close_game_title),
+                message = context.getString(R.string.dialog_game_invite_close_game_body),
+                confirmBtnText = context.getString(R.string.ok),
+                dismissBtnText = context.getString(R.string.close),
+            )
+            val confirmed = deferred.await()
+            inviteCloseGameDeferred = null
+            msgDialogState = MessageDialogState(false)
+            if (!confirmed) {
+                viewModel.setPendingLobbyInvite(null)
+                return@LaunchedEffect
+            }
+            PluviaApp.events.emit(SteamEvent.ForceCloseApp)
+            // Suspend until XServerScreen is no longer the active destination
+            snapshotFlow { navController.currentBackStackEntry?.destination?.route }
+                .first { it != PluviaScreen.XServer.route }
+        }
+
+        // Step 4 — Apply connect args and launch.
+        // Append +connect_lobby as two tokens so Wine passes them as separate argv entries
+        // to the game executable (mirrors how the desktop Steam client invites work).
+        val connectArgs = withContext(Dispatchers.IO) {
+            val container = ContainerManager(context).getContainerById("STEAM_${invite.appId}")
+            val base = container?.execArgs?.trim() ?: ""
+            if (base.isNotEmpty()) "$base +connect_lobby ${invite.lobbyId}"
+            else "+connect_lobby ${invite.lobbyId}"
+        }
+        // Store lobby args in a lightweight side-channel rather than via ContainerData.
+        // ContainerData resets all un-set fields (emulator, graphics driver, …) to defaults,
+        // and XServerScreen's saveData() calls would then persist those defaults to disk —
+        // permanently clobbering the user's container config.
+        IntentLaunchManager.setPendingExtraGameArgs("STEAM_${invite.appId}", connectArgs)
+        // Clear before launching so this effect doesn't re-fire if the composable recomposes
+        viewModel.setPendingLobbyInvite(null)
+        PluviaApp.events.emit(AndroidEvent.ExternalGameLaunch("STEAM_${invite.appId}"))
     }
 
     // timeout stale pending requests — if service never starts, don't hang indefinitely
@@ -1100,6 +1215,27 @@ fun PluviaMain(
             onDismissRequest = {
                 workshopUpdateDeferred?.complete(false)
             }
+        }
+
+        // Game invite — informational only, no confirm button needed
+        DialogType.INVITE_NOT_INSTALLED -> {
+            onConfirmClick = null
+            onDismissClick = { msgDialogState = MessageDialogState(false) }
+            onDismissRequest = { msgDialogState = MessageDialogState(false) }
+        }
+
+        // Game invite — yes/no: enable Bionic Steam or cancel
+        DialogType.INVITE_NEEDS_BIONIC -> {
+            onConfirmClick = { inviteBionicDeferred?.complete(true) }
+            onDismissClick = { inviteBionicDeferred?.complete(false) }
+            onDismissRequest = { inviteBionicDeferred?.complete(false) }
+        }
+
+        // Game invite — yes/no: close running game or cancel
+        DialogType.INVITE_CLOSE_GAME -> {
+            onConfirmClick = { inviteCloseGameDeferred?.complete(true) }
+            onDismissClick = { inviteCloseGameDeferred?.complete(false) }
+            onDismissRequest = { inviteCloseGameDeferred?.complete(false) }
         }
 
         else -> {

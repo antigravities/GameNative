@@ -33,6 +33,7 @@ import coil.request.CachePolicy
 import app.gamenative.BuildConfig
 import app.gamenative.PrefManager
 import app.gamenative.events.AndroidEvent
+import app.gamenative.service.NotificationHelper
 import app.gamenative.service.SteamService
 import app.gamenative.service.gog.GOGService
 import app.gamenative.service.epic.EpicService
@@ -99,6 +100,22 @@ class MainActivity : ComponentActivity() {
 
         @Volatile
         var wasLaunchedViaExternalIntent: Boolean = false
+
+        // Pending game invite stored during a cold start, consumed by PluviaMain once the UI is ready.
+        @Volatile
+        private var pendingGameInvite: AndroidEvent.GameInviteAccepted? = null
+
+        fun consumePendingGameInvite(): AndroidEvent.GameInviteAccepted? {
+            synchronized(this) {
+                val invite = pendingGameInvite
+                pendingGameInvite = null
+                return invite
+            }
+        }
+
+        private fun setPendingGameInvite(invite: AndroidEvent.GameInviteAccepted) {
+            synchronized(this) { pendingGameInvite = invite }
+        }
     }
 
     private val onSetSystemUi: (AndroidEvent.SetSystemUIVisibility) -> Unit = {
@@ -277,6 +294,21 @@ class MainActivity : ComponentActivity() {
             } else if (intent.action == "${BuildConfig.APPLICATION_ID}.OPEN_GAME_PAGE") {
                 Timber.w("[IntentLaunch]: parseOpenPageIntent returned null for OPEN_GAME_PAGE intent")
                 SnackbarManager.show(getString(R.string.intent_launch_failed))
+            }
+            // Game invite tapped from the notification shade.
+            if (intent.action == NotificationHelper.ACTION_GAME_INVITE_ACCEPT) {
+                val appId      = intent.getIntExtra(NotificationHelper.EXTRA_INVITE_APP_ID, -1)
+                val lobbyId    = intent.getLongExtra(NotificationHelper.EXTRA_INVITE_LOBBY_ID, -1L)
+                val senderName = intent.getStringExtra(NotificationHelper.EXTRA_INVITE_SENDER_NAME) ?: "A friend"
+                val gameName   = intent.getStringExtra(NotificationHelper.EXTRA_INVITE_GAME_NAME) ?: "Unknown Game"
+                if (appId != -1 && lobbyId != -1L) {
+                    val event = AndroidEvent.GameInviteAccepted(appId, lobbyId, senderName, gameName)
+                    if (isNewIntent) {
+                        lifecycleScope.launch { PluviaApp.events.emit(event) }
+                    } else {
+                        setPendingGameInvite(event)
+                    }
+                }
             }
         } catch (e: Exception) {
             Timber.e(e, "[IntentLaunch]: Failed to handle launch intent")
