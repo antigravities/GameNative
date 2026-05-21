@@ -112,6 +112,7 @@ import app.gamenative.ui.widget.PerformanceHudView
 import app.gamenative.utils.AssetUtils
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.downloader.CoreDriverDownloader
+import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.ScreenshotUtils
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ExecutableSelectionUtils
@@ -354,7 +355,9 @@ fun XServerScreen(
     }
 
     val container = remember(appId) {
-        ContainerUtils.getContainer(context, appId)
+        // Use the override-aware loader so temporary config changes (e.g. execArgs
+        // injected for lobby joins) are applied even though we're reading from disk.
+        ContainerUtils.getOrCreateContainerWithOverride(context, appId)
     }
 
     val suspendPolicy = remember(container.id) { container.suspendPolicy }
@@ -2265,7 +2268,7 @@ fun XServerScreen(
             // so scope.launch is safe. The GL read is queued inside captureFromGL().
             icView.setScreenshotCallback {
                 val renderer = xServerView?.getxServer()?.renderer
-                if (renderer != null) {
+                if (renderer != null && renderer is GLRenderer) {
                     ScreenshotUtils.captureFromGL(renderer, PrefManager.screenshotPostEffects) { bitmap ->
                         scope.launch(Dispatchers.IO) {
                             if (bitmap == null) {
@@ -3369,8 +3372,18 @@ private fun setupXEnvironment(
                 guestProgramLauncherComponent.setSteamAppId(numericAppId.toString())
             }
         }
+        val bionicMode = guestProgramLauncherComponent is BionicProgramLauncherComponent && container.isLaunchBionicSteam
+        // Consume any lobby-join args stored by the invite flow (e.g. "+connect_lobby <id>").
+        // Using a side-channel avoids touching ContainerData which would clobber all other
+        // container settings (emulator, graphics driver, …) and persist them via saveData().
+        val pendingLobbyArgs = if (bionicMode) IntentLaunchManager.consumePendingExtraGameArgs(appId) ?: "" else ""
         gameExecutable = "wine explorer /desktop=shell," + xServer.screenInfo + " " +
-            getWineStartCommand(context, appId, container, bootToContainer, testGraphics, appLaunchInfo, envVars, guestProgramLauncherComponent, gameSource, offline) +
+            getWineStartCommand(
+                context, appId, container, bootToContainer, testGraphics,
+                appLaunchInfo, envVars, guestProgramLauncherComponent, gameSource,
+                offline,
+                extraGameArgs = pendingLobbyArgs,
+            ) +
             (if (container.execArgs.isNotEmpty()) " " + container.execArgs else "")
         preInstallCommands = PreInstallSteps.getPreInstallCommands(
             container,
@@ -3998,7 +4011,8 @@ private fun getWineStartCommand(
     envVars: EnvVars,
     guestProgramLauncherComponent: GuestProgramLauncherComponent,
     gameSource: GameSource,
-    offline: Boolean
+    offline: Boolean,
+    extraGameArgs: String = "",  // injected as part of the game exe token in Bionic Steam mode
 ): String {
     val tempDir = File(container.getRootDir(), ".wine/drive_c/windows/temp")
     // Preserve patchstaging across the temp wipe if patch work is queued for this launch.
@@ -4385,7 +4399,10 @@ private fun getWineStartCommand(
             guestProgramLauncherComponent.workingDir = File(executableDir)
             Timber.i("Bionic-Steam working directory is $executableDir")
             val gameFolderName = appDirPath.substringAfterLast('/').ifEmpty { gameId.toString() }
-            "\"C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\$gameFolderName\\\\$normalizedExe\""
+            // Append extra args (e.g. +connect_lobby) directly to the exe — no steam.exe wrapper
+            // needed; the Bionic Steam client running in the background handles the session.
+            val connectSuffix = if (extraGameArgs.isNotEmpty()) " $extraGameArgs" else ""
+            "\"C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\$gameFolderName\\\\$normalizedExe\"$connectSuffix"
         } else if (container.isLaunchRealSteam) {
             // Launch Steam with the applaunch parameter to start the game
             "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" -silent -vgui -tcp " +

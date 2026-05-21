@@ -37,6 +37,10 @@ enum class DialogType(val icon: ImageVector? = null) {
     EXECUTABLE_NOT_FOUND,
     WORKSHOP_UPDATE_PROMPT,
 
+    INVITE_NOT_INSTALLED,
+    INVITE_NEEDS_BIONIC,
+    INVITE_CLOSE_GAME,
+
     NONE,
 
     FRIEND_BLOCK(Icons.Default.Block),
