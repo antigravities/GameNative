@@ -108,6 +108,7 @@ import app.gamenative.ui.data.PerformanceHudSize
 import app.gamenative.ui.data.XServerState
 import app.gamenative.ui.widget.PerformanceHudView
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.ScreenshotUtils
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ExecutableSelectionUtils
@@ -343,7 +344,9 @@ fun XServerScreen(
     }
 
     val container = remember(appId) {
-        ContainerUtils.getContainer(context, appId)
+        // Use the override-aware loader so temporary config changes (e.g. execArgs
+        // injected for lobby joins) are applied even though we're reading from disk.
+        ContainerUtils.getOrCreateContainerWithOverride(context, appId)
     }
 
     val suspendPolicy = remember(container.id) { container.suspendPolicy }
@@ -3249,8 +3252,17 @@ private fun setupXEnvironment(
                 guestProgramLauncherComponent.setSteamAppId(numericAppId.toString())
             }
         }
+        val bionicMode = guestProgramLauncherComponent is BionicProgramLauncherComponent && container.isLaunchBionicSteam
+        // Consume any lobby-join args stored by the invite flow (e.g. "+connect_lobby <id>").
+        // Using a side-channel avoids touching ContainerData which would clobber all other
+        // container settings (emulator, graphics driver, …) and persist them via saveData().
+        val pendingLobbyArgs = if (bionicMode) IntentLaunchManager.consumePendingExtraGameArgs(appId) ?: "" else ""
         gameExecutable = "wine explorer /desktop=shell," + xServer.screenInfo + " " +
-            getWineStartCommand(context, appId, container, bootToContainer, testGraphics, appLaunchInfo, envVars, guestProgramLauncherComponent, gameSource) +
+            getWineStartCommand(
+                context, appId, container, bootToContainer, testGraphics,
+                appLaunchInfo, envVars, guestProgramLauncherComponent, gameSource,
+                extraGameArgs = pendingLobbyArgs,
+            ) +
             (if (container.execArgs.isNotEmpty()) " " + container.execArgs else "")
         preInstallCommands = PreInstallSteps.getPreInstallCommands(
             container,
@@ -3870,6 +3882,7 @@ private fun getWineStartCommand(
     envVars: EnvVars,
     guestProgramLauncherComponent: GuestProgramLauncherComponent,
     gameSource: GameSource,
+    extraGameArgs: String = "",  // injected as part of the game exe token in Bionic Steam mode
 ): String {
     val tempDir = File(container.getRootDir(), ".wine/drive_c/windows/temp")
     // Preserve patchstaging across the temp wipe if patch work is queued for this launch.
@@ -4246,7 +4259,11 @@ private fun getWineStartCommand(
             val executableDir = appDirPath + "/" + exePath.substringBeforeLast("/", "")
             guestProgramLauncherComponent.workingDir = File(executableDir)
             Timber.i("Bionic-Steam working directory is $executableDir")
-            "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" \"C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\$gameFolderName\\\\$normalizedExe\""
+            val gamePath = "C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\$gameFolderName\\\\$normalizedExe"
+            // Append extra args (e.g. +connect_lobby) as separate unquoted tokens after the
+            // quoted game-exe — the same safe pattern as the non-Bionic execArgs append.
+            val connectSuffix = if (extraGameArgs.isNotEmpty()) " $extraGameArgs" else ""
+            "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" \"$gamePath\"$connectSuffix"
         } else if (container.isLaunchRealSteam) {
             // Launch Steam with the applaunch parameter to start the game
             "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" -silent -vgui -tcp " +
