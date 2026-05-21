@@ -32,6 +32,7 @@ import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.SteamUtils
 import app.gamenative.utils.UpdateInfo
 import com.materialkolor.PaletteStyle
+import com.winlator.container.ContainerManager
 import com.winlator.xserver.Window
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.AppProcessInfo
@@ -218,6 +219,47 @@ class MainViewModel @Inject constructor(
         _pendingOpenAppId.value = event.appId
     }
 
+    /** Data class carried by [pendingLobbyInvite] through the accept flow. */
+    data class LobbyInvite(
+        val appId: Int,
+        val lobbyId: Long,
+        val senderName: String,
+        val gameName: String,
+    )
+
+    private val _pendingLobbyInvite = MutableStateFlow<LobbyInvite?>(null)
+    val pendingLobbyInvite: StateFlow<LobbyInvite?> = _pendingLobbyInvite.asStateFlow()
+
+    fun setPendingLobbyInvite(invite: LobbyInvite?) {
+        _pendingLobbyInvite.value = invite
+    }
+
+    /**
+     * Returns true if the container for the given Steam appId has Bionic Steam enabled.
+     * Must be called from a coroutine — ContainerManager reads from disk.
+     */
+    fun isLaunchBionicSteam(context: Context, appId: Int): Boolean =
+        ContainerManager(context).getContainerById("STEAM_$appId")?.isLaunchBionicSteam ?: false
+
+    /**
+     * Enables Bionic Steam on the container for the given Steam appId and persists the change.
+     * Must be called from a coroutine — ContainerManager reads/writes from disk.
+     */
+    fun enableLaunchBionicSteam(context: Context, appId: Int) {
+        val container = ContainerManager(context).getContainerById("STEAM_$appId") ?: return
+        container.setLaunchBionicSteam(true)
+        container.saveData()
+    }
+
+    private val onGameInviteAccepted: (AndroidEvent.GameInviteAccepted) -> Unit = { event ->
+        _pendingLobbyInvite.value = LobbyInvite(
+            appId      = event.appId,
+            lobbyId    = event.lobbyId,
+            senderName = event.senderName,
+            gameName   = event.gameName,
+        )
+    }
+
     private val onServiceReady: (AndroidEvent.ServiceReady) -> Unit = {
         viewModelScope.launch {
             _uiEvent.send(MainUiEvent.ServiceReady)
@@ -263,6 +305,7 @@ class MainViewModel @Inject constructor(
         PluviaApp.events.on<AndroidEvent.BackPressed, Unit>(onBackPressed)
         PluviaApp.events.on<AndroidEvent.ExternalGameLaunch, Unit>(onExternalGameLaunch)
         PluviaApp.events.on<AndroidEvent.ExternalOpenGamePage, Unit>(onExternalOpenGamePage)
+        PluviaApp.events.on<AndroidEvent.GameInviteAccepted, Unit>(onGameInviteAccepted)
         PluviaApp.events.on<AndroidEvent.SetBootingSplashText, Unit>(onSetBootingSplashText)
         PluviaApp.events.on<SteamEvent.Connected, Unit>(onSteamConnected)
         PluviaApp.events.on<SteamEvent.Disconnected, Unit>(onSteamDisconnected)
@@ -290,6 +333,7 @@ class MainViewModel @Inject constructor(
         PluviaApp.events.off<AndroidEvent.BackPressed, Unit>(onBackPressed)
         PluviaApp.events.off<AndroidEvent.ExternalGameLaunch, Unit>(onExternalGameLaunch)
         PluviaApp.events.off<AndroidEvent.ExternalOpenGamePage, Unit>(onExternalOpenGamePage)
+        PluviaApp.events.off<AndroidEvent.GameInviteAccepted, Unit>(onGameInviteAccepted)
         PluviaApp.events.off<AndroidEvent.SetBootingSplashText, Unit>(onSetBootingSplashText)
         PluviaApp.events.off<SteamEvent.Connected, Unit>(onSteamConnected)
         PluviaApp.events.off<SteamEvent.Disconnected, Unit>(onSteamDisconnected)

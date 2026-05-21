@@ -38,4 +38,10 @@ interface AndroidEvent<T> : Event<T> {
         val detail: EPurchaseResultDetail?,
         val packageName: String?,
     ) : AndroidEvent<Unit>
+    data class GameInviteAccepted(
+        val appId: Int,
+        val lobbyId: Long,
+        val senderName: String,
+        val gameName: String,
+    ) : AndroidEvent<Unit>
 }
