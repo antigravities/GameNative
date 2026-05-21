@@ -361,6 +361,17 @@ object IntentLaunchManager {
             useGLSL = if (override.useGLSL != "enabled") override.useGLSL else base.useGLSL,
         )
     }
+
+    // Lightweight store for +connect_lobby args injected by the game invite flow.
+    // Separate from ContainerData overrides to avoid clobbering any container settings.
+    private val pendingExtraGameArgs = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    fun setPendingExtraGameArgs(appId: String, args: String) {
+        pendingExtraGameArgs[appId] = args
+    }
+
+    fun consumePendingExtraGameArgs(appId: String): String? =
+        pendingExtraGameArgs.remove(appId)
 }
 
 private object TemporaryConfigStore {

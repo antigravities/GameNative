@@ -593,6 +593,15 @@
     <string name="notification_download_complete_title">Download complete</string>
     <string name="notification_download_complete_text">%1$s is ready to play</string>
     <string name="update_available">Update Available</string>
+    <string name="notification_game_invite_title">%1$s invited you to play %2$s</string>
+    <string name="notification_game_invite_text">Tap to join</string>
+    <string name="dialog_game_invite_not_installed_title">Game not installed</string>
+    <string name="dialog_game_invite_not_installed_body">%1$s is not installed. Install it first to join this game.</string>
+    <string name="dialog_game_invite_needs_bionic_title">Bionic Steam required</string>
+    <string name="dialog_game_invite_needs_bionic_body">Game invites require Bionic Steam. Enable it for %1$s?</string>
+    <string name="dialog_game_invite_needs_bionic_enable">Enable</string>
+    <string name="dialog_game_invite_close_game_title">Close current game?</string>
+    <string name="dialog_game_invite_close_game_body">Accepting this invite will close your running game.</string>
     <string name="game_information">Game Information</string>
     <string name="status">Status</string>
     <string name="status_online">Online</string>
