@@ -1641,13 +1641,12 @@ fun PluviaMain(
                                     ?.route
 
                                 if (currentRoute == PluviaScreen.XServer.route) {
-                                    if (MainActivity.wasLaunchedViaExternalIntent) {
-                                        Timber.d("[IntentLaunch]: Finishing activity to return to external launcher")
-                                        MainActivity.wasLaunchedViaExternalIntent = false
-                                        (context as? android.app.Activity)?.finish()
-                                    } else {
-                                        navController.popBackStack()
-                                    }
+                                    // Always pop back to the library, regardless of how
+                                    // the session was launched. Calling finish() here
+                                    // would close the whole app when launched via an
+                                    // external intent (home screen shortcut, deep link).
+                                    MainActivity.wasLaunchedViaExternalIntent = false
+                                    navController.popBackStack()
                                 }
                             }
                         },
