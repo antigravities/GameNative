@@ -78,8 +78,12 @@ import `in`.dragonbra.javasteam.steam.handlers.steamscreenshots.ScreenshotDetail
 import `in`.dragonbra.javasteam.types.GameID
 import `in`.dragonbra.javasteam.networking.steam3.ProtocolTypes
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesClientObjects.ECloudPendingRemoteOperation
+import `in`.dragonbra.javasteam.enums.EChatEntryType
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesFamilygroupsSteamclient
+import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesFriendmessagesSteamclient
 import `in`.dragonbra.javasteam.rpc.service.FamilyGroups
+import `in`.dragonbra.javasteam.rpc.service.FriendMessagesClient
+import `in`.dragonbra.javasteam.steam.handlers.steamunifiedmessages.callback.ServiceMethodNotification
 import `in`.dragonbra.javasteam.steam.authentication.AuthPollResult
 import `in`.dragonbra.javasteam.steam.authentication.AuthSessionDetails
 import `in`.dragonbra.javasteam.steam.authentication.AuthenticationException
@@ -200,6 +204,11 @@ import app.gamenative.utils.CustomGameScanner
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
+// Short alias for the FriendMessages incoming-message notification builder type,
+// required by subscribeServiceNotification's generic parameter.
+private typealias IncomingMessage =
+        SteammessagesFriendmessagesSteamclient.CFriendMessages_IncomingMessage_Notification.Builder
+
 @AndroidEntryPoint
 class SteamService : Service(), IChallengeUrlChanged {
 
@@ -292,7 +301,7 @@ class SteamService : Service(), IChallengeUrlChanged {
     private val pendingSyncAppIds: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val pendingSyncFileLock = Any()
     private val pendingSyncFile by lazy { File(applicationContext.filesDir, "pending_achievement_sync.txt") }
-  
+
     // Debounce fields for onLicenseList — coalesces rapid callback bursts into one processing run.
     private var licenseListDebounceJob: Job? = null
     @Volatile private var pendingLicenseCallback: LicenseListCallback? = null
@@ -4341,6 +4350,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                     add(subscribe(LicenseListCallback::class.java, ::onLicenseList))
                     add(subscribe(PlayingSessionStateCallback::class.java, ::onPlayingSessionState))
                     add(subscribe(PurchaseResponseCallback::class.java, ::onPurchaseResult))
+                    // FriendMessages uses the unified messaging RPC path, so it needs
+                    // subscribeServiceNotification rather than the legacy subscribe().
+                    add(subscribeServiceNotification<FriendMessagesClient, IncomingMessage>(::onIncomingMessage))
                 }
             }
 
@@ -4837,6 +4849,42 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         } else {
             reconnect()
+        }
+    }
+
+    /**
+     * Handles incoming chat messages delivered via Steam's new unified messaging path.
+     * We only care about [lobbyinvite] BBCode — all other chat content is ignored.
+     *
+     * Steam's client sometimes emits irregular whitespace inside the tag, so we match
+     * each attribute independently rather than on the full tag string.
+     */
+    private fun onIncomingMessage(notification: ServiceMethodNotification<IncomingMessage>) {
+        if (notification.body.chatEntryType != EChatEntryType.ChatMsg.code()) return
+
+        val message = notification.body.message
+        // Quick bail-out: if the message doesn't contain "lobbyinvite" at all, skip it.
+        if (!message.contains("lobbyinvite", ignoreCase = true)) return
+
+        val appId  = Regex("""appid\s*=\s*"(\d+)"""").find(message)?.groupValues?.get(1)?.toIntOrNull()
+        val lobbyId = Regex("""lobbyid\s*=\s*"(\d+)"""").find(message)?.groupValues?.get(1)?.toLongOrNull()
+        if (appId == null || lobbyId == null) return
+
+        val senderSteamId = notification.body.steamidFriend
+
+        scope.launch {
+            val gameName   = appDao.findApp(appId)?.name ?: "Unknown Game"
+            // getFriendPersonaName returns "" when the persona hasn't been cached yet.
+            val senderName = _steamFriends
+                ?.getFriendPersonaName(SteamID(senderSteamId))
+                ?.takeIf { it.isNotEmpty() }
+                ?: "A friend"
+            notificationHelper.notifyGameInvite(
+                appId      = appId,
+                lobbyId    = lobbyId,
+                gameName   = gameName,
+                senderName = senderName,
+            )
         }
     }
 
