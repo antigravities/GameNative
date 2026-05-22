@@ -314,6 +314,13 @@ fun GeneralTabContent(
             state = config.portraitMode,
             onCheckedChange = { state.config.value = config.copy(portraitMode = it) },
         )
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.vertical_mode)) },
+            subtitle = { Text(text = stringResource(R.string.vertical_mode_description)) },
+            state = config.verticalMode,
+            onCheckedChange = { state.config.value = config.copy(verticalMode = it) },
+        )
         SettingsListDropdown(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.audio_driver)) },
