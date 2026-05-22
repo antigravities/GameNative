@@ -156,6 +156,8 @@ public class Container {
 
     private boolean portraitMode = false;
 
+    private boolean verticalMode = false;
+
     private String containerVariant = DEFAULT_VARIANT;
 
     public String getGraphicsDriverVersion() {
@@ -722,6 +724,7 @@ public class Container {
             // Process suspend policy setting
             data.put("suspendPolicy", suspendPolicy);
             data.put("portraitMode", portraitMode);
+            data.put("verticalMode", verticalMode);
 
             if (!WineInfo.isMainWineVersion(wineVersion)) data.put("wineVersion", wineVersion);
             FileUtils.writeString(getConfigFile(), data.toString());
@@ -924,6 +927,9 @@ public class Container {
                 case "portraitMode":
                     this.portraitMode = data.getBoolean(key);
                     break;
+                case "verticalMode":
+                    this.verticalMode = data.getBoolean(key);
+                    break;
             }
         }
 
@@ -1047,6 +1053,14 @@ public class Container {
 
     public void setPortraitMode(boolean portraitMode) {
         this.portraitMode = portraitMode;
+    }
+
+    public boolean isVerticalMode() {
+        return verticalMode;
+    }
+
+    public void setVerticalMode(boolean verticalMode) {
+        this.verticalMode = verticalMode;
     }
 
     public String getContainerJson() {
