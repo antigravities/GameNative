@@ -168,6 +168,8 @@ public class Container {
 
     private boolean portraitMode = false;
 
+    private boolean verticalMode = false;
+
     private String containerVariant = DEFAULT_VARIANT;
 
     // default wine for back-compat — pre-html5 containers have no runtime key in json
@@ -760,6 +762,7 @@ public class Container {
             // Process suspend policy setting
             data.put("suspendPolicy", suspendPolicy);
             data.put("portraitMode", portraitMode);
+            data.put("verticalMode", verticalMode);
 
             // runtime classification — written every save for forward-compat
             data.put("runtime", runtime);
@@ -993,6 +996,9 @@ public class Container {
                 case "portraitMode":
                     this.portraitMode = data.getBoolean(key);
                     break;
+                case "verticalMode":
+                    this.verticalMode = data.getBoolean(key);
+                    break;
             }
         }
 
@@ -1193,6 +1199,14 @@ public class Container {
 
     public void setPortraitMode(boolean portraitMode) {
         this.portraitMode = portraitMode;
+    }
+
+    public boolean isVerticalMode() {
+        return verticalMode;
+    }
+
+    public void setVerticalMode(boolean verticalMode) {
+        this.verticalMode = verticalMode;
     }
 
     public String getContainerJson() {
