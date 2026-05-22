@@ -45,7 +45,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class ImageFsInstaller {
-    public static final byte LATEST_VERSION = 28;
+    public static final byte LATEST_VERSION = 29;
 
     private static void resetContainerImgVersions(Context context) {
         ContainerManager manager = new ContainerManager(context);
@@ -197,8 +197,8 @@ public abstract class ImageFsInstaller {
                     TarCompressorUtils.Type.ZSTD,      // you said .tzst
                     in, imagefs);                      // helper already exists in the project
         } catch (IOException e) {
-            Log.e("ImageFsInstaller", "redirect deploy failed", e);
-            return;
+            // redirect.tzst is optional; libredirect.so ships inside imagefs_bionic.txz
+            Log.w("ImageFsInstaller", "redirect.tzst not found, skipping: " + e.getMessage());
         }
 
         // ➌  Make sure the new libs are world-readable / executable
