@@ -21,6 +21,7 @@ import com.winlator.container.Container
 import com.winlator.core.TarCompressorUtils
 import com.winlator.core.WineRegistryEditor
 import com.winlator.xenvironment.ImageFs
+import `in`.dragonbra.javasteam.enums.EPersonaState
 import `in`.dragonbra.javasteam.types.KeyValue
 import `in`.dragonbra.javasteam.util.HardwareUtils
 import kotlinx.coroutines.CompletableDeferred
@@ -490,7 +491,15 @@ object SteamUtils {
             configPath.mkdirs()
             remotePath.mkdirs()
 
-            // Create localconfig.vdf for small mode and low resource usage
+            // Mirror the app's persona state into Steam's config:
+            //   Invisible → SignIntoFriends = 0: Steam stays connected (playtime tracks)
+            //                but friends see the user as offline with no in-game status.
+            //   Online / Away → SignIntoFriends = 1: appear normally, in-game status visible.
+            val isInvisible = PrefManager.personaState == EPersonaState.Invisible
+            val signIntoFriends = if (isInvisible) "0" else "1"
+            val signIntoFriendsJson = if (isInvisible) "false" else "true"
+
+            // localconfig.vdf: per-user local settings (small mode, low-resource flags, friends visibility)
             val localConfigContent = """
                 "UserLocalConfigStore"
                 {
@@ -509,12 +518,12 @@ object SteamUtils {
                   }
                   "friends"
                   {
-                    "SignIntoFriends" "0"
+                    "SignIntoFriends" "$signIntoFriends"
                   }
                 }
             """.trimIndent()
 
-            // Create sharedconfig.vdf for additional optimizations
+            // sharedconfig.vdf: roaming settings, also controls friends-UI visibility
             val sharedConfigContent = """
                 "UserRoamingConfigStore"
                 {
@@ -527,7 +536,7 @@ object SteamUtils {
                         "SteamDefaultDialog" "#app_games"
                         "FriendsUI"
                         {
-                          "FriendsUIJSON" "{\"bSignIntoFriends\":false,\"bAnimatedAvatars\":false,\"PersonaNotifications\":0,\"bDisableRoomEffects\":true}"
+                          "FriendsUIJSON" "{\"bSignIntoFriends\":$signIntoFriendsJson,\"bAnimatedAvatars\":false,\"PersonaNotifications\":0,\"bDisableRoomEffects\":true}"
                         }
                       }
                     }
@@ -535,19 +544,18 @@ object SteamUtils {
                 }
             """.trimIndent()
 
-            // Write the configuration files if they don't exist
+            // Always overwrite both files so the status is correct at every container start.
+            // (If we only wrote on first creation, a prior real-Steam session could leave
+            // SignIntoFriends = 1 on disk and bionic steam would keep showing you as in-game
+            // even when you've chosen Invisible in the app.)
             val localConfigFile = File(configPath, "localconfig.vdf")
             val sharedConfigFile = File(remotePath, "sharedconfig.vdf")
 
-            if (!localConfigFile.exists()) {
-                localConfigFile.writeText(localConfigContent)
-                Timber.i("Created lightweight Steam localconfig.vdf")
-            }
+            localConfigFile.writeText(localConfigContent)
+            Timber.i("Wrote lightweight Steam localconfig.vdf (SignIntoFriends=$signIntoFriends)")
 
-            if (!sharedConfigFile.exists()) {
-                sharedConfigFile.writeText(sharedConfigContent)
-                Timber.i("Created lightweight Steam sharedconfig.vdf")
-            }
+            sharedConfigFile.writeText(sharedConfigContent)
+            Timber.i("Wrote lightweight Steam sharedconfig.vdf (bSignIntoFriends=$signIntoFriendsJson)")
         } catch (e: Exception) {
             Timber.w(e, "Failed to setup lightweight Steam configuration")
         }
