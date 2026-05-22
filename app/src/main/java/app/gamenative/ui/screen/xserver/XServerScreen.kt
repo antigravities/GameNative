@@ -361,10 +361,19 @@ fun XServerScreen(
 
     PluviaApp.events.emit(
         AndroidEvent.SetAllowedOrientation(
-            if (container.isPortraitMode) EnumSet.of(Orientation.PORTRAIT)
+            if (container.isPortraitMode || container.isVerticalMode) EnumSet.of(Orientation.PORTRAIT)
             else PrefManager.allowedOrientation,
         ),
     )
+
+    // Swap W×H for vertical mode so the X server presents a portrait framebuffer
+    // (e.g., "1280x720" → "720x1280"). The stored screen size is left untouched.
+    val effectiveScreenSize = if (container.isVerticalMode) {
+        val parts = container.screenSize.split("x")
+        if (parts.size == 2) "${parts[1]}x${parts[0]}" else container.screenSize
+    } else {
+        container.screenSize
+    }
 
     val xServerState = rememberSaveable(stateSaver = XServerState.Saver) {
         mutableStateOf(
@@ -374,7 +383,7 @@ fun XServerScreen(
                 audioDriver = container.audioDriver,
                 dxwrapper = container.dxWrapper,
                 dxwrapperConfig = DXVKHelper.parseConfig(container.dxWrapperConfig),
-                screenSize = container.screenSize,
+                screenSize = effectiveScreenSize,
             ),
         )
     }
