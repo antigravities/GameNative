@@ -574,7 +574,7 @@ class MainViewModel @Inject constructor(
                         Triple(
                             heroFile?.let { android.net.Uri.fromFile(it).toString() } ?: "",
                             "",
-                            "GameNative"
+                            folder.name
                         )
                     } else Triple("", "", "")
                 }
@@ -586,7 +586,7 @@ class MainViewModel @Inject constructor(
             setShowBootingSplash(true)
 
             // Report to Steam as a non-Steam game if the user has opted in
-            if (gameSource != GameSource.STEAM && gameSource != GameSource.CUSTOM_GAME &&
+            if (gameSource != GameSource.STEAM &&
                 PrefManager.reportNonSteamToSteam
             ) {
                 viewModelScope.launch(Dispatchers.IO) {
