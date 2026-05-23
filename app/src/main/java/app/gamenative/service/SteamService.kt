@@ -2771,6 +2771,35 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         }
 
+        // Reports a non-Steam game (Epic, GOG, Amazon) as playing to the Steam network so the
+        // user's profile shows "In non-Steam game: [gameName]". gameId=0 signals a non-Steam
+        // session; gameExtraInfo carries the display title. If gameId=0 turns out to be ignored
+        // by Valve's servers, switch to: ((CRC32(gameName) or 0x80000000L) shl 32) or 0x02000000L
+        suspend fun notifyNonSteamGamePlaying(gameName: String) = withContext(Dispatchers.IO) {
+            instance?.let { steamInstance ->
+                Timber.tag("SteamService.notifyNonSteamGamePlaying").d("Reporting $gameName")
+                if (isConnected) {
+                    val userAccountId = userSteamId?.accountID?.toInt() ?: return@withContext
+                    steamInstance._steamApps?.notifyGamesPlayed(
+                        gamesPlayed = listOf(
+                            GamePlayedInfo(
+                                // Synthetic non-Steam shortcut ID matching Steam's own shortcut hash format
+                                gameId = java.util.zip.CRC32().let { crc ->
+                                    crc.update(gameName.toByteArray())
+                                    (crc.value or 0x80000000L) shl 32 or 0x02000000L
+                                },
+                                gameExtraInfo = gameName,
+                                processId = 0,
+                                ownerId = userAccountId,
+                                gameBuildId = 0,
+                            )
+                        ),
+                        clientOsType = EOSType.AndroidUnknown,
+                    )
+                }
+            }
+        }
+
         fun beginLaunchApp(
             appId: Int,
             parentScope: CoroutineScope = CoroutineScope(Dispatchers.IO),
