@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import app.gamenative.PluviaApp
+import app.gamenative.data.DownloadInfo
+import app.gamenative.data.ItchioGame
 import app.gamenative.db.dao.ItchioGameDao
 import app.gamenative.events.AndroidEvent
 import app.gamenative.service.NotificationHelper
@@ -114,6 +116,56 @@ class ItchioService : Service() {
         fun deleteGame(context: Context, gameId: String): Result<Unit> {
             // TODO: delegate to ItchioManager once download/install is implemented
             return Result.failure(NotImplementedError("itch.io game deletion not yet implemented"))
+        }
+
+        // ==========================================================================
+        // DOWNLOADS
+        // ==========================================================================
+
+        /** Returns the active [DownloadInfo] for [gameId], or null if not downloading. */
+        fun getDownloadInfo(gameId: Long): DownloadInfo? =
+            ItchioDownloadManager.getDownloadInfo(gameId)
+
+        /**
+         * Looks up the DB row for [gameId]. Returns null if the service is not running
+         * or the game is not in the database.
+         */
+        suspend fun getGame(gameId: Long): ItchioGame? {
+            val svc = instance ?: return null
+            return svc.itchioGameDao.getById(gameId.toString())
+        }
+
+        /**
+         * Starts a background download for a single itch.io upload.
+         * The download runs on the service's IO scope so it survives UI navigation.
+         * Silently no-ops if the service is not running or credentials are missing.
+         */
+        suspend fun downloadGame(
+            context: Context,
+            gameId: Long,
+            uploadId: Long,
+            filename: String,
+            totalBytes: Long,
+        ): Result<Unit> {
+            val svc = instance
+                ?: return Result.failure(IllegalStateException("ItchioService is not running"))
+            val creds = ItchioAuthManager.getStoredCredentials(context)
+                ?: return Result.failure(IllegalStateException("Not logged in to itch.io"))
+            val game = svc.itchioGameDao.getById(gameId.toString())
+                ?: return Result.failure(IllegalStateException("Game $gameId not found in DB"))
+
+            ItchioDownloadManager.startDownload(
+                context = context,
+                gameId = gameId,
+                uploadId = uploadId,
+                filename = filename,
+                totalBytes = totalBytes,
+                apiKey = creds.apiKey,
+                downloadKeyId = game.downloadKeyId.toLongOrNull(),
+                dao = svc.itchioGameDao,
+                scope = svc.scope,
+            )
+            return Result.success(Unit)
         }
     }
 
