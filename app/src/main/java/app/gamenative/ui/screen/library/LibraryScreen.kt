@@ -1336,6 +1336,10 @@ private suspend fun performLibraryUninstall(context: android.content.Context, it
             // Custom games are just folder references; no delete-from-device semantics here.
             // Uninstall is intentionally a no-op for custom games in this menu.
         }
+
+        GameSource.ITCHIO -> {
+            // itch.io uninstall not yet implemented
+        }
     }
 }
 

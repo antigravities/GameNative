@@ -578,6 +578,7 @@ class MainViewModel @Inject constructor(
                         )
                     } else Triple("", "", "")
                 }
+                GameSource.ITCHIO -> Triple("", "", null)
             }
 
             setBootingSplashHeroImageUrl(heroUrl)

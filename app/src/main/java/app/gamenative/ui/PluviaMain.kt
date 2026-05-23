@@ -218,6 +218,8 @@ private fun resolveGameAppId(context: Context, appId: String): GameResolutionRes
         GameSource.CUSTOM_GAME -> {
             CustomGameScanner.isGameInstalled(gameId)
         }
+
+        GameSource.ITCHIO -> false
     }
 
     if (!isInstalled) {
@@ -1869,6 +1871,7 @@ fun preLaunchApp(
                 GameSource.EPIC -> EpicService.getLaunchExecutable(appId)
                 GameSource.CUSTOM_GAME -> CustomGameScanner.getLaunchExecutable(container)
                 GameSource.AMAZON -> AmazonService.getLaunchExecutable(appId)
+                GameSource.ITCHIO -> ""
             }
             if (savedLaunchExe.isBlank()) {
                 Timber.tag("preLaunchApp").w("Cannot launch $appId: no executable found (game source: $gameSource)")
@@ -2134,6 +2137,7 @@ fun preLaunchApp(
                 GameSource.EPIC -> EpicService.getEpicGameOf(gameId)?.catalogId ?: gameId.toString()
                 GameSource.AMAZON -> AmazonService.getAmazonGameByAppId(gameId)?.productId ?: gameId.toString()
                 GameSource.CUSTOM_GAME -> return
+                GameSource.ITCHIO -> return
             }
 
             Timber.tag("Patches").i("Fetching patches for $gameSource/$storeId")

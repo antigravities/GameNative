@@ -17,11 +17,14 @@ import app.gamenative.events.AndroidEvent
 import app.gamenative.data.GOGGame
 import app.gamenative.data.EpicGame
 import app.gamenative.data.AmazonGame
+import app.gamenative.data.ItchioGame
 import app.gamenative.db.dao.SteamAppDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.EpicGameDao
 import app.gamenative.db.dao.AmazonGameDao
+import app.gamenative.db.dao.ItchioGameDao
 import app.gamenative.db.dao.DownloadingAppInfoDao
+import app.gamenative.service.itchio.ItchioService
 import app.gamenative.service.DownloadService
 import app.gamenative.service.SteamService
 import app.gamenative.service.amazon.AmazonArtwork
@@ -71,6 +74,7 @@ class LibraryViewModel @Inject constructor(
     private val gogGameDao: GOGGameDao,
     private val epicGameDao: EpicGameDao,
     private val amazonGameDao: AmazonGameDao,
+    private val itchioGameDao: ItchioGameDao,
     private val downloadingAppInfoDao: DownloadingAppInfoDao,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -118,6 +122,7 @@ class LibraryViewModel @Inject constructor(
     private var gogGameList: List<GOGGame> = emptyList()
     private var epicGameList: List<EpicGame> = emptyList()
     private var amazonGameList: List<AmazonGame> = emptyList()
+    private var itchioGameList: List<ItchioGame> = emptyList()
 
     // Caches the LibraryItem built for each Steam app ID.
     // Key: Steam appId (Int). Value: the SteamAppSummary instance that produced the item,
@@ -257,6 +262,17 @@ class LibraryViewModel @Inject constructor(
             }
         }
 
+        viewModelScope.launch(Dispatchers.IO) {
+            itchioGameDao.getAll().collect { games ->
+                Timber.tag("LibraryViewModel").d("Collecting ${games.size} itch.io games")
+                val hasChanges = itchioGameList.size != games.size || itchioGameList != games
+                itchioGameList = games
+                if (hasChanges) {
+                    onFilterApps(paginationCurrentPage)
+                }
+            }
+        }
+
         PluviaApp.events.on<AndroidEvent.LibraryInstallStatusChanged, Unit>(onInstallStatusChanged)
         PluviaApp.events.on<AndroidEvent.CustomGameImagesFetched, Unit>(onCustomGameImagesFetched)
         PluviaApp.events.on<AndroidEvent.RecommendationToggleChanged, Unit>(onRecommendationToggleChanged)
@@ -334,6 +350,11 @@ class LibraryViewModel @Inject constructor(
                 val newValue = !current.showAmazonInLibrary
                 PrefManager.showAmazonInLibrary = newValue
                 _state.update { it.copy(showAmazonInLibrary = newValue) }
+            }
+            GameSource.ITCHIO -> {
+                val newValue = !current.showItchioInLibrary
+                PrefManager.showItchioInLibrary = newValue
+                _state.update { it.copy(showItchioInLibrary = newValue) }
             }
         }
         onFilterApps(paginationCurrentPage)
@@ -841,10 +862,47 @@ class LibraryViewModel @Inject constructor(
                 )
             }
 
+            // Filter itch.io games
+            val filteredItchioGames = itchioGameList
+                .asSequence()
+                .filter { game ->
+                    if (currentState.searchQuery.isNotEmpty()) {
+                        matches(game.title, currentState.searchQuery)
+                    } else {
+                        true
+                    }
+                }
+                .filter { game ->
+                    val installedOnly = currentState.currentTab.installedOnly ||
+                        currentState.appInfoSortType.contains(AppFilter.INSTALLED)
+                    if (installedOnly) game.isInstalled else true
+                }
+                .toList()
+
+            val itchioEntries = filteredItchioGames
+                .filter { passesCompatibleFilter(it.title) }
+                .map { game ->
+                LibraryEntry(
+                    item = LibraryItem(
+                        index = 0,
+                        appId = "${GameSource.ITCHIO.name}_${game.id}",
+                        name = game.title,
+                        iconHash = game.imageUrl,
+                        capsuleImageUrl = game.imageUrl,
+                        headerImageUrl = game.imageUrl,
+                        heroImageUrl = game.imageUrl,
+                        isShared = false,
+                        gameSource = GameSource.ITCHIO,
+                    ),
+                    isInstalled = game.isInstalled,
+                )
+            }
+
             // Calculate installed counts
             val gogInstalledCount = filteredGOGGames.count { it.isInstalled }
             val epicInstalledCount = filteredEpicGames.count { it.isInstalled }
             val amazonInstalledCount = filteredAmazonGames.count { it.isInstalled }
+            val itchioInstalledCount = filteredItchioGames.count { it.isInstalled }
             // Save game counts for skeleton loaders (only when not searching, to get accurate counts)
             // This needs to happen before filtering by source, so we save the total counts
             if (currentState.searchQuery.isEmpty()) {
@@ -891,6 +949,12 @@ class LibraryViewModel @Inject constructor(
                 currentTab.showAmazon
             }) && AmazonService.hasStoredCredentials(context)
 
+            val includeItchio = (if (currentTab == app.gamenative.ui.enums.LibraryTab.ALL) {
+                currentState.showItchioInLibrary
+            } else {
+                currentTab.showItchio
+            }) && ItchioService.hasStoredCredentials(context)
+
             // Combine both lists and apply sort option.
             // combined must be built first so sort keys can be pre-computed in O(n) before the
             // comparator runs — avoids calling the transliterator O(n log n) times during sort.
@@ -900,6 +964,7 @@ class LibraryViewModel @Inject constructor(
                 if (includeGOG) addAll(gogEntries)
                 if (includeEpic) addAll(epicEntries)
                 if (includeAmazon) addAll(amazonEntries)
+                if (includeItchio) addAll(itchioEntries)
             }
 
             // Pre-compute one sort key per entry. trim() removes surrounding whitespace;
@@ -1027,11 +1092,13 @@ class LibraryViewModel @Inject constructor(
                         (if (currentState.showCustomGamesInLibrary) customEntries.size else 0) +
                         (if (currentState.showGOGInLibrary && GOGService.hasStoredCredentials(context)) gogEntries.size else 0) +
                         (if (currentState.showEpicInLibrary && EpicService.hasStoredCredentials(context)) epicEntries.size else 0) +
-                        (if (currentState.showAmazonInLibrary && AmazonService.hasStoredCredentials(context)) amazonEntries.size else 0),
+                        (if (currentState.showAmazonInLibrary && AmazonService.hasStoredCredentials(context)) amazonEntries.size else 0) +
+                        (if (currentState.showItchioInLibrary && ItchioService.hasStoredCredentials(context)) itchioEntries.size else 0),
                     steamCount = if (currentState.showSteamInLibrary) steamEntries.size else 0,
                     gogCount = if (currentState.showGOGInLibrary && GOGService.hasStoredCredentials(context)) gogEntries.size else 0,
                     epicCount = if (currentState.showEpicInLibrary && EpicService.hasStoredCredentials(context)) epicEntries.size else 0,
                     amazonCount = if (currentState.showAmazonInLibrary && AmazonService.hasStoredCredentials(context)) amazonEntries.size else 0,
+                    itchioCount = if (currentState.showItchioInLibrary && ItchioService.hasStoredCredentials(context)) itchioEntries.size else 0,
                     localCount = if (currentState.showCustomGamesInLibrary) customEntries.size else 0,
                 )
             }

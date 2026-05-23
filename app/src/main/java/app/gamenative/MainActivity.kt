@@ -37,6 +37,7 @@ import app.gamenative.service.NotificationHelper
 import app.gamenative.service.SteamService
 import app.gamenative.service.gog.GOGService
 import app.gamenative.service.epic.EpicService
+import app.gamenative.service.itchio.ItchioService
 import app.gamenative.ui.PluviaMain
 import app.gamenative.ui.enums.Orientation
 import app.gamenative.utils.AnimatedPngDecoder
@@ -359,6 +360,12 @@ class MainActivity : ComponentActivity() {
             Timber.i("Stopping EpicService - app destroyed")
             EpicService.stop()
         }
+
+        // Stop ItchioService when app is destroyed (unless config change)
+        if (ItchioService.isRunning && !isChangingConfigurations) {
+            Timber.i("Stopping ItchioService - app destroyed")
+            ItchioService.stop()
+        }
     }
 
     private fun hasReadyGameLifecycleState(action: String): Boolean {
@@ -416,6 +423,12 @@ class MainActivity : ComponentActivity() {
             !EpicService.isRunning) {
             Timber.i("EpicService was down on resume - restarting")
             EpicService.start(this)
+        }
+
+        // Restart ItchioService if it went down and user is authenticated
+        if (ItchioService.hasStoredCredentials(this) && !ItchioService.isRunning) {
+            Timber.i("ItchioService was down on resume - restarting")
+            ItchioService.start(this)
         }
 
         if (PrefManager.usageAnalyticsEnabled) {
@@ -493,6 +506,14 @@ class MainActivity : ComponentActivity() {
                 EpicService.stop()
             } else {
                 Timber.d("EpicService kept running - has active operations")
+            }
+        }
+
+        // Stop ItchioService if running and no active operations
+        if (ItchioService.isRunning && !isChangingConfigurations) {
+            if (!ItchioService.hasActiveOperations()) {
+                Timber.i("Stopping ItchioService - no active operations")
+                ItchioService.stop()
             }
         }
     }

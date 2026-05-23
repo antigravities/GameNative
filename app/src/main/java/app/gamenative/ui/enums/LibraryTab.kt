@@ -10,6 +10,7 @@ enum class LibraryTab(
     val showGoG: Boolean,
     val showEpic: Boolean,
     val showAmazon: Boolean,
+    val showItchio: Boolean,
     val installedOnly: Boolean,
 ) {
     ALL(
@@ -19,6 +20,7 @@ enum class LibraryTab(
         showGoG = true,
         showEpic = true,
         showAmazon = true,
+        showItchio = true,
         installedOnly = false,
     ),
     STEAM(
@@ -28,6 +30,7 @@ enum class LibraryTab(
         showGoG = false,
         showEpic = false,
         showAmazon = false,
+        showItchio = false,
         installedOnly = false,
     ),
     GOG(
@@ -37,6 +40,7 @@ enum class LibraryTab(
         showGoG = true,
         showEpic = false,
         showAmazon = false,
+        showItchio = false,
         installedOnly = false,
     ),
     EPIC(
@@ -46,6 +50,7 @@ enum class LibraryTab(
         showGoG = false,
         showEpic = true,
         showAmazon = false,
+        showItchio = false,
         installedOnly = false,
     ),
     AMAZON(
@@ -55,6 +60,17 @@ enum class LibraryTab(
         showGoG = false,
         showEpic = false,
         showAmazon = true,
+        showItchio = false,
+        installedOnly = false,
+    ),
+    ITCHIO(
+        labelResId = R.string.tab_itchio,
+        showCustom = false,
+        showSteam = false,
+        showGoG = false,
+        showEpic = false,
+        showAmazon = false,
+        showItchio = true,
         installedOnly = false,
     ),
     LOCAL(
@@ -64,6 +80,7 @@ enum class LibraryTab(
         showGoG = false,
         showEpic = false,
         showAmazon = false,
+        showItchio = false,
         installedOnly = false,
     );
 

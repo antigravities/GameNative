@@ -9,8 +9,8 @@ enum class GameSource {
     CUSTOM_GAME,
     GOG,
     EPIC,
-    AMAZON
-    // Add other platforms here..
+    AMAZON,
+    ITCHIO
 }
 
 enum class GameCompatibilityStatus {
@@ -76,6 +76,10 @@ data class LibraryItem(
                 iconHash
             }
             GameSource.AMAZON -> {
+                iconHash
+            }
+            GameSource.ITCHIO -> {
+                // itch.io cover URLs are returned as full URLs by the API
                 iconHash
             }
         }

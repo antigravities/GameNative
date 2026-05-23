@@ -360,6 +360,10 @@ object ContainerStorageManager {
             GameSource.CUSTOM_GAME -> {
                 return@withContext Result.failure(UnsupportedOperationException("Custom games are not supported"))
             }
+
+            GameSource.ITCHIO -> {
+                // itch.io move not yet implemented; no DAO to update
+            }
         }
 
         Timber.tag("ContainerStorageManager").i(
@@ -462,6 +466,7 @@ object ContainerStorageManager {
                 }
 
                 GameSource.CUSTOM_GAME -> Result.failure(UnsupportedOperationException("Custom games are not supported"))
+                GameSource.ITCHIO -> Result.failure(UnsupportedOperationException("itch.io uninstall not yet implemented"))
             }
 
             if (result.isSuccess) {
@@ -831,6 +836,7 @@ object ContainerStorageManager {
             }
 
             GameSource.CUSTOM_GAME -> null
+            GameSource.ITCHIO -> null
         }
     }
 
@@ -843,6 +849,7 @@ object ContainerStorageManager {
             GameSource.EPIC -> listOf(EpicConstants.internalEpicGamesPath(context))
             GameSource.AMAZON -> listOf(AmazonConstants.internalAmazonGamesPath(context))
             GameSource.CUSTOM_GAME -> emptyList()
+            GameSource.ITCHIO -> emptyList()
         }
 
         if (internalRoots.any { root -> isPathWithin(normalizedPath, root) }) {
@@ -866,6 +873,7 @@ object ContainerStorageManager {
                 GameSource.EPIC -> if (PrefManager.externalStoragePath.isNotBlank()) add(EpicConstants.externalEpicGamesPath())
                 GameSource.AMAZON -> if (PrefManager.externalStoragePath.isNotBlank()) add(AmazonConstants.externalAmazonGamesPath())
                 GameSource.CUSTOM_GAME -> Unit
+                GameSource.ITCHIO -> Unit
             }
 
             inferExternalInstallRoot(gameSource, normalizedPath)?.let(::add)
@@ -887,6 +895,7 @@ object ContainerStorageManager {
             GameSource.EPIC -> listOf("Epic", "games")
             GameSource.AMAZON -> listOf("Amazon", "games")
             GameSource.CUSTOM_GAME -> emptyList()
+            GameSource.ITCHIO -> emptyList()
         }
         if (expectedRootSegments.isEmpty()) return null
 
@@ -1002,6 +1011,7 @@ object ContainerStorageManager {
         containerId.startsWith("GOG_") -> GameSource.GOG
         containerId.startsWith("EPIC_") -> GameSource.EPIC
         containerId.startsWith("AMAZON_") -> GameSource.AMAZON
+        containerId.startsWith("ITCHIO_") -> GameSource.ITCHIO
         else -> null
     }
 
@@ -1068,6 +1078,8 @@ object ContainerStorageManager {
                     known = game != null,
                 )
             }
+
+            GameSource.ITCHIO -> ResolvedGame(name = null, installPath = null, iconUrl = "", known = false)
         }
     }
 

@@ -929,6 +929,7 @@ private fun gameSourceLabel(gameSource: GameSource?): String = when (gameSource)
     GameSource.GOG -> stringResource(R.string.tab_gog)
     GameSource.EPIC -> stringResource(R.string.tab_epic)
     GameSource.AMAZON -> stringResource(R.string.tab_amazon)
+    GameSource.ITCHIO -> stringResource(R.string.tab_itchio)
     null -> stringResource(R.string.container_storage_source_unknown)
 }
 

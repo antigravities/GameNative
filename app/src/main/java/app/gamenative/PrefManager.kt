@@ -1071,6 +1071,13 @@ object PrefManager {
             setPref(SHOW_AMAZON_IN_LIBRARY, value)
         }
 
+    private val SHOW_ITCHIO_IN_LIBRARY = booleanPreferencesKey("show_itchio_in_library")
+    var showItchioInLibrary: Boolean
+        get() = getPref(SHOW_ITCHIO_IN_LIBRARY, true)
+        set(value) {
+            setPref(SHOW_ITCHIO_IN_LIBRARY, value)
+        }
+
     private val HIDE_ADULT_CONTENT = booleanPreferencesKey("hide_adult_content")
     var hideAdultContent: Boolean
         get() = getPref(HIDE_ADULT_CONTENT, false)   // default OFF — opt-in filter

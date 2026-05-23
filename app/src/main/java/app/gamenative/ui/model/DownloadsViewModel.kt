@@ -274,6 +274,8 @@ class DownloadsViewModel @Inject constructor(
                 CustomGameScanner.scanAsLibraryItems(query = "")
                     .firstOrNull { it.appId == libraryAppId }
             }
+
+            GameSource.ITCHIO -> null
         }
     }
 
@@ -359,6 +361,7 @@ class DownloadsViewModel @Inject constructor(
             GameSource.GOG -> gogGameDao.getById(appId)?.isInstalled == true
             GameSource.AMAZON -> amazonGameDao.getByProductId(appId)?.isInstalled == true
             GameSource.CUSTOM_GAME -> false
+            GameSource.ITCHIO -> false
         }
     }
 
@@ -624,6 +627,7 @@ class DownloadsViewModel @Inject constructor(
                 GameSource.GOG -> GOGService.cancelDownload(item.appId)
                 GameSource.AMAZON -> AmazonService.cancelDownload(item.appId)
                 GameSource.CUSTOM_GAME -> Unit
+                GameSource.ITCHIO -> Unit
             }
         }
     }
@@ -675,6 +679,7 @@ class DownloadsViewModel @Inject constructor(
                 }
 
                 GameSource.CUSTOM_GAME -> Unit
+                GameSource.ITCHIO -> Unit
             }
 
             scheduleRefreshDownloads()
@@ -782,6 +787,7 @@ class DownloadsViewModel @Inject constructor(
                 }
 
                 GameSource.CUSTOM_GAME -> Unit
+                GameSource.ITCHIO -> Unit
             }
         }
     }

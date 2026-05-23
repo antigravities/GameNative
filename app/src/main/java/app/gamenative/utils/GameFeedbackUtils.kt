@@ -65,6 +65,7 @@ object GameFeedbackUtils {
                     val appInfo = SteamService.getAppInfoOf(gameId)
                     appInfo?.name ?: ""
                 }
+                GameSource.ITCHIO -> ""
             }
 
             if (gameName.isEmpty()) {

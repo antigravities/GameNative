@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
 import app.gamenative.db.dao.AmazonGameDao
+import app.gamenative.db.dao.ItchioGameDao
 import app.gamenative.db.dao.EpicGameDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.SteamAppDao
@@ -33,6 +34,7 @@ class GamePageViewModel @Inject constructor(
     private val gogGameDao: GOGGameDao,
     private val epicGameDao: EpicGameDao,
     private val amazonGameDao: AmazonGameDao,
+    private val itchioGameDao: ItchioGameDao,
 ) : ViewModel() {
 
     private val appId: String = checkNotNull(savedStateHandle[PluviaScreen.GamePage.ARG_APP_ID])
@@ -193,6 +195,20 @@ class GamePageViewModel @Inject constructor(
                         headerImageUrl = it.heroUrl.ifEmpty { it.artUrl },
                         heroImageUrl = it.heroUrl.ifEmpty { it.artUrl },
                         gameSource = GameSource.AMAZON,
+                    )
+                }
+            }
+            GameSource.ITCHIO -> {
+                itchioGameDao.getById(numericId)?.let { game ->
+                    LibraryItem(
+                        appId = appId,
+                        name = game.title,
+                        iconHash = game.imageUrl,
+                        capsuleImageUrl = game.imageUrl,
+                        headerImageUrl = game.imageUrl,
+                        heroImageUrl = game.imageUrl,
+                        gameSource = GameSource.ITCHIO,
+                        isInstalled = game.isInstalled,
                     )
                 }
             }

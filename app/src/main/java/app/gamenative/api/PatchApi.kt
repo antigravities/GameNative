@@ -53,6 +53,7 @@ object PatchApi {
             GameSource.EPIC -> "epic"
             GameSource.AMAZON -> "amazon"
             GameSource.CUSTOM_GAME -> return ApiResult.Success(emptyList())
+            GameSource.ITCHIO -> return ApiResult.Success(emptyList())
         }
         val url = "$normalizedBase/$storePrefix/$storeId"
         Timber.tag("PatchApi").d("Fetching patches from: $url")
