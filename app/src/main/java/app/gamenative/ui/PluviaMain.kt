@@ -219,7 +219,8 @@ private fun resolveGameAppId(context: Context, appId: String): GameResolutionRes
             CustomGameScanner.isGameInstalled(gameId)
         }
 
-        GameSource.ITCHIO -> false
+        // A Wine container must exist for the game to be launchable.
+        GameSource.ITCHIO -> ContainerUtils.hasContainer(context, appId)
     }
 
     if (!isInstalled) {
@@ -1871,7 +1872,9 @@ fun preLaunchApp(
                 GameSource.EPIC -> EpicService.getLaunchExecutable(appId)
                 GameSource.CUSTOM_GAME -> CustomGameScanner.getLaunchExecutable(container)
                 GameSource.AMAZON -> AmazonService.getLaunchExecutable(appId)
-                GameSource.ITCHIO -> ""
+                // Use whatever executable path the user configured in the container.
+                // Empty string falls through to the "not found" dialog below.
+                GameSource.ITCHIO -> container.executablePath
             }
             if (savedLaunchExe.isBlank()) {
                 Timber.tag("preLaunchApp").w("Cannot launch $appId: no executable found (game source: $gameSource)")
@@ -2277,6 +2280,16 @@ fun preLaunchApp(
         val isAmazonGame = gameSource == GameSource.AMAZON
         if (isAmazonGame) {
             Timber.tag("preLaunchApp").i("Amazon Game detected for $appId — skipping cloud sync and launching container")
+            setLoadingDialogVisible(false)
+            runPatchFlowIfNeeded()
+            onSuccess(context, appId)
+            return@launch
+        }
+
+        // For itch.io games, skip all cloud sync — itch.io provides no cloud saves, achievements, or leaderboards.
+        val isItchioGame = gameSource == GameSource.ITCHIO
+        if (isItchioGame) {
+            Timber.tag("preLaunchApp").i("itch.io game detected for $appId — skipping cloud sync and launching")
             setLoadingDialogVisible(false)
             runPatchFlowIfNeeded()
             onSuccess(context, appId)
