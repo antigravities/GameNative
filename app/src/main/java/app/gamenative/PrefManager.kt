@@ -335,6 +335,13 @@ object PrefManager {
             setPref(UPLOAD_SCREENSHOTS_TO_STEAM, value)
         }
 
+    private val REPORT_NON_STEAM_TO_STEAM = booleanPreferencesKey("report_non_steam_to_steam")
+    var reportNonSteamToSteam: Boolean
+        get() = getPref(REPORT_NON_STEAM_TO_STEAM, false)
+        set(value) {
+            setPref(REPORT_NON_STEAM_TO_STEAM, value)
+        }
+
     private val SCREENSHOT_POST_EFFECTS = booleanPreferencesKey("screenshot_post_effects")
     // Default true = capture the composited frame shown on screen (with CRT/FSR/FXAA applied).
     // False = capture the raw game frame before any post-processing.
