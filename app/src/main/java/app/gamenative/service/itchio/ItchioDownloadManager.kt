@@ -3,6 +3,7 @@ package app.gamenative.service.itchio
 import android.content.Context
 import app.gamenative.data.DownloadInfo
 import app.gamenative.db.dao.ItchioGameDao
+import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.Net
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -183,7 +184,34 @@ object ItchioDownloadManager {
             markerFile.delete()
             val game = dao.getById(gameId.toString())
             if (game != null) {
-                dao.update(game.copy(installPath = destFile.absolutePath, isInstalled = true))
+                val installerType = ItchioInstallerDetector.detect(destFile)
+                if (installerType == ItchioInstallerType.ZIP) {
+                    // Extract the ZIP on the Android side and delete it.
+                    val exeRelPath = ItchioZipInstaller.extractAndFindExe(destFile, destDir)
+                    if (exeRelPath == null) {
+                        // No exe found — container will open to the Wine shell on first launch.
+                        Timber.tag(TAG).w("No exe found after extracting ZIP for game $gameId — container will open without a launch exe")
+                    } else {
+                        // Store as a relative Windows path (no drive prefix), matching the
+                        // CUSTOM_GAME convention. The launch code prepends "A:\" at runtime.
+                        val winPath = exeRelPath.replace('/', '\\')
+                        val containerId = "ITCHIO_$gameId"
+                        // getOrCreateContainer creates the container now if it doesn't exist yet
+                        // (containers are otherwise created lazily on first launch). This ensures
+                        // the exe path is persisted immediately, even on a fresh install.
+                        val container = ContainerUtils.getOrCreateContainer(context, containerId)
+                        // Don't overwrite an exe path the user already configured manually.
+                        if (container.executablePath.isEmpty()) {
+                            container.executablePath = winPath
+                            container.saveData()
+                            Timber.tag(TAG).i("Auto-set itch.io exe to $winPath for game $gameId")
+                        }
+                    }
+                    // The ZIP was deleted; store the directory path so uninstall can clean up files.
+                    dao.update(game.copy(installPath = destDir.absolutePath, isInstalled = true))
+                } else {
+                    dao.update(game.copy(installPath = destFile.absolutePath, isInstalled = true))
+                }
             }
             // Add to the in-memory set BEFORE emitting 1f so that ItchioAppScreen.isInstalled()
             // returns true by the time observeGameState's onStateChanged() fires and

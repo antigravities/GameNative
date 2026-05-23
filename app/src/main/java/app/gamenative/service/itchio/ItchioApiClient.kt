@@ -127,6 +127,7 @@ object ItchioApiClient {
     ): Result<List<UploadEntry>> {
         var url = "$BASE_URL/games/$gameId/uploads?api_key=$apiKey"
         if (downloadKeyId != null) url += "&download_key_id=$downloadKeyId"
+        Timber.tag("ItchioApiClient.fetchUploads").d(url)
 
         return try {
             val request = Request.Builder().url(url).build()

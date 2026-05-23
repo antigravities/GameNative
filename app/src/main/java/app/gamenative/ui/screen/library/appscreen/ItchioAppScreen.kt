@@ -405,16 +405,21 @@ class ItchioAppScreen : BaseAppScreen() {
 
     override fun getInstallPath(context: Context, libraryItem: LibraryItem): String? = null
 
-    override fun supportsContainerConfig(): Boolean = false
+    override fun supportsContainerConfig(): Boolean = true
 
-    override fun loadContainerData(context: Context, libraryItem: LibraryItem): ContainerData =
-        ContainerData()
+    override fun loadContainerData(context: Context, libraryItem: LibraryItem): ContainerData {
+        val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
+        return ContainerUtils.toContainerData(container)
+    }
 
     override fun saveContainerConfig(
         context: Context,
         libraryItem: LibraryItem,
         config: ContainerData,
-    ) {}
+    ) {
+        val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
+        ContainerUtils.applyToContainer(context, container, config)
+    }
 
     @Composable
     override fun getResetContainerOption(

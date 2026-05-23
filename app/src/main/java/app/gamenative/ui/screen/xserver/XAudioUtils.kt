@@ -39,7 +39,10 @@ object XAudioUtils {
                 }
                 GameSource.AMAZON -> AmazonService.getInstallPath(appId)
                 GameSource.CUSTOM_GAME -> CustomGameScanner.getFolderPathFromAppId(appId)
-                GameSource.ITCHIO -> null
+                GameSource.ITCHIO -> {
+                    val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
+                    File(context.getExternalFilesDir("itchio"), "$gameId").absolutePath
+                }
             }
         } catch (e: Exception) {
             Timber.tag("XAudioUtils")

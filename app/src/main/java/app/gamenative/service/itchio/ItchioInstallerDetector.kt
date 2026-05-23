@@ -47,6 +47,9 @@ object ItchioInstallerDetector {
         // .msi is always an OLE2 compound file — no need to read bytes
         if (ext == "msi") return ItchioInstallerType.MSI
 
+        // .zip by extension — no need to inspect bytes
+        if (ext == "zip") return ItchioInstallerType.ZIP
+
         // Only exe and msi are installer candidates
         if (ext != "exe") return ItchioInstallerType.NOT_INSTALLER
 

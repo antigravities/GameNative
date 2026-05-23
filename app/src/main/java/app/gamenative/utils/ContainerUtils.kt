@@ -504,27 +504,32 @@ object ContainerUtils {
         // Set container LC_ALL according to selected language
         val lcAll = mapLanguageToLocale(containerData.language)
         container.setLC_ALL(lcAll)
-        // If language changed, remove the STEAM_DLL_REPLACED marker so settings regenerate
-        if (previousLanguage.lowercase() != containerData.language.lowercase()) {
-            val steamAppId = extractGameIdFromContainerId(container.id)
-            val appDirPath = SteamService.getAppDirPath(steamAppId)
-            MarkerUtils.removeMarker(appDirPath, Marker.STEAM_DLL_REPLACED)
-            MarkerUtils.removeMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED)
-            Timber.i("Language changed from '$previousLanguage' to '${containerData.language}'. Cleared STEAM_DLL_REPLACED marker for container ${container.id}.")
-        }
-        if (previousForceDlc != containerData.forceDlc) {
-            val steamAppId = extractGameIdFromContainerId(container.id)
-            val appDirPath = SteamService.getAppDirPath(steamAppId)
-            MarkerUtils.removeMarker(appDirPath, Marker.STEAM_DLL_REPLACED)
-            MarkerUtils.removeMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED)
-            Timber.i("forceDlc changed from '$previousForceDlc' to '${containerData.forceDlc}'. Cleared STEAM_DLL_REPLACED marker for container ${container.id}.")
-        }
-        if (previousSteamOfflineMode != containerData.steamOfflineMode) {
-            val steamAppId = extractGameIdFromContainerId(container.id)
-            val appDirPath = SteamService.getAppDirPath(steamAppId)
-            MarkerUtils.removeMarker(appDirPath, Marker.STEAM_DLL_REPLACED)
-            MarkerUtils.removeMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED)
-            Timber.i("steamOfflineMode changed from '$previousSteamOfflineMode' to '${containerData.steamOfflineMode}'. Cleared STEAM_DLL_REPLACED marker for container ${container.id}.")
+        // These marker removals only make sense for Steam containers; other game sources
+        // (itch.io, GOG, Epic, …) have no Steam DLL markers and their IDs must not be
+        // passed to SteamService.getAppDirPath, which expects a real Steam app ID.
+        val containerGameSource = extractGameSourceFromContainerId(container.id)
+        if (containerGameSource == GameSource.STEAM) {
+            if (previousLanguage.lowercase() != containerData.language.lowercase()) {
+                val steamAppId = extractGameIdFromContainerId(container.id)
+                val appDirPath = SteamService.getAppDirPath(steamAppId)
+                MarkerUtils.removeMarker(appDirPath, Marker.STEAM_DLL_REPLACED)
+                MarkerUtils.removeMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED)
+                Timber.i("Language changed from '$previousLanguage' to '${containerData.language}'. Cleared STEAM_DLL_REPLACED marker for container ${container.id}.")
+            }
+            if (previousForceDlc != containerData.forceDlc) {
+                val steamAppId = extractGameIdFromContainerId(container.id)
+                val appDirPath = SteamService.getAppDirPath(steamAppId)
+                MarkerUtils.removeMarker(appDirPath, Marker.STEAM_DLL_REPLACED)
+                MarkerUtils.removeMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED)
+                Timber.i("forceDlc changed from '$previousForceDlc' to '${containerData.forceDlc}'. Cleared STEAM_DLL_REPLACED marker for container ${container.id}.")
+            }
+            if (previousSteamOfflineMode != containerData.steamOfflineMode) {
+                val steamAppId = extractGameIdFromContainerId(container.id)
+                val appDirPath = SteamService.getAppDirPath(steamAppId)
+                MarkerUtils.removeMarker(appDirPath, Marker.STEAM_DLL_REPLACED)
+                MarkerUtils.removeMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED)
+                Timber.i("steamOfflineMode changed from '$previousSteamOfflineMode' to '${containerData.steamOfflineMode}'. Cleared STEAM_DLL_REPLACED marker for container ${container.id}.")
+            }
         }
 
         // Apply controller settings to container
@@ -989,7 +994,12 @@ object ContainerUtils {
                 if (appIdInt != null) AmazonService.getInstallPathByAppId(appIdInt) else null
             }
 
-            GameSource.ITCHIO -> null
+            GameSource.ITCHIO -> {
+                // Map drive A to the itch.io download directory so it is maintained on every
+                // container load, matching the behaviour of all other stores.
+                val gameId = extractGameIdFromContainerId(appId)
+                File(context.getExternalFilesDir("itchio"), "$gameId").absolutePath
+            }
         }
 
         if (gameFolderPath != null) {

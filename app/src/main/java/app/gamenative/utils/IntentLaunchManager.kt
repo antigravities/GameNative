@@ -290,75 +290,84 @@ object IntentLaunchManager {
         // Quick return if no actual overrides
         if (override == base) return base
 
-        return ContainerData(
-            name = override.name.ifEmpty { base.name },
-            screenSize = if (override.screenSize != Container.DEFAULT_SCREEN_SIZE) {
-                override.screenSize
-            } else {
-                base.screenSize
-            },
-            envVars = if (override.envVars != Container.DEFAULT_ENV_VARS) override.envVars else base.envVars,
-            graphicsDriver = if (override.graphicsDriver != Container.DEFAULT_GRAPHICS_DRIVER) {
-                override.graphicsDriver
-            } else {
-                base.graphicsDriver
-            },
-            graphicsDriverVersion = override.graphicsDriverVersion.ifEmpty { base.graphicsDriverVersion },
-            dxwrapper = if (override.dxwrapper != Container.DEFAULT_DXWRAPPER) override.dxwrapper else base.dxwrapper,
-            dxwrapperConfig = when {
-                override.dxwrapperConfig.isNotEmpty() -> override.dxwrapperConfig
-                base.dxwrapperConfig.isNotEmpty() -> base.dxwrapperConfig
-                else -> DXVKHelper.DEFAULT_CONFIG
-            },
-            audioDriver = if (override.audioDriver != Container.DEFAULT_AUDIO_DRIVER) override.audioDriver else base.audioDriver,
-            wincomponents = if (override.wincomponents != Container.DEFAULT_WINCOMPONENTS) {
-                override.wincomponents
-            } else {
-                base.wincomponents
-            },
-            drives = if (override.drives != Container.DEFAULT_DRIVES) override.drives else base.drives,
-            execArgs = override.execArgs.ifEmpty { base.execArgs },
-            executablePath = override.executablePath.ifEmpty { base.executablePath },
-            installPath = override.installPath.ifEmpty { base.installPath },
-            // Boolean fields: only override if different from parsing defaults
-            showFPS = if (override.showFPS != false) override.showFPS else base.showFPS,
-            launchRealSteam = if (override.launchRealSteam != false) override.launchRealSteam else base.launchRealSteam,
-            launchBionicSteam = if (override.launchBionicSteam != false) override.launchBionicSteam else base.launchBionicSteam,
-            cpuList = if (override.cpuList != Container.getFallbackCPUList()) override.cpuList else base.cpuList,
-            cpuListWoW64 = if (override.cpuListWoW64 != Container.getFallbackCPUListWoW64()) {
-                override.cpuListWoW64
-            } else {
-                base.cpuListWoW64
-            },
-            wow64Mode = if (override.wow64Mode != true) override.wow64Mode else base.wow64Mode,
-            startupSelection = if (override.startupSelection != Container.STARTUP_SELECTION_ESSENTIAL.toInt().toByte()) {
-                override.startupSelection
-            } else {
-                base.startupSelection
-            },
-            box86Version = override.box86Version.ifEmpty { base.box86Version },
-            box64Version = override.box64Version.ifEmpty { base.box64Version },
-            box86Preset = override.box86Preset.ifEmpty { base.box86Preset },
-            box64Preset = override.box64Preset.ifEmpty { base.box64Preset },
-            desktopTheme = override.desktopTheme.ifEmpty { base.desktopTheme },
-            csmt = if (override.csmt != true) override.csmt else base.csmt,
-            videoPciDeviceID = if (override.videoPciDeviceID != 1728) override.videoPciDeviceID else base.videoPciDeviceID,
-            offScreenRenderingMode = if (override.offScreenRenderingMode != "fbo") {
-                override.offScreenRenderingMode
-            } else {
-                base.offScreenRenderingMode
-            },
-            strictShaderMath = if (override.strictShaderMath != true) override.strictShaderMath else base.strictShaderMath,
-            videoMemorySize = if (override.videoMemorySize != "2048") override.videoMemorySize else base.videoMemorySize,
-            mouseWarpOverride = if (override.mouseWarpOverride != "disable") override.mouseWarpOverride else base.mouseWarpOverride,
-            sdlControllerAPI = if (override.sdlControllerAPI != true) override.sdlControllerAPI else base.sdlControllerAPI,
-            enableXInput = if (override.enableXInput != true) override.enableXInput else base.enableXInput,
-            enableDInput = if (override.enableDInput != true) override.enableDInput else base.enableDInput,
-            dinputMapperType = if (override.dinputMapperType != 1.toByte()) override.dinputMapperType else base.dinputMapperType,
-            disableMouseInput = if (override.disableMouseInput != false) override.disableMouseInput else base.disableMouseInput,
-            suspendPolicy = base.suspendPolicy,
-            shaderBackend = if (override.shaderBackend != "glsl") override.shaderBackend else base.shaderBackend,
-            useGLSL = if (override.useGLSL != "enabled") override.useGLSL else base.useGLSL,
+        // Start from a copy of the base so any field NOT listed below keeps its base value.
+        // For each field we apply the override only when it differs from the ContainerData default,
+        // treating "equals default" as "not explicitly set by the override caller."
+        // This is imperfect for the edge case where the caller intentionally sets a field to its
+        // default value, but correct for the common case and far safer than the previous approach
+        // which silently reset ~27 fields (emulator, wineVersion, language, etc.) to defaults.
+        val d = ContainerData() // default sentinel
+        return base.copy(
+            name                  = if (override.name                  != d.name)                  override.name                  else base.name,
+            screenSize            = if (override.screenSize            != d.screenSize)            override.screenSize            else base.screenSize,
+            envVars               = if (override.envVars               != d.envVars)               override.envVars               else base.envVars,
+            graphicsDriver        = if (override.graphicsDriver        != d.graphicsDriver)        override.graphicsDriver        else base.graphicsDriver,
+            graphicsDriverVersion = if (override.graphicsDriverVersion != d.graphicsDriverVersion) override.graphicsDriverVersion else base.graphicsDriverVersion,
+            graphicsDriverConfig  = if (override.graphicsDriverConfig  != d.graphicsDriverConfig)  override.graphicsDriverConfig  else base.graphicsDriverConfig,
+            dxwrapper             = if (override.dxwrapper             != d.dxwrapper)             override.dxwrapper             else base.dxwrapper,
+            dxwrapperConfig       = if (override.dxwrapperConfig       != d.dxwrapperConfig)       override.dxwrapperConfig       else base.dxwrapperConfig,
+            audioDriver           = if (override.audioDriver           != d.audioDriver)           override.audioDriver           else base.audioDriver,
+            wincomponents         = if (override.wincomponents         != d.wincomponents)         override.wincomponents         else base.wincomponents,
+            drives                = if (override.drives                != d.drives)                override.drives                else base.drives,
+            execArgs              = if (override.execArgs              != d.execArgs)              override.execArgs              else base.execArgs,
+            executablePath        = if (override.executablePath        != d.executablePath)        override.executablePath        else base.executablePath,
+            installPath           = if (override.installPath           != d.installPath)           override.installPath           else base.installPath,
+            showFPS               = if (override.showFPS               != d.showFPS)               override.showFPS               else base.showFPS,
+            launchRealSteam       = if (override.launchRealSteam       != d.launchRealSteam)       override.launchRealSteam       else base.launchRealSteam,
+            launchBionicSteam     = if (override.launchBionicSteam     != d.launchBionicSteam)     override.launchBionicSteam     else base.launchBionicSteam,
+            allowSteamUpdates     = if (override.allowSteamUpdates     != d.allowSteamUpdates)     override.allowSteamUpdates     else base.allowSteamUpdates,
+            steamType             = if (override.steamType             != d.steamType)             override.steamType             else base.steamType,
+            cpuList               = if (override.cpuList               != d.cpuList)               override.cpuList               else base.cpuList,
+            cpuListWoW64          = if (override.cpuListWoW64          != d.cpuListWoW64)          override.cpuListWoW64          else base.cpuListWoW64,
+            wow64Mode             = if (override.wow64Mode             != d.wow64Mode)             override.wow64Mode             else base.wow64Mode,
+            startupSelection      = if (override.startupSelection      != d.startupSelection)      override.startupSelection      else base.startupSelection,
+            box86Version          = if (override.box86Version          != d.box86Version)          override.box86Version          else base.box86Version,
+            box64Version          = if (override.box64Version          != d.box64Version)          override.box64Version          else base.box64Version,
+            box86Preset           = if (override.box86Preset           != d.box86Preset)           override.box86Preset           else base.box86Preset,
+            box64Preset           = if (override.box64Preset           != d.box64Preset)           override.box64Preset           else base.box64Preset,
+            desktopTheme          = if (override.desktopTheme          != d.desktopTheme)          override.desktopTheme          else base.desktopTheme,
+            containerVariant      = if (override.containerVariant      != d.containerVariant)      override.containerVariant      else base.containerVariant,
+            wineVersion           = if (override.wineVersion           != d.wineVersion)           override.wineVersion           else base.wineVersion,
+            emulator              = if (override.emulator              != d.emulator)              override.emulator              else base.emulator,
+            fexcoreVersion        = if (override.fexcoreVersion        != d.fexcoreVersion)        override.fexcoreVersion        else base.fexcoreVersion,
+            fexcoreTSOMode        = if (override.fexcoreTSOMode        != d.fexcoreTSOMode)        override.fexcoreTSOMode        else base.fexcoreTSOMode,
+            fexcoreX87Mode        = if (override.fexcoreX87Mode        != d.fexcoreX87Mode)        override.fexcoreX87Mode        else base.fexcoreX87Mode,
+            fexcoreMultiBlock     = if (override.fexcoreMultiBlock     != d.fexcoreMultiBlock)     override.fexcoreMultiBlock     else base.fexcoreMultiBlock,
+            fexcorePreset         = if (override.fexcorePreset         != d.fexcorePreset)         override.fexcorePreset         else base.fexcorePreset,
+            renderer              = if (override.renderer              != d.renderer)              override.renderer              else base.renderer,
+            csmt                  = if (override.csmt                  != d.csmt)                  override.csmt                  else base.csmt,
+            videoPciDeviceID      = if (override.videoPciDeviceID      != d.videoPciDeviceID)      override.videoPciDeviceID      else base.videoPciDeviceID,
+            offScreenRenderingMode= if (override.offScreenRenderingMode!= d.offScreenRenderingMode)override.offScreenRenderingMode else base.offScreenRenderingMode,
+            strictShaderMath      = if (override.strictShaderMath      != d.strictShaderMath)      override.strictShaderMath      else base.strictShaderMath,
+            useDRI3               = if (override.useDRI3               != d.useDRI3)               override.useDRI3               else base.useDRI3,
+            videoMemorySize       = if (override.videoMemorySize       != d.videoMemorySize)       override.videoMemorySize       else base.videoMemorySize,
+            mouseWarpOverride     = if (override.mouseWarpOverride     != d.mouseWarpOverride)     override.mouseWarpOverride     else base.mouseWarpOverride,
+            shaderBackend         = if (override.shaderBackend         != d.shaderBackend)         override.shaderBackend         else base.shaderBackend,
+            useGLSL               = if (override.useGLSL               != d.useGLSL)               override.useGLSL               else base.useGLSL,
+            sdlControllerAPI      = if (override.sdlControllerAPI      != d.sdlControllerAPI)      override.sdlControllerAPI      else base.sdlControllerAPI,
+            useSteamInput         = if (override.useSteamInput         != d.useSteamInput)         override.useSteamInput         else base.useSteamInput,
+            enableXInput          = if (override.enableXInput          != d.enableXInput)          override.enableXInput          else base.enableXInput,
+            enableDInput          = if (override.enableDInput          != d.enableDInput)          override.enableDInput          else base.enableDInput,
+            dinputMapperType      = if (override.dinputMapperType      != d.dinputMapperType)      override.dinputMapperType      else base.dinputMapperType,
+            disableMouseInput     = if (override.disableMouseInput     != d.disableMouseInput)     override.disableMouseInput     else base.disableMouseInput,
+            touchscreenMode       = if (override.touchscreenMode       != d.touchscreenMode)       override.touchscreenMode       else base.touchscreenMode,
+            shooterMode           = if (override.shooterMode           != d.shooterMode)           override.shooterMode           else base.shooterMode,
+            gestureConfig         = if (override.gestureConfig         != d.gestureConfig)         override.gestureConfig         else base.gestureConfig,
+            externalDisplayMode   = if (override.externalDisplayMode   != d.externalDisplayMode)   override.externalDisplayMode   else base.externalDisplayMode,
+            externalDisplaySwap   = if (override.externalDisplaySwap   != d.externalDisplaySwap)   override.externalDisplaySwap   else base.externalDisplaySwap,
+            language              = if (override.language              != d.language)              override.language              else base.language,
+            forceDlc              = if (override.forceDlc              != d.forceDlc)              override.forceDlc              else base.forceDlc,
+            localSavesOnly        = if (override.localSavesOnly        != d.localSavesOnly)        override.localSavesOnly        else base.localSavesOnly,
+            steamOfflineMode      = if (override.steamOfflineMode      != d.steamOfflineMode)      override.steamOfflineMode      else base.steamOfflineMode,
+            useLegacyDRM          = if (override.useLegacyDRM          != d.useLegacyDRM)          override.useLegacyDRM          else base.useLegacyDRM,
+            unpackFiles           = if (override.unpackFiles           != d.unpackFiles)           override.unpackFiles           else base.unpackFiles,
+            suspendPolicy         = if (override.suspendPolicy         != d.suspendPolicy)         override.suspendPolicy         else base.suspendPolicy,
+            portraitMode          = if (override.portraitMode          != d.portraitMode)          override.portraitMode          else base.portraitMode,
+            verticalMode          = if (override.verticalMode          != d.verticalMode)          override.verticalMode          else base.verticalMode,
+            sharpnessEffect       = if (override.sharpnessEffect       != d.sharpnessEffect)       override.sharpnessEffect       else base.sharpnessEffect,
+            sharpnessLevel        = if (override.sharpnessLevel        != d.sharpnessLevel)        override.sharpnessLevel        else base.sharpnessLevel,
+            sharpnessDenoise      = if (override.sharpnessDenoise      != d.sharpnessDenoise)      override.sharpnessDenoise      else base.sharpnessDenoise,
+            lsfgEnabled           = if (override.lsfgEnabled           != d.lsfgEnabled)           override.lsfgEnabled           else base.lsfgEnabled,
         )
     }
 

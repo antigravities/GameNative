@@ -840,6 +840,7 @@ fun XServerScreen(
                         if (!hasNonEssential) {
                             withContext(Dispatchers.Main) {
                                 exit(
+                                    context,
                                     winHandler,
                                     frameRating,
                                     currentAppInfo,
@@ -1241,7 +1242,7 @@ fun XServerScreen(
                 imeInputReceiver?.hideKeyboard()
                 // Resume processes before exiting so they can receive SIGTERM cleanly.
                 forceResumeIfSuspended()
-                exit(xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
+                exit(context, xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
                 true
             }
 
@@ -1350,7 +1351,7 @@ fun XServerScreen(
     DisposableEffect(lifecycleOwner, container) {
         val onActivityDestroyed: (AndroidEvent.ActivityDestroyed) -> Unit = {
             Timber.i("onActivityDestroyed")
-            exit(xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
+            exit(context, xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
         }
         val onKeyEvent: (AndroidEvent.KeyEvent) -> Boolean = {
             val isKeyboard = Keyboard.isKeyboardDevice(it.event.device)
@@ -1453,12 +1454,12 @@ fun XServerScreen(
             // The termination callback fires on a background waitFor thread. Compose
             // navigation (navigateBack) must run on the main thread, so dispatch there.
             Handler(Looper.getMainLooper()).post {
-                exit(xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
+                exit(context, xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
             }
         }
         val onForceCloseApp: (SteamEvent.ForceCloseApp) -> Unit = {
             Timber.i("onForceCloseApp")
-            exit(xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
+            exit(context, xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
         }
         val onPlayingBlocked: (SteamEvent.PlayingBlocked) -> Unit = { event ->
             if (isOffline || container.isSteamOfflineMode()) {
@@ -2685,7 +2686,7 @@ fun XServerScreen(
                 TextButton(onClick = {
                     showPlayingBlockedDialog = false
                     playingBlockedRemoteName = null
-                    exit(xServerView?.getxServer()?.winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
+                    exit(context, xServerView?.getxServer()?.winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
                 }) {
                     Text(text = stringResource(R.string.cancel))
                 }
@@ -4231,6 +4232,27 @@ private fun getWineStartCommand(
         }
 
         return launchCommand
+    } else if (gameSource == GameSource.ITCHIO) {
+        // Find where drive A is mounted (the itch.io extract directory).
+        var gameFolderPath: String? = null
+        for (drive in Container.drivesIterator(container.drives)) {
+            if (drive[0] == "A") { gameFolderPath = drive[1]; break }
+        }
+        val execPath = container.executablePath
+        if (execPath.isNotEmpty() && gameFolderPath != null) {
+            // executablePath is a relative Windows path (e.g. "Celeste.exe" or "subdir\game.exe"),
+            // matching the CUSTOM_GAME convention. Convert to forward slashes for host resolution,
+            // then prepend "A:\" for the Wine-side path.
+            val relPath = execPath.replace('\\', '/')
+            val executableDir = gameFolderPath + "/" + relPath.substringBeforeLast("/", "")
+            guestProgramLauncherComponent.workingDir = File(executableDir)
+            val normalizedPath = execPath.replace('/', '\\')
+            envVars.put("WINEPATH", "A:\\")
+            "\"A:\\${normalizedPath}\""
+        } else {
+            Timber.tag("XServerScreen").w("No executablePath for itch.io game: $appId")
+            "\"wfm.exe\""
+        }
     } else if (isCustomGame) {
         // For Custom Games, we can launch even without appLaunchInfo
         // Use the executable path from container config. If missing, try to auto-detect
@@ -4365,6 +4387,7 @@ private fun getSteamlessTarget(
 }
 
 private fun exit(
+    context: Context,
     winHandler: WinHandler?,
     frameRating: FrameRating?,
     appInfo: SteamApp?,
@@ -4391,8 +4414,15 @@ private fun exit(
         ),
     )
 
-    // Store session data in container metadata
+    // Store session data in container metadata.
+    // If a temporary config override was active, restore the original config first so we don't
+    // persist override-defaulted fields (e.g. emulator, wineVersion) to disk — only the session
+    // metadata (avg_fps, session_length_sec) should survive this save.
     frameRating?.let { rating ->
+        val originalConfig = IntentLaunchManager.getOriginalConfig(appId)
+        if (originalConfig != null) {
+            ContainerUtils.applyToContainer(context, container, originalConfig, saveToDisk = false)
+        }
         container.putSessionMetadata("avg_fps", rating.avgFPS)
         container.putSessionMetadata("session_length_sec", rating.sessionLengthSec.toInt())
         container.saveData()
