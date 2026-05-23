@@ -91,14 +91,13 @@ class ItchioService : Service() {
         // AUTHENTICATION — not yet implemented
         // ==========================================================================
 
-        fun hasStoredCredentials(context: Context): Boolean {
-            // TODO: delegate to ItchioAuthManager
-            return false
-        }
+        fun hasStoredCredentials(context: Context): Boolean =
+            ItchioAuthManager.hasStoredCredentials(context)
 
         suspend fun logout(context: Context): Result<Unit> {
-            // TODO: clear credentials, wipe DB, stop service
-            return Result.failure(NotImplementedError("itch.io logout not yet implemented"))
+            val result = ItchioAuthManager.logout(context)
+            stop()
+            return result
         }
 
         // ==========================================================================

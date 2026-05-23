@@ -1494,6 +1494,14 @@
     <string name="amazon_integration_title">Amazon Games Integration (Alpha)</string>
     <string name="itchio_settings_login_title">Log in with itch.io</string>
     <string name="itchio_settings_logout_title">Log out of itch.io</string>
+    <string name="itchio_login_dialog_title">Log in with itch.io</string>
+    <string name="itchio_login_dialog_body">Enter an itch.io API key. You can generate one from your account settings.</string>
+    <string name="itchio_login_generate_key">Generate API key →</string>
+    <string name="itchio_login_api_key_hint">API key</string>
+    <string name="itchio_login_connect">Connect</string>
+    <string name="itchio_login_invalid_key">Invalid API key — please check and try again</string>
+    <string name="itchio_logout_success">Logged out of itch.io</string>
+    <string name="itchio_logout_failed">itch.io logout failed: %s</string>
     <string name="amazon_settings_login_title">Sign in to Amazon Games</string>
     <string name="amazon_settings_login_subtitle">Sign in to your Amazon Games account</string>
     <string name="amazon_login_success_title">Login Successful</string>

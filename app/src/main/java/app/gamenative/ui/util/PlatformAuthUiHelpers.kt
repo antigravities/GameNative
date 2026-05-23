@@ -5,6 +5,7 @@ import app.gamenative.R
 import app.gamenative.service.amazon.AmazonService
 import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGService
+import app.gamenative.service.itchio.ItchioService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -144,6 +145,48 @@ object PlatformAuthUiHelpers {
                     callbacks.onLoadingChange(false)
                     val message = context.getString(
                         R.string.amazon_logout_failed,
+                        e.message ?: "Unknown",
+                    )
+                    callbacks.onError(message)
+                    SnackbarManager.show(message)
+                }
+            }
+        }
+    }
+
+    fun logoutItchio(
+        context: Context,
+        scope: CoroutineScope,
+        callbacks: PlatformLogoutCallbacks = PlatformLogoutCallbacks(),
+    ) {
+        callbacks.onLoadingChange(true)
+        scope.launch {
+            try {
+                Timber.d("[PlatformAuthUiHelpers][Itchio] Starting logout...")
+                val result = ItchioService.logout(context)
+                withContext(Dispatchers.Main) {
+                    callbacks.onLoadingChange(false)
+                    if (result.isSuccess) {
+                        Timber.i("[PlatformAuthUiHelpers][Itchio] Logout successful")
+                        callbacks.onSuccess()
+                        SnackbarManager.show(context.getString(R.string.itchio_logout_success))
+                    } else {
+                        val error = result.exceptionOrNull()
+                        Timber.e(error, "[PlatformAuthUiHelpers][Itchio] Logout failed")
+                        val message = context.getString(
+                            R.string.itchio_logout_failed,
+                            error?.message ?: "Unknown",
+                        )
+                        callbacks.onError(message)
+                        SnackbarManager.show(message)
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "[PlatformAuthUiHelpers][Itchio] Exception during logout")
+                withContext(Dispatchers.Main) {
+                    callbacks.onLoadingChange(false)
+                    val message = context.getString(
+                        R.string.itchio_logout_failed,
                         e.message ?: "Unknown",
                     )
                     callbacks.onError(message)

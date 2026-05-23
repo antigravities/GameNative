@@ -2,6 +2,7 @@ package app.gamenative.ui.screen.library
 
 import android.content.Intent
 import android.content.res.Configuration
+import android.net.Uri
 import android.view.KeyEvent
 import android.view.MotionEvent
 import app.gamenative.ui.util.SnackbarManager
@@ -112,8 +113,12 @@ import app.gamenative.service.gog.GOGService
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.PlatformOAuthHandlers
 import app.gamenative.utils.SteamUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.os.SystemClock
+import app.gamenative.service.itchio.ItchioAuthManager
+import app.gamenative.ui.component.dialog.ItchioApiKeyDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -363,6 +368,10 @@ private fun LibraryScreenContent(
     var showAddCustomGameDialog by remember { mutableStateOf(false) }
     // Holds the game that the user long-pressed "Uninstall" on, pending confirmation.
     var pendingUninstallItem by remember { mutableStateOf<LibraryItem?>(null) }
+    // itch.io API key dialog state
+    var showItchioApiKeyDialog by remember { mutableStateOf(false) }
+    var itchioApiKeyLoading by remember { mutableStateOf(false) }
+    var itchioApiKeyError by remember { mutableStateOf<String?>(null) }
     var dontShowAgain by remember { mutableStateOf(false) }
     var previousAppCount by remember { mutableIntStateOf(state.appInfoList.size) }
     var controllerBootstrapNeeded by remember { mutableStateOf(true) }
@@ -933,7 +942,10 @@ private fun LibraryScreenContent(
                         LibraryTab.ITCHIO -> Triple(
                             R.string.library_source_not_logged_in_itchio,
                             R.string.itchio_settings_login_title,
-                            { /* TODO: launch itch.io login flow */ },
+                            {
+                                itchioApiKeyError = null
+                                showItchioApiKeyDialog = true
+                            },
                         )
                         LibraryTab.LOCAL -> Triple(
                             R.string.library_source_no_custom_games,
@@ -1217,10 +1229,11 @@ private fun LibraryScreenContent(
                 },
                 itchioLoggedIn = itchioLoggedIn,
                 onItchioLoginClick = {
-                    // TODO: launch itch.io login flow
+                    itchioApiKeyError = null
+                    showItchioApiKeyDialog = true
                 },
                 onItchioLogoutClick = {
-                    // TODO: launch itch.io logout flow
+                    PlatformAuthUiHelpers.logoutItchio(context, lifecycleScope, PlatformLogoutCallbacks())
                 },
             )
         }
@@ -1248,6 +1261,38 @@ private fun LibraryScreenContent(
                 },
             )
         }
+
+        // itch.io API key login dialog
+        ItchioApiKeyDialog(
+            visible = showItchioApiKeyDialog,
+            isLoading = itchioApiKeyLoading,
+            errorMessage = itchioApiKeyError,
+            onDismiss = {
+                if (!itchioApiKeyLoading) showItchioApiKeyDialog = false
+            },
+            onOpenApiKeyPage = {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://itch.io/user/settings/api-keys"))
+                )
+            },
+            onConfirm = { apiKey ->
+                itchioApiKeyLoading = true
+                itchioApiKeyError = null
+                lifecycleScope.launch {
+                    val result = ItchioAuthManager.validateAndSave(context, apiKey)
+                    withContext(Dispatchers.Main) {
+                        itchioApiKeyLoading = false
+                        if (result.isSuccess) {
+                            showItchioApiKeyDialog = false
+                            ItchioService.start(context)
+                        } else {
+                            itchioApiKeyError = result.exceptionOrNull()?.message
+                                ?: context.getString(R.string.itchio_login_invalid_key)
+                        }
+                    }
+                }
+            },
+        )
 
         // Add custom game dialog
         if (showAddCustomGameDialog) {
