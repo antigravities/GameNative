@@ -666,6 +666,19 @@ fun SettingsGroupInterface(
                 },
             )
         }
+        // Report non-Steam (Epic, GOG, Amazon) game sessions to Steam so the user's profile
+        // shows "In non-Steam game: [Title]" while playing. Opt-in, defaults off.
+        var reportNonSteamToSteam by rememberSaveable { mutableStateOf(PrefManager.reportNonSteamToSteam) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_report_non_steam_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_report_non_steam_subtitle)) },
+            state = reportNonSteamToSteam,
+            onCheckedChange = {
+                reportNonSteamToSteam = it
+                PrefManager.reportNonSteamToSteam = it
+            },
+        )
     }
 
     // Steam Download Server choice dialog
