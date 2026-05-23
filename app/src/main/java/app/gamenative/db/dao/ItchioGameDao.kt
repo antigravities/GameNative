@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import app.gamenative.data.ItchioGame
 import kotlinx.coroutines.flow.Flow
@@ -41,4 +42,23 @@ interface ItchioGameDao {
 
     @Query("DELETE FROM itchio_game WHERE is_installed = 0")
     suspend fun deleteAllNonInstalledGames()
+
+    /**
+     * Insert or update a batch of games from a library sync, preserving the local install state
+     * of any games already on-device. Without this, a REPLACE insert would wipe isInstalled/installPath.
+     *
+     * Runs inside a single transaction so the DB is never half-updated if the sync is cancelled.
+     */
+    @Transaction
+    suspend fun upsertPreservingInstallStatus(games: List<ItchioGame>) {
+        games.forEach { newGame ->
+            val existing = getById(newGame.id)
+            insert(
+                newGame.copy(
+                    isInstalled = existing?.isInstalled ?: false,
+                    installPath = existing?.installPath ?: "",
+                ),
+            )
+        }
+    }
 }

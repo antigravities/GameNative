@@ -22,6 +22,11 @@ data class ItchioGame(
     @ColumnInfo("image_url")
     val imageUrl: String = "",
 
+    // Download key ID from the /profile/owned-keys endpoint — required for downloading games later.
+    // This is distinct from `id` (the game ID): each purchase generates a unique key per game.
+    @ColumnInfo(name = "download_key_id", defaultValue = "")
+    val downloadKeyId: String = "",
+
     @ColumnInfo("is_installed")
     val isInstalled: Boolean = false,
 
