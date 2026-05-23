@@ -21,20 +21,27 @@ import com.winlator.container.ContainerData
 import app.gamenative.R
 import app.gamenative.data.ItchioGame
 import app.gamenative.data.LibraryItem
+import app.gamenative.enums.Marker
 import app.gamenative.service.itchio.ItchioAuthManager
 import app.gamenative.service.itchio.ItchioDownloadManager
+import app.gamenative.service.itchio.ItchioInstallerDetector
+import app.gamenative.service.itchio.ItchioInstallerType
 import app.gamenative.service.itchio.ItchioService
+import app.gamenative.utils.MarkerUtils
+import app.gamenative.utils.ItchioInstallerStep
 import app.gamenative.ui.component.dialog.ItchioGameManagerDialog
 import app.gamenative.ui.data.AppMenuOption
 import app.gamenative.ui.data.GameDisplayInfo
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.utils.ContainerUtils
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 /**
@@ -54,6 +61,12 @@ class ItchioAppScreen : BaseAppScreen() {
 
         // Mirrors the uninstall-dialog pattern from GOGAppScreen / EpicAppScreen.
         private val uninstallDialogAppIds = mutableStateListOf<String>()
+
+        // Shows the "Run Installer?" dialog for unknown executables that need user consent.
+        // Keyed by appId; the stored lambda is the onClickPlay callback to invoke once the
+        // user decides, since AdditionalDialogs has no direct access to that callback.
+        private val showInstallerConsentDialog = mutableStateMapOf<String, Boolean>()
+        private val pendingPlayCallback = mutableStateMapOf<String, (Boolean) -> Unit>()
 
         fun showUninstallDialog(appId: String) {
             if (!uninstallDialogAppIds.contains(appId)) {
@@ -110,6 +123,10 @@ class ItchioAppScreen : BaseAppScreen() {
     /**
      * Shows the download file-picker dialog by setting state that [AdditionalDialogs] observes.
      * The actual dialog + download kick-off happens on the UI thread in AdditionalDialogs.
+     *
+     * When the game is already installed, we first check whether the downloaded file is an
+     * unknown executable that needs one-time user consent before running as a pre-install step.
+     * Known installer types (NSIS, Inno, MSI, 7-zip SFX) run automatically without a prompt.
      */
     override fun onDownloadInstallClick(
         context: Context,
@@ -119,7 +136,35 @@ class ItchioAppScreen : BaseAppScreen() {
         // AppScreenContent routes both "Play" and "Install" taps here. Branch on installed
         // state so that tapping Play doesn't reopen the download file-picker dialog.
         if (isInstalled(context, libraryItem)) {
-            onClickPlay(true)
+            val appId = libraryItem.appId
+            val gameId = libraryItem.gameId.toLong()
+
+            // Detect the installer type on the IO thread (reads up to 4 MB from disk) so
+            // we don't block the main thread, then switch back to Main to update UI state.
+            CoroutineScope(Dispatchers.IO).launch {
+                val downloadDir = File(context.getExternalFilesDir("itchio"), "$gameId")
+                val installerFile = ItchioInstallerStep.findInstallerFile(downloadDir)
+
+                val needsConsent = if (installerFile != null) {
+                    val type = ItchioInstallerDetector.detect(installerFile)
+                    val dirPath = downloadDir.absolutePath
+                    type == ItchioInstallerType.UNKNOWN_EXE &&
+                        !MarkerUtils.hasMarker(dirPath, Marker.ITCHIO_INSTALLER_RAN) &&
+                        !MarkerUtils.hasMarker(dirPath, Marker.ITCHIO_INSTALLER_CONSENT) &&
+                        !MarkerUtils.hasMarker(dirPath, Marker.ITCHIO_INSTALLER_SKIP)
+                } else {
+                    false
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (needsConsent) {
+                        pendingPlayCallback[appId] = onClickPlay
+                        showInstallerConsentDialog[appId] = true
+                    } else {
+                        onClickPlay(true)
+                    }
+                }
+            }
         } else {
             showDownloadDialog[libraryItem.appId] = true
         }
@@ -303,6 +348,54 @@ class ItchioAppScreen : BaseAppScreen() {
                     TextButton(onClick = { hideUninstallDialog(appId) }) {
                         Text(stringResource(R.string.cancel))
                     }
+                },
+            )
+        }
+
+        // ── Installer consent dialog (unknown EXE only) ──────────────────────
+        // Shown once when the user taps Play and the downloaded file is an unrecognised
+        // executable. "Run" writes a consent marker so the pre-install step activates;
+        // "Skip" writes a skip marker so the question is never asked again.
+        if (showInstallerConsentDialog[appId] == true) {
+            AlertDialog(
+                onDismissRequest = {
+                    // Dismissed without choosing — don't launch and don't record anything
+                    showInstallerConsentDialog.remove(appId)
+                    pendingPlayCallback.remove(appId)
+                },
+                title = { Text(stringResource(R.string.itchio_installer_consent_title)) },
+                text = { Text(stringResource(R.string.itchio_installer_consent_message)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            // Write consent marker on IO thread so the pre-install step
+                            // picks it up on the next getPreInstallCommands() call
+                            CoroutineScope(Dispatchers.IO).launch {
+                                MarkerUtils.addMarker(
+                                    File(context.getExternalFilesDir("itchio"), "$gameId")
+                                        .absolutePath,
+                                    Marker.ITCHIO_INSTALLER_CONSENT,
+                                )
+                            }
+                            showInstallerConsentDialog.remove(appId)
+                            pendingPlayCallback.remove(appId)?.invoke(true)
+                        },
+                    ) { Text(stringResource(R.string.run)) }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                MarkerUtils.addMarker(
+                                    File(context.getExternalFilesDir("itchio"), "$gameId")
+                                        .absolutePath,
+                                    Marker.ITCHIO_INSTALLER_SKIP,
+                                )
+                            }
+                            showInstallerConsentDialog.remove(appId)
+                            pendingPlayCallback.remove(appId)?.invoke(true)
+                        },
+                    ) { Text(stringResource(R.string.cancel)) }
                 },
             )
         }

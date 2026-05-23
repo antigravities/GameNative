@@ -30,6 +30,7 @@ object PreInstallSteps {
         XnaFrameworkStep,
         GogScriptInterpreterStep,
         UbisoftConnectStep,
+        ItchioInstallerStep,
     )
 
     private var stepsProvider: () -> List<PreInstallStep> = { steps }
@@ -106,7 +107,7 @@ object PreInstallSteps {
         return "wine explorer /desktop=shell,$screenInfo $wrapped"
     }
 
-    private fun getGameDir(container: Container): File? {
+    internal fun getGameDir(container: Container): File? {
         for (drive in Container.drivesIterator(container.drives)) {
             if (drive[0].equals("A", ignoreCase = true)) return File(drive[1])
         }

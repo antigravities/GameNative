@@ -12,4 +12,7 @@ enum class Marker(val fileName: String ) {
     OPENAL_INSTALLED(".openal_installed"),
     XNA_INSTALLED(".xna_installed"),
     UBISOFT_CONNECT_INSTALLED(".ubisoft_connect_installed"),
+    ITCHIO_INSTALLER_RAN(".itchio_installer_ran"),
+    ITCHIO_INSTALLER_CONSENT(".itchio_installer_consent"),
+    ITCHIO_INSTALLER_SKIP(".itchio_installer_skip"),
 }

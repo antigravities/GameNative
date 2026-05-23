@@ -702,7 +702,18 @@ object ContainerUtils {
                 }
             }
 
-            GameSource.ITCHIO -> defaultDrives
+            GameSource.ITCHIO -> {
+                // Map the itch.io download directory as drive A so that PreInstallSteps can
+                // find and run the downloaded installer via its Windows path (A:\setup.exe).
+                val gameId = extractGameIdFromContainerId(appId)
+                val downloadDir = File(context.getExternalFilesDir("itchio"), "$gameId").absolutePath
+                val drive: Char = if (defaultDrives.contains("A:")) {
+                    Container.getNextAvailableDriveLetter(defaultDrives)
+                } else {
+                    'A'
+                }
+                "$defaultDrives$drive:$downloadDir"
+            }
         }
         Timber.d("Prepared container drives: $drives")
 

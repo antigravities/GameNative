@@ -71,6 +71,9 @@
     <string name="itchio_uninstall_confirmation_message">Are you sure you want to uninstall %1$s? This action cannot be undone.</string>
     <string name="itchio_uninstall_success">%1$s has been uninstalled</string>
     <string name="itchio_uninstall_failed">Failed to uninstall game</string>
+    <string name="itchio_installer_consent_title">Run Installer?</string>
+    <string name="itchio_installer_consent_message">This game was downloaded as an installer. Run it before launching? You won\'t be asked again.</string>
+    <string name="itchio_installer_failed">Installer did not complete successfully. The installer file has been kept.</string>
     <string name="steam_never">Never</string>
     <string name="steam_continue">Continue</string>
     <string name="header_img_desc">App header image</string>

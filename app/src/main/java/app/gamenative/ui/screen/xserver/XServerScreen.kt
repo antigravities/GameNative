@@ -83,6 +83,8 @@ import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.SteamBootstrap
 import app.gamenative.data.GameSource
+import app.gamenative.enums.Marker
+import app.gamenative.utils.ItchioInstallerStep
 import app.gamenative.gamefixes.GameFixesRegistry
 import app.gamenative.data.LaunchInfo
 import app.gamenative.data.LibraryItem
@@ -3720,6 +3722,23 @@ private fun setupXEnvironment(
         guestProgramLauncherComponent.setGuestExecutable(remaining.first().executable)
         guestProgramLauncherComponent.setTerminationCallback { _ ->
             val current = remaining.first()
+
+            // For itch.io installer steps, detect success by checking whether the installer
+            // file was deleted inside Wine. buildCommand uses "&&" before "del", so the file
+            // survives only when the installer exited non-zero (wine explorer itself always
+            // exits 0, so the integer exit code passed here is not useful for this purpose).
+            if (current.marker == Marker.ITCHIO_INSTALLER_RAN) {
+                val gameDir = PreInstallSteps.getGameDir(container)
+                val installerRemains = gameDir != null &&
+                    ItchioInstallerStep.findInstallerFile(gameDir) != null
+                if (installerRemains) {
+                    Timber.e("itch.io installer failed — file still present after Wine exited")
+                    SnackbarManager.show(context.getString(R.string.itchio_installer_failed))
+                    PluviaApp.events.emit(AndroidEvent.GuestProgramTerminated)
+                    return@setTerminationCallback  // don't mark done, don't chain next step
+                }
+            }
+
             PreInstallSteps.markStepDone(container, current.marker)
             guestProgramLauncherComponent.setPreUnpack(null)
             try {
