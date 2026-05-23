@@ -67,6 +67,10 @@
     <string name="epic_delete_download_message">Delete all downloaded data for this game?</string>
     <string name="epic_uninstall_failed">Uninstall failed: %1$s</string>
     <string name="epic_uninstall_error">Uninstall error: %1$s</string>
+    <string name="itchio_uninstall_game_title">Uninstall Game</string>
+    <string name="itchio_uninstall_confirmation_message">Are you sure you want to uninstall %1$s? This action cannot be undone.</string>
+    <string name="itchio_uninstall_success">%1$s has been uninstalled</string>
+    <string name="itchio_uninstall_failed">Failed to uninstall game</string>
     <string name="steam_never">Never</string>
     <string name="steam_continue">Continue</string>
     <string name="header_img_desc">App header image</string>

@@ -43,6 +43,9 @@ interface ItchioGameDao {
     @Query("DELETE FROM itchio_game WHERE is_installed = 0")
     suspend fun deleteAllNonInstalledGames()
 
+    @Query("UPDATE itchio_game SET is_installed = 0, install_path = '' WHERE id = :gameId")
+    suspend fun uninstall(gameId: String)
+
     /**
      * Insert or update a batch of games from a library sync, preserving the local install state
      * of any games already on-device. Without this, a REPLACE insert would wipe isInstalled/installPath.

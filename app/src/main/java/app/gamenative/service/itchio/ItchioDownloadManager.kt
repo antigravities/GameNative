@@ -41,12 +41,22 @@ object ItchioDownloadManager {
     // after completion without waiting for GamePageViewModel to re-fetch the DB row.
     private val installedGameIds: MutableSet<Long> = ConcurrentHashMap.newKeySet()
 
+    // Tracks games explicitly uninstalled this session. Checked by ItchioAppScreen.isInstalled()
+    // to override the stale libraryItem.isInstalled=true that GamePageViewModel cached on page load.
+    private val uninstalledGameIds: MutableSet<Long> = ConcurrentHashMap.newKeySet()
+
     fun isInstalled(gameId: Long): Boolean = gameId in installedGameIds
+    fun isExplicitlyUninstalled(gameId: Long): Boolean = gameId in uninstalledGameIds
 
     // Broadcasts (gameId, progress 0..1) to any subscriber. extraBufferCapacity prevents
     // tryEmit from dropping events when the collector is briefly busy between chunks.
     private val _progressFlow = MutableSharedFlow<Pair<Long, Float>>(extraBufferCapacity = 64)
     val progressFlow: SharedFlow<Pair<Long, Float>> = _progressFlow
+
+    // Signals that a game was uninstalled. observeGameState() subscribes to this to trigger
+    // a performStateRefresh() so the Play→Install button flip happens without navigating away.
+    private val _uninstallFlow = MutableSharedFlow<Long>(extraBufferCapacity = 1)
+    val uninstallFlow: SharedFlow<Long> = _uninstallFlow
 
     fun isDownloading(gameId: Long): Boolean = activeDownloads.containsKey(gameId)
 
@@ -58,6 +68,13 @@ object ItchioDownloadManager {
     fun cancelDownload(gameId: Long) {
         activeDownloads[gameId]?.cancel()
         // Entry is removed inside the download coroutine's finally block.
+    }
+
+    /** Records an uninstall: clears the installed flag and signals observeGameState listeners. */
+    fun markUninstalled(gameId: Long) {
+        installedGameIds.remove(gameId)
+        uninstalledGameIds.add(gameId)
+        _uninstallFlow.tryEmit(gameId)
     }
 
     /**
@@ -81,6 +98,10 @@ object ItchioDownloadManager {
             Timber.tag(TAG).w("Download already in progress for game $gameId — ignoring")
             return
         }
+
+        // A new download supersedes any prior uninstall record for this game so that
+        // isExplicitlyUninstalled() returns false once the download completes.
+        uninstalledGameIds.remove(gameId)
 
         // DownloadInfo uses Int for gameId (Steam-era type). itch.io IDs fit in Int for all
         // practical games, but we coerce just in case.

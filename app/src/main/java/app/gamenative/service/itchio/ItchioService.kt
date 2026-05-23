@@ -113,9 +113,41 @@ class ItchioService : Service() {
             return ItchioManager.refreshLibrary(context, svc.itchioGameDao)
         }
 
-        fun deleteGame(context: Context, gameId: String): Result<Unit> {
-            // TODO: delegate to ItchioManager once download/install is implemented
-            return Result.failure(NotImplementedError("itch.io game deletion not yet implemented"))
+        suspend fun deleteGame(@Suppress("UNUSED_PARAMETER") context: Context, gameId: String): Result<Unit> {
+            val svc = instance
+                ?: return Result.failure(IllegalStateException("ItchioService is not running"))
+
+            return try {
+                val game = svc.itchioGameDao.getById(gameId)
+
+                // Delete the downloaded file from disk if we have a recorded path.
+                val installPath = game?.installPath?.takeIf { it.isNotBlank() }
+                if (installPath != null) {
+                    val file = java.io.File(installPath)
+                    if (file.exists()) {
+                        // itch.io installs are single files (zip/installer), not directories.
+                        file.delete()
+                        Timber.tag("ItchioService").i("Deleted installed file: $installPath")
+                    } else {
+                        Timber.tag("ItchioService").w("Install file not found at: $installPath")
+                    }
+                }
+
+                // Clear the install state in the DB.
+                svc.itchioGameDao.uninstall(gameId)
+
+                // Clear the in-memory installed set so isInstalled() returns false immediately.
+                ItchioDownloadManager.markUninstalled(gameId.toLong())
+
+                // Notify the library screen to refresh the install badge.
+                PluviaApp.events.emitJava(AndroidEvent.LibraryInstallStatusChanged(gameId.toIntOrNull() ?: 0))
+
+                Timber.tag("ItchioService").i("Uninstalled game $gameId")
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Timber.tag("ItchioService").e(e, "Failed to uninstall game $gameId")
+                Result.failure(e)
+            }
         }
 
         // ==========================================================================

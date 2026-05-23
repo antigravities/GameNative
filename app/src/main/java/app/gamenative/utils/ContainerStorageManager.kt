@@ -24,6 +24,7 @@ import app.gamenative.service.epic.EpicConstants
 import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGConstants
 import app.gamenative.service.gog.GOGService
+import app.gamenative.service.itchio.ItchioService
 import com.winlator.core.FileUtils
 import com.winlator.xenvironment.ImageFs
 import dagger.hilt.EntryPoint
@@ -466,7 +467,11 @@ object ContainerStorageManager {
                 }
 
                 GameSource.CUSTOM_GAME -> Result.failure(UnsupportedOperationException("Custom games are not supported"))
-                GameSource.ITCHIO -> Result.failure(UnsupportedOperationException("itch.io uninstall not yet implemented"))
+                GameSource.ITCHIO -> {
+                    val result = ItchioService.deleteGame(context, gameId.toString())
+                    if (result.isSuccess && entry.hasContainer) removeContainer(context, entry.containerId)
+                    result
+                }
             }
 
             if (result.isSuccess) {
