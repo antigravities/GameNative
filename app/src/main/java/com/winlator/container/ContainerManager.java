@@ -5,6 +5,7 @@ import static com.winlator.container.Container.STEAM_TYPE_NORMAL;
 
 import android.content.Context;
 import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 // import com.winlator.R;
@@ -155,7 +156,8 @@ public class ContainerManager {
     }
 
     public void removeContainerAsync(Container container, Runnable callback) {
-        final Handler handler = new Handler();
+        // Use the main Looper so this can be called from background threads (e.g. Dispatchers.IO).
+        final Handler handler = new Handler(Looper.getMainLooper());
         Executors.newSingleThreadExecutor().execute(() -> {
             removeContainer(container);
             handler.post(callback);

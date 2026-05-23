@@ -28,6 +28,7 @@ import app.gamenative.ui.component.dialog.ItchioGameManagerDialog
 import app.gamenative.ui.data.AppMenuOption
 import app.gamenative.ui.data.GameDisplayInfo
 import app.gamenative.ui.util.SnackbarManager
+import app.gamenative.utils.ContainerUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -152,6 +153,9 @@ class ItchioAppScreen : BaseAppScreen() {
             try {
                 val result = ItchioService.deleteGame(context, libraryItem.gameId.toString())
                 if (result.isSuccess) {
+                    // Remove the Winlator container if one was created for this game.
+                    // deleteContainer is a no-op when no container exists.
+                    ContainerUtils.deleteContainer(context, libraryItem.appId)
                     Timber.tag(TAG).i("Uninstalled itch.io game ${libraryItem.appId}")
                     SnackbarManager.show(
                         context.getString(R.string.itchio_uninstall_success, libraryItem.name),
