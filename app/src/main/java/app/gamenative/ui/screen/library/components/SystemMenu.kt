@@ -263,6 +263,9 @@ fun SystemMenu(
     onEpicLogoutClick: () -> Unit,
     onAmazonLoginClick: () -> Unit,
     onAmazonLogoutClick: () -> Unit,
+    itchioLoggedIn: Boolean,
+    onItchioLoginClick: () -> Unit,
+    onItchioLogoutClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -759,6 +762,24 @@ fun SystemMenu(
                             },
                             isDestructive = amazonLoggedIn,
                         )
+
+                        // itch.io
+                        SystemMenuItem(
+                            text = stringResource(
+                                if (itchioLoggedIn) R.string.itchio_settings_logout_title
+                                else R.string.itchio_settings_login_title,
+                            ),
+                            icon = if (itchioLoggedIn) {
+                                Icons.AutoMirrored.Filled.Logout
+                            } else {
+                                Icons.AutoMirrored.Filled.Login
+                            },
+                            onClick = {
+                                if (itchioLoggedIn) onItchioLogoutClick() else onItchioLoginClick()
+                                onDismiss()
+                            },
+                            isDestructive = itchioLoggedIn,
+                        )
                     }
 
                     // Gamepad hint at bottom (only on expanded screens)
@@ -836,6 +857,9 @@ private fun Preview_SystemMenu() {
                     onEpicLogoutClick = { },
                     onAmazonLoginClick = { },
                     onAmazonLogoutClick = { },
+                    itchioLoggedIn = false,
+                    onItchioLoginClick = { },
+                    onItchioLogoutClick = { },
                 )
             }
         }

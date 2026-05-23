@@ -106,6 +106,7 @@ import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.PlatformAuthUiHelpers
 import app.gamenative.ui.util.PlatformLogoutCallbacks
 import app.gamenative.service.amazon.AmazonService
+import app.gamenative.service.itchio.ItchioService
 import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGService
 import app.gamenative.utils.CustomGameScanner
@@ -903,6 +904,7 @@ private fun LibraryScreenContent(
                     LibraryTab.GOG -> !GOGService.hasStoredCredentials(context)
                     LibraryTab.EPIC -> !EpicService.hasStoredCredentials(context)
                     LibraryTab.AMAZON -> !AmazonService.hasStoredCredentials(context)
+                    LibraryTab.ITCHIO -> !ItchioService.hasStoredCredentials(context)
                     LibraryTab.LOCAL -> PrefManager.customGamesCount == 0
                     else -> false
                 }
@@ -928,12 +930,17 @@ private fun LibraryScreenContent(
                             R.string.amazon_settings_login_title,
                             { amazonOAuthLauncher.launch(Intent(context, AmazonOAuthActivity::class.java)) },
                         )
+                        LibraryTab.ITCHIO -> Triple(
+                            R.string.library_source_not_logged_in_itchio,
+                            R.string.itchio_settings_login_title,
+                            { /* TODO: launch itch.io login flow */ },
+                        )
                         LibraryTab.LOCAL -> Triple(
                             R.string.library_source_no_custom_games,
                             R.string.add_custom_game_dialog_title,
                             onAddCustomGameClick,
                         )
-                        else -> throw IllegalStateException("showEmptyStateSplash is true only for Steam/GOG/Epic/Amazon/LOCAL")
+                        else -> throw IllegalStateException("showEmptyStateSplash is true only for Steam/GOG/Epic/Amazon/ITCHIO/LOCAL")
                     }
                     LibrarySourceNotLoggedInSplash(
                         messageResId = messageResId,
@@ -1165,6 +1172,7 @@ private fun LibraryScreenContent(
             val gogLoggedIn = app.gamenative.service.gog.GOGAuthManager.hasStoredCredentials(context)
             val epicLoggedIn = app.gamenative.service.epic.EpicAuthManager.hasStoredCredentials(context)
             val amazonLoggedIn = app.gamenative.service.amazon.AmazonAuthManager.hasStoredCredentials(context)
+            val itchioLoggedIn = ItchioService.hasStoredCredentials(context)
 
             SystemMenu(
                 isOpen = isSystemMenuOpen,
@@ -1206,6 +1214,13 @@ private fun LibraryScreenContent(
                         scope = lifecycleScope,
                         callbacks = PlatformLogoutCallbacks(),
                     )
+                },
+                itchioLoggedIn = itchioLoggedIn,
+                onItchioLoginClick = {
+                    // TODO: launch itch.io login flow
+                },
+                onItchioLogoutClick = {
+                    // TODO: launch itch.io logout flow
                 },
             )
         }
