@@ -584,6 +584,15 @@ class MainViewModel @Inject constructor(
             setBootingLogoImageUrl(logoUrl ?: "")
             setBootingGameName(gameName ?: "GameNative")
             setShowBootingSplash(true)
+
+            // Report to Steam as a non-Steam game if the user has opted in
+            if (gameSource != GameSource.STEAM && gameSource != GameSource.CUSTOM_GAME &&
+                PrefManager.reportNonSteamToSteam
+            ) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    SteamService.notifyNonSteamGamePlaying(gameName ?: appId)
+                }
+            }
             PluviaApp.events.emit(AndroidEvent.SetAllowedOrientation(PrefManager.allowedOrientation))
 
             val apiJob = viewModelScope.async(Dispatchers.IO) {
@@ -625,8 +634,12 @@ class MainViewModel @Inject constructor(
                 val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
                 Timber.tag("Exit").i("Got game id: $gameId")
 
-                if (ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.STEAM) {
+                val exitSource = ContainerUtils.extractGameSourceFromContainerId(appId)
+                if (exitSource == GameSource.STEAM) {
                     ActiveGameRegistry.clearIfMatches(gameId)
+                    SteamService.notifyRunningProcesses()
+                } else if (exitSource != GameSource.CUSTOM_GAME && PrefManager.reportNonSteamToSteam) {
+                    // Clear the non-Steam game status we set at launch
                     SteamService.notifyRunningProcesses()
                 }
 

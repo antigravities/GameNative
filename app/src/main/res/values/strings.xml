@@ -291,6 +291,8 @@
     <string name="screenshot_saved_upload_failed">Screenshot saved to gallery (Steam upload failed)</string>
     <string name="settings_steam_upload_screenshots_title">Upload screenshots to Steam</string>
     <string name="settings_steam_upload_screenshots_subtitle">Automatically upload in-game screenshots to your Steam profile</string>
+    <string name="settings_report_non_steam_title">Report to Steam</string>
+    <string name="settings_report_non_steam_subtitle">Show Epic, GOG, and Amazon game activity on your Steam profile as a non-Steam game</string>
     <string name="settings_screenshot_post_effects_title">Screenshot mode</string>
     <string name="settings_screenshot_post_effects_subtitle">Off: raw game frame (no effects). On: capture screen as shown (CRT, FSR, FXAA applied)</string>
     <string name="settings_four_finger_screenshot_title">4-finger tap screenshot</string>
