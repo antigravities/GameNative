@@ -1041,6 +1041,7 @@ private fun LibraryScreenContent(
                                 LibraryTab.GOG to state.gogCount,
                                 LibraryTab.EPIC to state.epicCount,
                                 LibraryTab.AMAZON to state.amazonCount,
+                                LibraryTab.ITCHIO to state.itchioCount,
                                 LibraryTab.LOCAL to state.localCount,
                             ),
                             onTabSelected = onTabChanged,
