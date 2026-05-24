@@ -7,27 +7,36 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import com.winlator.renderer.GLRenderer
+import com.winlator.renderer.VulkanRenderer
+import com.winlator.renderer.XServerRenderer
 import java.io.ByteArrayOutputStream
 
 object ScreenshotUtils {
 
     /**
-     * Queues a screenshot capture on the GL thread via [renderer]. The [onCaptured]
-     * callback is invoked on the GL thread with the resulting Bitmap, or null on
-     * failure. Callers must dispatch any UI work (Toasts, etc.) back to the main
-     * thread — e.g., via [kotlinx.coroutines.withContext] or a Handler.
+     * Captures a frame from [renderer], dispatching to the appropriate backend.
      *
-     * Driver-agnostic: works with Turnip/DRI3 GPU hardware buffers and software paths.
+     * For [GLRenderer] (VirGL/OpenGL path), this queues a one-shot GL-thread read;
+     * [onCaptured] is called on the GL thread — marshal UI work back to Main/IO.
+     * [postEffects] controls whether effects (CRT/FSR/FXAA) are included.
      *
-     * @param postEffects true = capture the composited frame shown on screen (with effects
-     *                    like CRT/FSR/FXAA applied); false = capture the raw game frame
-     *                    before any post-processing (default, preserves prior behavior).
+     * For [VulkanRenderer], this uses PixelCopy to read the composited surface buffer;
+     * [onCaptured] is called on the main thread. [postEffects] is ignored — the Vulkan
+     * compositor has no pre-effects capture path.
      */
-    fun captureFromGL(renderer: GLRenderer, postEffects: Boolean = false, onCaptured: (Bitmap?) -> Unit) {
-        try {
-            renderer.captureFrame({ bitmap -> onCaptured(bitmap) }, postEffects)
-        } catch (e: Exception) {
-            onCaptured(null)
+    fun captureFromGL(renderer: XServerRenderer, postEffects: Boolean = false, onCaptured: (Bitmap?) -> Unit) {
+        when (renderer) {
+            is GLRenderer -> try {
+                renderer.captureFrame({ bitmap -> onCaptured(bitmap) }, postEffects)
+            } catch (e: Exception) {
+                onCaptured(null)
+            }
+            is VulkanRenderer -> try {
+                renderer.captureFrame { bitmap -> onCaptured(bitmap) }
+            } catch (e: Exception) {
+                onCaptured(null)
+            }
+            else -> onCaptured(null)
         }
     }
 
