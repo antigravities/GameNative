@@ -3351,7 +3351,28 @@ class SteamService : Service(), IChallengeUrlChanged {
         fun refreshAllApps() {
             val service = instance ?: return
             service.scope.launch {
-                Timber.w("refreshAllApps: Force re-queuing all known apps for PICS refresh")
+                Timber.w("refreshAllApps: Re-queuing all packages + all known apps for PICS refresh")
+
+                // --- Phase 1: Package PICS re-queue (with pause/resume) ---
+                // Mirrors the full-update path in PICSChangesCheck (lines 5336-5344).
+                // The package PICS consumer populates steam_license.app_ids, stubs new steam_app
+                // rows, and queues newly discovered apps for app PICS automatically.
+                val stubs = service.licenseDao.getLicenseStubs()
+                val savedPkgOffset = PrefManager.refreshAllPackagesOffset
+                Timber.i("refreshAllApps: ${stubs.size} packages total, resuming from offset $savedPkgOffset")
+                var pkgOffset = savedPkgOffset
+                stubs.drop(pkgOffset).chunked(MAX_PICS_BUFFER).forEach { chunk ->
+                    service.packagePicsChannel.send(chunk.map { PICSRequest(it.packageId, it.accessToken) })
+                    pkgOffset += chunk.size
+                    // Persist after each send so a crash resumes from the last sent chunk.
+                    PrefManager.refreshAllPackagesOffset = pkgOffset
+                }
+                // Mark packages as done: stubs.size causes drop() to produce an empty list on resume,
+                // skipping the package phase entirely and going straight to the app phase.
+                PrefManager.refreshAllPackagesOffset = stubs.size
+                Timber.i("refreshAllApps: All ${stubs.size} packages queued for package PICS")
+
+                // --- Phase 2: App PICS re-queue (with existing pause/resume) ---
                 // ORDER BY id ASC ensures the list is stable across restarts so drop(offset) is correct.
                 val allIds = service.appDao.getAllAppIds()
                 val savedOffset = PrefManager.refreshAllAppsOffset
@@ -3375,12 +3396,13 @@ class SteamService : Service(), IChallengeUrlChanged {
                         PrefManager.refreshAllAppsOffset = offset
                         _picsSyncQueued.update { it + chunk.size }
                     }
-                // All batches sent — clear resume state and progress counters.
+                // Both phases done — reset all resume state and progress counters.
                 PrefManager.refreshAllAppsPending = false
                 PrefManager.refreshAllAppsOffset = 0
+                PrefManager.refreshAllPackagesOffset = 0
                 _picsSyncTotal.value = 0
                 _picsSyncQueued.value = 0
-                Timber.i("refreshAllApps: All batches queued at offset $offset; resume flag cleared")
+                Timber.i("refreshAllApps: All batches queued; resume state cleared")
             }
         }
 
@@ -3441,6 +3463,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                     _picsSyncTotal.value = 0
                     _picsSyncQueued.value = 0
                     PrefManager.refreshAllAppsOffset = 0
+                    PrefManager.refreshAllPackagesOffset = 0
                 }
             }
         }
