@@ -245,6 +245,12 @@ class LibraryViewModel @Inject constructor(
                     Timber.tag("LibraryViewModel").d("Collecting ${apps.size} apps")
                     // Check if the list has actually changed before triggering a re-filter
                     if (appList != apps) {
+                        // Clear the item cache before replacing the list. When the DAO emits a new
+                        // list, all SteamAppSummary instances are new objects, so every cache entry
+                        // would be a reference-equality miss anyway. Clearing eagerly releases the
+                        // old SteamAppSummary + LibraryItem pairs (which include depot maps) instead
+                        // of holding them until each slot is overwritten by onFilterApps().
+                        steamItemCache.clear()
                         appList = apps
                         // Show the library immediately (sizeBytes = 0 until background job finishes).
                         onFilterApps(paginationCurrentPage)
