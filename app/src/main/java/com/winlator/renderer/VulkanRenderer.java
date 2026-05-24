@@ -304,6 +304,26 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         }
     }
 
+    /**
+     * Captures the current composited frame via PixelCopy. The callback is invoked on
+     * the main thread with the result Bitmap, or null if the renderer isn't ready or
+     * the copy fails. Always captures post-effects output; there is no pre-effects path
+     * for the Vulkan compositor (unlike GLRenderer's scene FBO).
+     */
+    public void captureFrame(java.util.function.Consumer<Bitmap> callback) {
+        if (!initComplete || surfaceWidth <= 0 || surfaceHeight <= 0) {
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> callback.accept(null));
+            return;
+        }
+        Bitmap bitmap = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ARGB_8888);
+        android.view.PixelCopy.request(
+            xServerView,
+            bitmap,
+            result -> callback.accept(result == android.view.PixelCopy.SUCCESS ? bitmap : null),
+            new android.os.Handler(android.os.Looper.getMainLooper())
+        );
+    }
+
     public void updateScene() {
         ArrayList<RenderableWindow> newList = new ArrayList<>();
         try (XLock xl = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
