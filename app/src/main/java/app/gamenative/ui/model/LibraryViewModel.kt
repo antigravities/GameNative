@@ -209,6 +209,13 @@ class LibraryViewModel @Inject constructor(
                     // stay empty after re-login when the game count matched the pre-logout value
                     // (e.g. 45k → 0 → 45k). The DAO's own distinctUntilChanged() already prevents
                     // redundant emissions, so the guard was only harmful here.
+                    //
+                    // Clear the item cache before replacing the list. When the DAO emits a new
+                    // list, all SteamAppSummary instances are new objects, so every cache entry
+                    // would be a reference-equality miss anyway. Clearing eagerly releases the
+                    // old SteamAppSummary + LibraryItem pairs (which include depot maps) instead
+                    // of holding them until each slot is overwritten by onFilterApps().
+                    steamItemCache.clear()
                     appList = apps
                     // Show the library immediately (sizeBytes = 0 until background job finishes).
                     onFilterApps(paginationCurrentPage)
