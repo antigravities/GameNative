@@ -336,6 +336,10 @@ class SteamService : Service(), IChallengeUrlChanged {
 
     companion object {
         const val MAX_PICS_BUFFER = 256
+        // Chunk size for writing cachedLicenses in T2 of onLicenseList. Writing 59k rows in a
+        // single transaction holds the Room write lock for seconds and allocates the full list
+        // at once. 1k chunks keep each allocation ~700 KB and each lock window milliseconds.
+        private const val CACHED_LICENSE_CHUNK_SIZE = 1_000
 
         const val MAX_RETRY_ATTEMPTS = 20
 
@@ -5141,12 +5145,16 @@ class SteamService : Service(), IChallengeUrlChanged {
             // --- Transaction 2: raw license persistence for DepotDownloader ---
             // JSON serialization of 59k License objects happens here (outside T1) so T1's
             // lock window stays short. Runs after PICS is queued so it doesn't delay the pipeline.
-            val cachedLicenses = pending.licenseList.map { license ->
-                CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
-            }
-            db.withTransaction {
-                cachedLicenseDao.deleteAll()
-                cachedLicenseDao.insertAll(cachedLicenses)
+            // Chunked writes: each chunk serializes CACHED_LICENSE_CHUNK_SIZE licenses and writes
+            // them in their own short transaction. This keeps the peak allocation to ~700 KB per
+            // chunk (vs. ~23 MB for all 59k at once) and each write lock window to milliseconds.
+            db.withTransaction { cachedLicenseDao.deleteAll() }
+            pending.licenseList.chunked(CACHED_LICENSE_CHUNK_SIZE).forEach { chunk ->
+                val cachedChunk = chunk.map { license ->
+                    CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
+                }
+                db.withTransaction { cachedLicenseDao.insertAll(cachedChunk) }
+                // cachedChunk goes out of scope here; GC may reclaim before the next chunk is built
             }
         }
     }
@@ -5224,6 +5232,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                             .chunked(MAX_PICS_BUFFER)
                             .forEach { chunk ->
                                 ensureActive()
+                                // Same backpressure as refreshAllApps: wait until fewer than 2
+                                // batches are in-flight before queuing the next one.
+                                while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2) { delay(500) }
                                 val picsRequests = chunk.map { PICSRequest(id = it) }
                                 _picsSyncPending.update { it + picsRequests.size }
                                 appPicsChannel.send(picsRequests)
@@ -5329,10 +5340,24 @@ class SteamService : Service(), IChallengeUrlChanged {
                             )
 
                             ensureActive()
+
+                            // Batch-load existing app + license rows for this PICS result up front
+                            // (2 queries total) rather than one findApp() + findLicense() per app.
+                            // This shrinks the window during which the raw PICS callback — potentially
+                            // 50–75 MB of KeyValues for 256 apps — is held in memory.
+                            val batchIds = picsCallback.apps.keys.toList()
+                            val existingAppsMap = appDao.findSteamAppWithAppIds(batchIds).associateBy { it.id }
+                            val batchPackageIds = existingAppsMap.values
+                                .mapNotNull { it.packageId.takeIf { id -> id != INVALID_PKG_ID } }
+                                .distinct()
+                            val existingLicensesMap = if (batchPackageIds.isNotEmpty())
+                                licenseDao.findLicenses(batchPackageIds).associateBy { it.packageId }
+                            else emptyMap()
+
                             val steamAppsMap = picsCallback.apps.values.mapNotNull { app ->
-                                val appFromDb = appDao.findApp(app.id)
+                                val appFromDb = existingAppsMap[app.id]
                                 val packageId = appFromDb?.packageId ?: INVALID_PKG_ID
-                                val packageFromDb = if (packageId != INVALID_PKG_ID) licenseDao.findLicense(packageId) else null
+                                val packageFromDb = existingLicensesMap[packageId]
                                 val ownerAccountId = packageFromDb?.ownerAccountId ?: emptyList()
 
                                 // Apps with -1 for the ownerAccountId should be added.
@@ -5398,39 +5423,55 @@ class SteamService : Service(), IChallengeUrlChanged {
                         if (!isLoggedIn) return@collect
                         val queue = Collections.synchronizedList(mutableListOf<Int>())
 
+                        // When the same app appears in multiple packages (e.g. user owns the game and
+                        // also has a free-weekend / demo / family-shared sub for it), the previous
+                        // implementation overwrote SteamApp.packageId with whichever pkg was iterated
+                        // last — non-deterministic and prone to landing on a non-user-owned package,
+                        // which then makes the user's own game appear as family-shared in the library.
+                        // To fix that we (a) process user-owned packages last so they win the
+                        // last-write-wins assignment within this batch and (b) refuse to downgrade an
+                        // existing user-owned packageId across batches.
+                        val accountId = userSteamId?.accountID?.toInt()
+
+                        // Pre-load license rows OUTSIDE the write lock (reads don't need to hold it).
+                        val packageLicenses: Map<Int, SteamLicense> = if (accountId != null) {
+                            val packageIds = picsCallback.packages.values.map { it.id }
+                            licenseDao.findLicenses(packageIds).associateBy { it.packageId }
+                        } else {
+                            emptyMap()
+                        }
+
+                        // Pre-load all SteamApp rows for every app ID in this package batch — one
+                        // batch SELECT instead of one findApp() per app inside the write lock. For
+                        // a 256-package batch this can be 12,800 individual queries → 1 query.
+                        // appsStateMap is mutable so in-transaction inserts/updates are visible to
+                        // subsequent packages in the same batch (handles same-app-in-multiple-pkgs).
+                        val allAppIdsInBatch = picsCallback.packages.values
+                            .flatMap { pkg -> pkg.keyValues["appids"].children.map { it.asInteger() } }
+                            .distinct()
+                        val preloadedApps = if (allAppIdsInBatch.isNotEmpty())
+                            appDao.findSteamAppWithAppIds(allAppIdsInBatch).associateBy { it.id }
+                        else emptyMap()
+                        val appsStateMap = preloadedApps.toMutableMap()
+
+                        val userOwnedPackageIds: Set<Int> = if (accountId != null) {
+                            packageLicenses.values
+                                .filter { it.ownerAccountId.contains(accountId) }
+                                .mapTo(HashSet()) { it.packageId }
+                        } else {
+                            emptySet()
+                        }
+
+                        // Prefer non-expired user-owned packages so a live sub wins over an expired remnant.
+                        fun pkgRank(pkgId: Int): Int {
+                            if (pkgId !in userOwnedPackageIds) return 0
+                            val expired = packageLicenses[pkgId]?.licenseFlags?.contains(ELicenseFlags.Expired) == true
+                            return if (expired) 1 else 2
+                        }
+
+                        val orderedPackages = picsCallback.packages.values.sortedBy { pkgRank(it.id) }
+
                         db.withTransaction {
-                            // When the same app appears in multiple packages (e.g. user owns the game and
-                            // also has a free-weekend / demo / family-shared sub for it), the previous
-                            // implementation overwrote SteamApp.packageId with whichever pkg was iterated
-                            // last — non-deterministic and prone to landing on a non-user-owned package,
-                            // which then makes the user's own game appear as family-shared in the library.
-                            // To fix that we (a) process user-owned packages last so they win the
-                            // last-write-wins assignment within this batch and (b) refuse to downgrade an
-                            // existing user-owned packageId across batches.
-                            val accountId = userSteamId?.accountID?.toInt()
-                            val packageLicenses: Map<Int, SteamLicense> = if (accountId != null) {
-                                val packageIds = picsCallback.packages.values.map { it.id }
-                                licenseDao.findLicenses(packageIds).associateBy { it.packageId }
-                            } else {
-                                emptyMap()
-                            }
-                            val userOwnedPackageIds: Set<Int> = if (accountId != null) {
-                                packageLicenses.values
-                                    .filter { it.ownerAccountId.contains(accountId) }
-                                    .mapTo(HashSet()) { it.packageId }
-                            } else {
-                                emptySet()
-                            }
-
-                            // Prefer non-expired user-owned packages so a live sub wins over an expired remnant.
-                            fun pkgRank(pkgId: Int): Int {
-                                if (pkgId !in userOwnedPackageIds) return 0
-                                val expired = packageLicenses[pkgId]?.licenseFlags?.contains(ELicenseFlags.Expired) == true
-                                return if (expired) 1 else 2
-                            }
-
-                            val orderedPackages = picsCallback.packages.values.sortedBy { pkgRank(it.id) }
-
                             orderedPackages.forEach { pkg ->
                                 val appIds = pkg.keyValues["appids"].children.map { it.asInteger() }
                                 licenseDao.updateApps(pkg.id, appIds)
@@ -5440,15 +5481,19 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                                 // Insert a stub row (or update) of SteamApps to the database.
                                 appIds.forEach { appid ->
-                                    val existing = appDao.findApp(appid)
+                                    val existing = appsStateMap[appid]  // pre-loaded map, no DB query
                                     if (existing == null) {
-                                        appDao.insert(SteamApp(id = appid, packageId = pkg.id))
+                                        val newApp = SteamApp(id = appid, packageId = pkg.id)
+                                        appDao.insert(newApp)
+                                        appsStateMap[appid] = newApp  // track so later pkgs see it
                                         return@forEach
                                     }
                                     if (existing.packageId == pkg.id) {
                                         return@forEach
                                     }
                                     if (accountId != null && existing.packageId != INVALID_PKG_ID) {
+                                        // packageLicenses covers this batch; fallback query only hits
+                                        // apps whose current pkg is from a *prior* batch.
                                         val existingLicense = packageLicenses[existing.packageId]
                                             ?: licenseDao.findLicense(existing.packageId)
                                         val existingRank = when {
@@ -5461,7 +5506,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                                             return@forEach
                                         }
                                     }
-                                    appDao.update(existing.copy(packageId = pkg.id))
+                                    val updated = existing.copy(packageId = pkg.id)
+                                    appDao.update(updated)
+                                    appsStateMap[appid] = updated  // track update
                                 }
 
                                 queue.addAll(appIds)
@@ -5498,6 +5545,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                                     .map { PICSRequest(id = it, accessToken = appTokens[it] ?: 0L) }
                                     .chunked(MAX_PICS_BUFFER)
                                     .forEach { chunk ->
+                                        // Mirror refreshAllApps: let the app consumer catch up
+                                        // before queuing more to cap in-flight app PICS work.
+                                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2) { delay(500) }
                                         Timber.d("bufferedPICSGetProductInfo: Queueing ${chunk.size} for PICS")
                                         _picsSyncPending.update { it + chunk.size }
                                         appPicsChannel.send(chunk)
