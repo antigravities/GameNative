@@ -173,6 +173,14 @@ object PrefManager {
         get() = getPref(REFRESH_ALL_APPS_OFFSET, 0)
         set(value) { setPref(REFRESH_ALL_APPS_OFFSET, value) }
 
+    // How many package stubs have been sent to packagePicsChannel in the current refresh run.
+    // Set to stubs.size when the package phase completes (so drop() skips it on resume);
+    // reset to 0 only when the entire refresh finishes.
+    private val REFRESH_ALL_PACKAGES_OFFSET = intPreferencesKey("refresh_all_packages_offset")
+    var refreshAllPackagesOffset: Int
+        get() = getPref(REFRESH_ALL_PACKAGES_OFFSET, 0)
+        set(value) { setPref(REFRESH_ALL_PACKAGES_OFFSET, value) }
+
     /* Container Default Settings */
     private val SCREEN_SIZE = stringPreferencesKey("screen_size")
     var screenSize: String
