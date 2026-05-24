@@ -56,6 +56,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
@@ -705,28 +706,47 @@ private fun LibraryScreenContent(
 
     // Global key/motion bootstrap path for cases where Compose focus was lost by touch mode.
     // This runs at the app event bus layer, independent of current Compose focus target.
-    // Helper functions defined in composable scope to capture latest state on each recomposition.
-    val canBootstrapContentFocus: () -> Boolean = {
-        val now = SystemClock.uptimeMillis()
-        selectedAppId == null &&
-            !isSystemMenuOpen &&
-            !state.isOptionsPanelOpen &&
-            !state.isSearching &&
-            isListFocusable() &&
-            controllerBootstrapNeeded &&
-            !rootHasFocus &&
-            !tabBarHasFocus &&
-            (now - lastBootstrapAtMs) > 250L
-    }
-    val canNavigateTabsWithoutFocus: () -> Boolean = {
-        selectedAppId == null &&
-            !isSystemMenuOpen &&
-            !state.isOptionsPanelOpen &&
-            !state.isSearching &&
-            !rootHasFocus
-    }
+    //
+    // The original effect re-registered its event listeners every time any of six keys changed,
+    // including state.appInfoList.size — which fires on every PICS batch during a library sync.
+    // On a 45k library that can mean hundreds of unnecessary unregister/register cycles.
+    //
+    // Fix: register once (key = Unit) and use rememberUpdatedState to give the lambdas inside
+    // access to fresh values without requiring re-registration:
+    //   - state.isOptionsPanelOpen / isSearching come from LibraryState (a plain snapshot
+    //     value, not a MutableState), so they must be wrapped.
+    //   - isListFocusable() depends on state.appInfoList / state.currentTab, so it must be
+    //     wrapped too (plain state read, not a MutableState).
+    //   - requestContentFocusOrDefer is a local fun that closes over state.appInfoList; wrapping
+    //     it ensures callers always invoke the version with the latest appInfoList.
+    //   - selectedAppId, isSystemMenuOpen, controllerBootstrapNeeded, rootHasFocus, tabBarHasFocus,
+    //     and lastBootstrapAtMs are all `var`s backed by MutableState (via `by remember`), so
+    //     Kotlin closures over them already read the current value at call time — no wrapping needed.
+    val isOptionsPanelOpenRef = rememberUpdatedState(state.isOptionsPanelOpen)
+    val isSearchingRef = rememberUpdatedState(state.isSearching)
+    val isListFocusableRef = rememberUpdatedState(isListFocusable())
+    val requestContentFocusRef = rememberUpdatedState { requestContentFocusOrDefer() }
 
     DisposableEffect(Unit) {
+        val canBootstrapContentFocus: () -> Boolean = {
+            val now = SystemClock.uptimeMillis()
+            selectedAppId == null &&
+                !isSystemMenuOpen &&
+                !isOptionsPanelOpenRef.value &&
+                !isSearchingRef.value &&
+                isListFocusableRef.value &&
+                controllerBootstrapNeeded &&
+                !rootHasFocus &&
+                !tabBarHasFocus &&
+                (now - lastBootstrapAtMs) > 250L
+        }
+        val canNavigateTabsWithoutFocus: () -> Boolean = {
+            selectedAppId == null &&
+                !isSystemMenuOpen &&
+                !isOptionsPanelOpenRef.value &&
+                !isSearchingRef.value &&
+                !rootHasFocus
+        }
         val onGlobalKeyEvent: (AndroidEvent.KeyEvent) -> Boolean = { androidEvent ->
             val event = androidEvent.event
             if (event.action != KeyEvent.ACTION_DOWN) {
@@ -763,7 +783,7 @@ private fun LibraryScreenContent(
                     KeyEvent.KEYCODE_BUTTON_THUMBR,
                     -> {
                         if (canBootstrapContentFocus()) {
-                            requestContentFocusOrDefer()
+                            requestContentFocusRef.value()
                             // Do not consume: let normal key routing continue after bootstrap.
                             false
                         } else {
@@ -792,7 +812,7 @@ private fun LibraryScreenContent(
                     kotlin.math.abs(leftY) >= 0.6f
 
                 if (isMoveLike && hasDirectionalAxis) {
-                    requestContentFocusOrDefer()
+                    requestContentFocusRef.value()
                     // Do not consume: allow normal movement handling after bootstrap.
                     false
                 } else {
