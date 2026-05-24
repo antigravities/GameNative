@@ -161,7 +161,7 @@ class ItchioAppScreen : BaseAppScreen() {
                         pendingPlayCallback[appId] = onClickPlay
                         showInstallerConsentDialog[appId] = true
                     } else {
-                        onClickPlay(true)
+                        onClickPlay(false)
                     }
                 }
             }
@@ -378,7 +378,7 @@ class ItchioAppScreen : BaseAppScreen() {
                                 )
                             }
                             showInstallerConsentDialog.remove(appId)
-                            pendingPlayCallback.remove(appId)?.invoke(true)
+                            pendingPlayCallback.remove(appId)?.invoke(false)
                         },
                     ) { Text(stringResource(R.string.run)) }
                 },
@@ -393,7 +393,7 @@ class ItchioAppScreen : BaseAppScreen() {
                                 )
                             }
                             showInstallerConsentDialog.remove(appId)
-                            pendingPlayCallback.remove(appId)?.invoke(true)
+                            pendingPlayCallback.remove(appId)?.invoke(false)
                         },
                     ) { Text(stringResource(R.string.cancel)) }
                 },

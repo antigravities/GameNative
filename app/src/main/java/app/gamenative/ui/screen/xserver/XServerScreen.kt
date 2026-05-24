@@ -4650,7 +4650,8 @@ private fun unpackExecutableFile(
 
         output = StringBuilder()
 
-        if (!container.isLaunchRealSteam) {
+        val isSteamGame = ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.STEAM
+        if (!container.isLaunchRealSteam && isSteamGame) {
             val exePaths = if (container.isUnpackFiles) {
                 val scanned = ContainerUtils.scanExecutablesInADrive(container.drives)
                 val filtered = ContainerUtils.filterExesForUnpacking(scanned)
@@ -4720,7 +4721,7 @@ private fun unpackExecutableFile(
                 }
             }
         } else {
-            Timber.i("Skipping Steamless (launchRealSteam=${container.isLaunchRealSteam}, launchBionicSteam=${container.isLaunchBionicSteam}, useLegacyDRM=${container.isUseLegacyDRM}, unpackFiles=${container.isUnpackFiles})")
+            Timber.i("Skipping Steamless (isSteamGame=$isSteamGame, launchRealSteam=${container.isLaunchRealSteam}, launchBionicSteam=${container.isLaunchBionicSteam}, useLegacyDRM=${container.isUseLegacyDRM}, unpackFiles=${container.isUnpackFiles})")
         }
 
         output = StringBuilder()
