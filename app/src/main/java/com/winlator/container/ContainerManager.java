@@ -27,7 +27,11 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.concurrent.Executors;
@@ -37,6 +41,35 @@ public class ContainerManager {
     private final ArrayList<Container> containers = new ArrayList<>();
     private final File homeDir;
     private final Context context;
+
+    // Registry section header substrings that the Wine Mono MSI writes to system.reg.
+    // Used to extract a reusable template so future containers skip the MSI entirely.
+    private static final String[] MONO_REG_PREFIXES = {
+        "[Software\\Wine\\Mono\\",
+        "[Software\\Microsoft\\.NETFramework",
+        "[Software\\Microsoft\\NET Framework Setup\\",
+        "[Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Wine Mono",
+    };
+
+    // Scans imagefs for the Wine Mono MSI and returns the version string encoded in its
+    // filename (e.g. "wine-mono-11.0.0-x86.msi" → "11.0.0"). Returns null if not found.
+    private String getMonoVersion() {
+        File dir = new File(ImageFs.find(context).getRootDir(), "opt/mono-gecko-offline");
+        File[] msiFiles = dir.listFiles(f ->
+                f.getName().startsWith("wine-mono-") && f.getName().endsWith(".msi"));
+        if (msiFiles == null || msiFiles.length == 0) return null;
+        String name = msiFiles[0].getName(); // e.g. "wine-mono-11.0.0-x86.msi"
+        int start = "wine-mono-".length();
+        int end = name.lastIndexOf('-'); // '-' before the arch suffix ("x86")
+        return (end > start) ? name.substring(start, end) : null;
+    }
+
+    // Returns the imagefs-relative base path for the shared Mono installation,
+    // or null if the MSI file cannot be found (imagefs not yet installed).
+    private String sharedMonoBase() {
+        String version = getMonoVersion();
+        return (version != null) ? "opt/wine-mono/" + version : null;
+    }
 
     public ContainerManager(Context context) {
         this.context = context;
@@ -240,6 +273,12 @@ public class ContainerManager {
         dstContainer.setWineVersion(srcContainer.getWineVersion());
         dstContainer.saveData();
 
+        // FileUtils.copy skips symlinks, so the duplicate has no drive_c/windows/mono.
+        // Re-create it from shared storage (registry was already copied with the real files).
+        if (isSharedMonoReady()) {
+            injectSharedMono(dstContainer);
+        }
+
         containers.add(dstContainer);
     }
 
@@ -262,6 +301,144 @@ public class ContainerManager {
 
     private void removeContainer(Container container) {
         if (FileUtils.delete(container.getRootDir())) containers.remove(container);
+    }
+
+    // Returns true when the shared Mono installation is available in imagefs and ready
+    // to be symlinked into new containers without running the MSI.
+    public boolean isSharedMonoReady() {
+        String base = sharedMonoBase();
+        if (base == null) return false;
+        File rootDir = ImageFs.find(context).getRootDir();
+        return new File(rootDir, base + "/ready").exists();
+    }
+
+    // Called after the first successful Mono MSI install. Moves the installed Mono
+    // files from the container into a shared imagefs location, replaces them with a
+    // symlink, and saves the Mono registry sections as a template for future containers.
+    public boolean promoteMonoToShared(Container container) {
+        String base = sharedMonoBase();
+        if (base == null) {
+            Log.w("ContainerManager", "promoteMonoToShared: could not determine Mono version from MSI filename");
+            return false;
+        }
+        File imageFsRoot = ImageFs.find(context).getRootDir();
+        File monoDir = new File(container.getRootDir(), ".wine/drive_c/windows/mono");
+
+        if (!monoDir.exists() || FileUtils.isSymlink(monoDir)) {
+            Log.w("ContainerManager", "promoteMonoToShared: mono dir missing or already a symlink, skipping");
+            return false;
+        }
+
+        File sharedFilesDir = new File(imageFsRoot, base + "/files");
+        if (!FileUtils.copy(monoDir, sharedFilesDir)) {
+            Log.e("ContainerManager", "promoteMonoToShared: failed to copy mono files to shared location");
+            return false;
+        }
+
+        // Replace the container's copy with a relative symlink to the shared files.
+        FileUtils.delete(monoDir);
+        String relPath = monoDir.getParentFile().toPath()
+                .relativize(sharedFilesDir.toPath()).toString();
+        FileUtils.symlink(relPath, monoDir.getPath());
+
+        saveMonoRegistryTemplate(container, imageFsRoot, base);
+
+        try {
+            new File(imageFsRoot, base + "/ready").createNewFile();
+            return true;
+        } catch (IOException e) {
+            Log.e("ContainerManager", "promoteMonoToShared: failed to write ready marker: " + e);
+            return false;
+        }
+    }
+
+    // Scans the container's system.reg for sections the Mono MSI wrote and saves them
+    // to a shared template file so injectSharedMono() can replay them into new containers.
+    private void saveMonoRegistryTemplate(Container container, File imageFsRoot, String base) {
+        File systemReg = new File(container.getRootDir(), ".wine/system.reg");
+        if (!systemReg.exists()) return;
+
+        StringBuilder monoSections = new StringBuilder();
+        // pendingBlank accumulates blank lines between sections; we only include them
+        // when the next section also belongs to Mono (to avoid trailing blank lines).
+        String pendingBlank = "";
+        try (BufferedReader reader = new BufferedReader(new FileReader(systemReg))) {
+            String line;
+            boolean inMonoSection = false;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("[")) {
+                    // New section header — decide whether it belongs to Mono.
+                    boolean isMonoSection = false;
+                    for (String prefix : MONO_REG_PREFIXES) {
+                        if (line.contains(prefix)) { isMonoSection = true; break; }
+                    }
+                    if (isMonoSection && monoSections.length() > 0) {
+                        monoSections.append(pendingBlank);
+                    }
+                    pendingBlank = "";
+                    inMonoSection = isMonoSection;
+                } else if (line.isEmpty()) {
+                    if (inMonoSection) pendingBlank += "\n";
+                    continue;
+                }
+                if (inMonoSection) monoSections.append(line).append('\n');
+            }
+        } catch (IOException e) {
+            Log.e("ContainerManager", "saveMonoRegistryTemplate: read error: " + e);
+            return;
+        }
+
+        if (monoSections.length() == 0) {
+            Log.w("ContainerManager", "saveMonoRegistryTemplate: no Mono sections found in system.reg");
+            return;
+        }
+
+        File templateFile = new File(imageFsRoot, base + "/mono_registry.reg");
+        FileUtils.writeString(templateFile, monoSections.toString());
+    }
+
+    // Wires shared Mono into a container that has never had the MSI run: creates the
+    // mono directory symlink and appends the Mono registry sections from the template.
+    // Safe to call on containers that already have Mono (symlink + registry both present).
+    public void injectSharedMono(Container container) {
+        String base = sharedMonoBase();
+        if (base == null) return; // imagefs not yet installed, nothing to wire up
+        File imageFsRoot = ImageFs.find(context).getRootDir();
+        File sharedFilesDir = new File(imageFsRoot, base + "/files");
+
+        // Always refresh the symlink so it points at the current shared files dir.
+        File monoDir = new File(container.getRootDir(), ".wine/drive_c/windows/mono");
+        if (FileUtils.isSymlink(monoDir)) {
+            monoDir.delete(); // Remove (potentially stale) symlink before recreating it.
+        }
+        if (!monoDir.exists()) {
+            // monoDir doesn't exist as a real directory either — safe to create the link.
+            String relPath = monoDir.getParentFile().toPath()
+                    .relativize(sharedFilesDir.toPath()).toString();
+            FileUtils.symlink(relPath, monoDir.getPath());
+        }
+
+        // Inject registry entries only if not already present (idempotent).
+        File systemReg = new File(container.getRootDir(), ".wine/system.reg");
+        if (!systemReg.exists()) return;
+
+        try {
+            String existing = FileUtils.readString(systemReg);
+            if (existing != null && existing.contains("[Software\\Wine\\Mono\\")) return;
+
+            File templateFile = new File(imageFsRoot, base + "/mono_registry.reg");
+            if (!templateFile.exists()) return;
+
+            String template = FileUtils.readString(templateFile);
+            if (template == null || template.isEmpty()) return;
+
+            try (FileWriter fw = new FileWriter(systemReg, /*append=*/true)) {
+                fw.write("\n");
+                fw.write(template);
+            }
+        } catch (IOException e) {
+            Log.e("ContainerManager", "injectSharedMono: failed to inject registry entries: " + e);
+        }
     }
 
     public ArrayList<Shortcut> loadShortcuts() {

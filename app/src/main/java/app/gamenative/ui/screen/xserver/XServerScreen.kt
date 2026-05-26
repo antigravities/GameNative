@@ -2088,6 +2088,7 @@ fun XServerScreen(
                                 appLaunchInfo,
                                 xServerView!!.getxServer(),
                                 containerVariantChanged,
+                                containerManager,
                                 onGameLaunchError,
                                 navigateBack,
                             )
@@ -3172,6 +3173,7 @@ private fun setupXEnvironment(
     // shortcut: Shortcut?,
     xServer: XServer,
     containerVariantChanged: Boolean,
+    containerManager: ContainerManager,
     onGameLaunchError: ((String) -> Unit)? = null,
     navigateBack: () -> Unit,
 ): XEnvironment {
@@ -3371,6 +3373,7 @@ private fun setupXEnvironment(
                 appLaunchInfo = appLaunchInfo,
                 guestProgramLauncherComponent = guestProgramLauncherComponent,
                 containerVariantChanged = containerVariantChanged,
+                containerManager = containerManager,
                 onError = onGameLaunchError
             )
             if (preInstallCommands.isNotEmpty()) {
@@ -4544,18 +4547,31 @@ private fun unpackExecutableFile(
     appLaunchInfo: LaunchInfo?,
     guestProgramLauncherComponent: GuestProgramLauncherComponent,
     containerVariantChanged: Boolean,
+    containerManager: ContainerManager,
     onError: ((String) -> Unit)? = null,
 ) {
     val imageFs = ImageFs.find(context)
     var output = StringBuilder()
-    if (needsUnpacking || containerVariantChanged){
+    if (needsUnpacking || containerVariantChanged) {
         try {
-            PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing Mono..."))
-            val monoCmd = "wine msiexec /i Z:\\opt\\mono-gecko-offline\\wine-mono-11.0.0-x86.msi && wineserver -k"
-            Timber.i("Install mono command $monoCmd")
-            val monoOutput = guestProgramLauncherComponent.execShellCommand(monoCmd)
-            output.append(monoOutput)
-            Timber.i("Result of mono command " + output)
+            if (PrefManager.shareContainerCoreFiles && containerManager.isSharedMonoReady()) {
+                // Fast path: shared Mono exists — wire up symlink + registry, no Wine needed.
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Linking Mono..."))
+                containerManager.injectSharedMono(container)
+            } else {
+                // Slow path: run the MSI installer (first time, or sharing is disabled).
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing Mono..."))
+                val monoCmd = "wine msiexec /i Z:\\opt\\mono-gecko-offline\\wine-mono-11.0.0-x86.msi && wineserver -k"
+                Timber.i("Install mono command $monoCmd")
+                val monoOutput = guestProgramLauncherComponent.execShellCommand(monoCmd)
+                output.append(monoOutput)
+                Timber.i("Result of mono command $output")
+                // After MSI installs, promote the files to the shared location so future
+                // containers skip the slow MSI step and get a symlink instead.
+                if (PrefManager.shareContainerCoreFiles) {
+                    containerManager.promoteMonoToShared(container)
+                }
+            }
         } catch (e: Exception) {
             Timber.e("Error during mono installation: $e")
         }
