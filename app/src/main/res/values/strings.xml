@@ -939,6 +939,12 @@
     <string name="settings_debug_no_channels_selected">No channels selected</string>
     <string name="settings_debug_refresh_pics_title">Refresh All Apps (PICS)</string>
     <string name="settings_debug_refresh_pics_subtitle">Re-queues all known apps for PICS metadata sync</string>
+    <string name="settings_debug_refresh_app_title">Refresh App by ID</string>
+    <string name="settings_debug_refresh_app_subtitle">Force-fetch PICS data for a single Steam app ID</string>
+    <string name="settings_debug_refresh_app_dialog_title">Refresh Steam App</string>
+    <string name="settings_debug_refresh_app_dialog_body">Enter the Steam App ID (visible in the game\'s store URL). The app will be re-fetched from Steam and should appear in your library within a few seconds.</string>
+    <string name="settings_debug_refresh_app_id_label">App ID</string>
+    <string name="settings_debug_refresh_app_confirm">Refresh</string>
     <string name="settings_debug_clear_prefs_title">Clear Preferences</string>
     <string name="settings_debug_clear_prefs_subtitle">[Closes App] Logs out the client and wipes local preference data.</string>
     <string name="settings_debug_clear_db_title">Clear Local Database</string>
