@@ -8,6 +8,7 @@ import android.os.Handler;
 import android.util.Log;
 
 // import com.winlator.R;
+import app.gamenative.PrefManager;
 import app.gamenative.R;
 import com.winlator.box86_64.Box86_64Preset;
 import com.winlator.contents.ContentsManager;
@@ -206,6 +207,14 @@ public class ContainerManager {
             return;
         }
 
+        // FileUtils.copy silently skips symlinks, so the duplicate's system32/syswow64
+        // would be empty. Re-create the shared DLL symlinks (or copies) for the new container.
+        ContentsManager contentsManager = new ContentsManager(context);
+        WineInfo wineInfo = WineInfo.fromIdentifier(context, contentsManager, srcContainer.getWineVersion());
+        if (!installDllLinks(wineInfo, dstDir)) {
+            Log.w("ContainerManager", "Duplicate " + newId + ": DLL links failed, container may be missing system DLLs");
+        }
+
         Container dstContainer = new Container(newId);
         dstContainer.setRootDir(dstDir);
         dstContainer.setName(srcContainer.getName()+" ("+context.getString(R.string.copy)+")");
@@ -330,18 +339,53 @@ public class ContainerManager {
         }
     }
 
+    /**
+     * Prepares dstFile for symlink creation.
+     * Returns true if the symlink should be created (either nothing was there, or a stale
+     * symlink from a previous Wine version was removed). Returns false if a real file exists
+     * at the destination — that means an installer (DXVK, VKD3D, etc.) already placed its
+     * own DLL there, and we must leave it alone.
+     */
+    private boolean prepareForSymlink(File dstFile) {
+        boolean isSymlink = FileUtils.isSymlink(dstFile);
+        if (!dstFile.exists() && !isSymlink) return true; // nothing here, proceed
+        if (isSymlink) {
+            // Stale symlink from a previous Wine version (possibly dangling) — replace it.
+            dstFile.delete();
+            return true;
+        }
+        return false; // real file written by an installer — preserve it
+    }
+
+    /**
+     * Creates a symlink at dstFile pointing (via a relative path) to srcFile, or falls back
+     * to a direct copy when the "share core files" preference is off.
+     */
+    private void linkOrCopyDll(File srcFile, File dstFile) {
+        if (PrefManager.INSTANCE.getShareContainerCoreFiles()) {
+            // Relative path keeps the link valid regardless of where imagefs is mounted.
+            String relPath = dstFile.getParentFile().toPath()
+                    .relativize(srcFile.toPath()).toString();
+            FileUtils.symlink(relPath, dstFile.getPath());
+        } else {
+            FileUtils.copy(srcFile, dstFile);
+        }
+    }
+
     private void extractCommonDlls(String srcName, String dstName, JSONObject commonDlls, File containerDir, OnExtractFileListener onExtractFileListener) throws JSONException {
         File srcDir = new File(ImageFs.find(context).getRootDir(), "/opt/wine/lib/wine/"+srcName);
         JSONArray dlnames = commonDlls.getJSONArray(dstName);
 
         for (int i = 0; i < dlnames.length(); i++) {
             String dlname = dlnames.getString(i);
+            File srcFile = new File(srcDir, dlname);
             File dstFile = new File(containerDir, ".wine/drive_c/windows/"+dstName+"/"+dlname);
             if (onExtractFileListener != null) {
                 dstFile = onExtractFileListener.onExtractFile(dstFile, 0);
                 if (dstFile == null) continue;
             }
-            FileUtils.copy(new File(srcDir, dlname), dstFile);
+            if (!prepareForSymlink(dstFile)) continue;
+            linkOrCopyDll(srcFile, dstFile);
         }
     }
 
@@ -349,21 +393,51 @@ public class ContainerManager {
         Log.d("Extraction", "extracting common dlls for bionic: " + srcName);
         File srcDir = new File(wineInfo.path + "/lib/wine/" + srcName);
 
-        File[] srcfiles = srcDir.listFiles(file -> file.isFile());
+        File[] srcfiles = srcDir.listFiles(File::isFile);
+        if (srcfiles == null) return;
 
         for (File file : srcfiles) {
             String dllName = file.getName();
-            if (dllName.equals("iexplore.exe") && wineInfo.isArm64EC() && srcName.equals("aarch64-windows"))
-                file = new File(wineInfo.path + "/lib/wine/" + "i386-windows/iexplore.exe");
+            // iexplore.exe on arm64ec must be served from the i386 build instead.
+            File srcFile = (dllName.equals("iexplore.exe") && wineInfo.isArm64EC()
+                    && srcName.equals("aarch64-windows"))
+                    ? new File(wineInfo.path + "/lib/wine/i386-windows/iexplore.exe")
+                    : file;
+
             File dstFile = new File(containerDir, ".wine/drive_c/windows/" + dstName + "/" + dllName);
-            if (dstFile.exists()) continue;
-            if (onExtractFileListener != null ) {
+            if (!prepareForSymlink(dstFile)) continue;
+            if (onExtractFileListener != null) {
                 Log.d("Extraction", "extracting " + dstFile);
                 dstFile = onExtractFileListener.onExtractFile(dstFile, 0);
                 if (dstFile == null) continue;
             }
-            Log.d("Extraction", "copying " + file + " to " + dstFile);
-            FileUtils.copy(file, dstFile);
+            Log.d("Extraction", "linking " + srcFile + " -> " + dstFile);
+            linkOrCopyDll(srcFile, dstFile);
+        }
+    }
+
+    /**
+     * Installs (or re-installs) the shared Wine DLL symlinks for a container.
+     * Safe to call at any time — stale symlinks from an old Wine version are replaced,
+     * real files written by game installers are preserved.
+     */
+    private boolean installDllLinks(WineInfo wineInfo, File containerDir) {
+        try {
+            if (WineInfo.isMainWineVersion(wineInfo.identifier())) {
+                JSONObject commonDlls = new JSONObject(FileUtils.readString(context, "common_dlls.json"));
+                extractCommonDlls("x86_64-windows", "system32", commonDlls, containerDir, null);
+                extractCommonDlls("i386-windows", "syswow64", commonDlls, containerDir, null);
+            } else {
+                if (wineInfo.isArm64EC())
+                    extractCommonDlls(wineInfo, "aarch64-windows", "system32", containerDir, null);
+                else
+                    extractCommonDlls(wineInfo, "x86_64-windows", "system32", containerDir, null);
+                extractCommonDlls(wineInfo, "i386-windows", "syswow64", containerDir, null);
+            }
+            return true;
+        } catch (JSONException e) {
+            Log.e("ContainerManager", "installDllLinks failed: " + e);
+            return false;
         }
     }
 
@@ -374,6 +448,8 @@ public class ContainerManager {
             boolean result = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.getAssets(), "container_pattern_gamenative.tzst", containerDir, onExtractFileListener);
 
             if (result) {
+                // Pass the listener so callers can track progress / remap paths during initial
+                // extraction; installDllLinks() uses null (no progress needed for re-links).
                 try {
                     JSONObject commonDlls = new JSONObject(FileUtils.readString(context, "common_dlls.json"));
                     extractCommonDlls("x86_64-windows", "system32", commonDlls, containerDir, onExtractFileListener);
@@ -405,7 +481,7 @@ public class ContainerManager {
             if (result) {
                 try {
                     if (wineInfo.isArm64EC())
-                        extractCommonDlls(wineInfo, "aarch64-windows", "system32", containerDir, onExtractFileListener); // arm64ec only
+                        extractCommonDlls(wineInfo, "aarch64-windows", "system32", containerDir, onExtractFileListener);
                     else
                         extractCommonDlls(wineInfo, "x86_64-windows", "system32", containerDir, onExtractFileListener);
 

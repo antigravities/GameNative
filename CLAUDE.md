@@ -96,6 +96,17 @@ When making a schema change, increment the schema version in `PluviaDatabase` an
 - **Supporting**: `virglrenderer`, `patchelf`, `adrenotools`
 - **Prebuilt `.so`**: `app/src/main/jniLibs/` — uses legacy JNI packaging (`useLegacyPackaging = true`)
 
+### Container DLL Layout
+
+Wine DLLs in `.wine/drive_c/windows/system32/` and `syswow64/` inside each container are **relative symlinks** to the shared Wine installation at `/opt/wine/lib/wine/` (main glibc Wine) or `/opt/installed-wine/<version>/lib/wine/` (custom/Bionic Wine). This keeps per-container size at ~100-200 MB instead of ~1.3-2 GB.
+
+Key invariants:
+- `FileUtils.copy()` silently skips symlinks (`if (isSymlink(srcFile)) return true`). Any code that copies a container directory **must** call `ContainerManager.installDllLinks()` afterward to recreate them — `duplicateContainer` already does this.
+- `prepareForSymlink(dstFile)` in `ContainerManager` handles three cases: nothing there (proceed), stale symlink from a prior Wine version (delete and relink), real file written by a game installer like DXVK (preserve it).
+- `installDllLinks(wineInfo, containerDir)` is idempotent and safe to call any time the container's Wine version changes.
+- Shared Wine lib files are chmoded 444 after installation (`ImageFsInstaller.protectWineLibs`) so that writes through symlinks fail with EACCES rather than corrupting the shared installation.
+- The `shareContainerCoreFiles` preference (default true) controls whether symlinks or copies are used; Java reads it as `PrefManager.INSTANCE.getShareContainerCoreFiles()`.
+
 ### Library Screen Hot Path
 
 `LibraryViewModel.onFilterApps()` is called on every user interaction with the library (search, sort, tab switch, install/uninstall events). Key facts for anyone working on this code:

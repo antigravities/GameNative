@@ -181,6 +181,12 @@ object PrefManager {
         get() = getPref(REFRESH_ALL_PACKAGES_OFFSET, 0)
         set(value) { setPref(REFRESH_ALL_PACKAGES_OFFSET, value) }
 
+    /* Container Core File Sharing */
+    private val SHARE_CONTAINER_CORE_FILES = booleanPreferencesKey("share_container_core_files")
+    var shareContainerCoreFiles: Boolean
+        get() = getPref(SHARE_CONTAINER_CORE_FILES, true)
+        set(value) { setPref(SHARE_CONTAINER_CORE_FILES, value) }
+
     /* Container Default Settings */
     private val SCREEN_SIZE = stringPreferencesKey("screen_size")
     var screenSize: String
