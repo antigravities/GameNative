@@ -5,19 +5,29 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import app.gamenative.CrashHandler
 import coil.annotation.ExperimentalCoilApi
 import coil.imageLoader
@@ -34,6 +44,7 @@ import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.theme.settingsTileColorsAlt
 import com.winlator.PrefManager as WinlatorPrefManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlinx.serialization.decodeFromString
@@ -50,6 +61,13 @@ fun SettingsGroupDebug() {
         PrefManager.init(context)
         WinlatorPrefManager.init(context)
     }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    // State for the "refresh single app by ID" dialog
+    var showRefreshAppDialog by rememberSaveable { mutableStateOf(false) }
+    var refreshAppIdInput by rememberSaveable { mutableStateOf("") }
+    var refreshAppInProgress by rememberSaveable { mutableStateOf(false) }
 
     // Load Wine debug channels and prepare selection state
     var allWineChannels by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -177,6 +195,50 @@ fun SettingsGroupDebug() {
         )
     }
 
+    if (showRefreshAppDialog) {
+        AlertDialog(
+            onDismissRequest = { showRefreshAppDialog = false; refreshAppIdInput = "" },
+            title = { Text(stringResource(R.string.settings_debug_refresh_app_dialog_title)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.settings_debug_refresh_app_dialog_body))
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = refreshAppIdInput,
+                        // Only allow digits — Steam app IDs are positive integers
+                        onValueChange = { refreshAppIdInput = it.filter { c -> c.isDigit() } },
+                        label = { Text(stringResource(R.string.settings_debug_refresh_app_id_label)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = refreshAppIdInput.isNotBlank() && !refreshAppInProgress,
+                    onClick = {
+                        val appId = refreshAppIdInput.toIntOrNull() ?: return@TextButton
+                        showRefreshAppDialog = false
+                        refreshAppIdInput = ""
+                        refreshAppInProgress = true
+                        coroutineScope.launch {
+                            // Fetches PICS with access token and upserts the steam_app row,
+                            // fixing stub rows (type=0, empty depots) that block library visibility.
+                            SteamService.requestAppInfoNow(appId)
+                            SnackbarManager.show("PICS refresh queued for app $appId")
+                            refreshAppInProgress = false
+                        }
+                    },
+                ) { Text(stringResource(R.string.settings_debug_refresh_app_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRefreshAppDialog = false; refreshAppIdInput = "" }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            },
+        )
+    }
+
     SettingsGroup() {
         SettingsMenuLink(
             colors = settingsTileColors(),
@@ -269,6 +331,13 @@ fun SettingsGroupDebug() {
             title = { Text(text = stringResource(R.string.settings_debug_refresh_pics_title)) },
             subtitle = { Text(text = stringResource(R.string.settings_debug_refresh_pics_subtitle)) },
             onClick = {},
+        )
+
+        SettingsMenuLink(
+            colors = settingsTileColors(),
+            title = { Text(text = stringResource(R.string.settings_debug_refresh_app_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_debug_refresh_app_subtitle)) },
+            onClick = { showRefreshAppDialog = true },
         )
 
         SettingsMenuLink(
