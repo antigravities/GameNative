@@ -102,6 +102,17 @@ fun SettingsGroupEmulation() {
                 PrefManager.autoApplyKnownConfig = it
             },
         )
+        var shareContainerCoreFiles by rememberSaveable { mutableStateOf(PrefManager.shareContainerCoreFiles) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            state = shareContainerCoreFiles,
+            title = { Text(text = stringResource(R.string.settings_emulation_share_core_files_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_emulation_share_core_files_subtitle)) },
+            onCheckedChange = {
+                shareContainerCoreFiles = it
+                PrefManager.shareContainerCoreFiles = it
+            },
+        )
         SettingsMenuLink(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.settings_emulation_box64_presets_title)) },

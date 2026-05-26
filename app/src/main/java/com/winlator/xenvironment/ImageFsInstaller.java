@@ -70,6 +70,7 @@ public abstract class ImageFsInstaller {
             File outFile = new File(rootDir, "/opt/" + version);
             outFile.mkdirs();
             TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, assetManager, version + ".txz", outFile);
+            protectWineLibs(outFile);
         }
     }
 
@@ -86,6 +87,24 @@ public abstract class ImageFsInstaller {
                 downloaded,
                 outFile
             );
+            protectWineLibs(outFile);
+        }
+    }
+
+    /**
+     * Makes the Wine PE DLL directories read-only so that writes through symlinks in a
+     * container's system32/syswow64 fail with EACCES instead of silently corrupting the
+     * shared installation. Wine never writes to its own DLL files during normal operation.
+     * Installers that replace a DLL via delete + create still work correctly because
+     * unlink() removes the symlink itself, not the target.
+     */
+    private static void protectWineLibs(File wineRoot) {
+        for (String arch : new String[]{"x86_64-windows", "i386-windows", "aarch64-windows"}) {
+            File libDir = new File(wineRoot, "lib/wine/" + arch);
+            if (!libDir.isDirectory()) continue;
+            File[] files = libDir.listFiles();
+            if (files == null) continue;
+            for (File f : files) FileUtils.chmod(f, 0444);
         }
     }
 
