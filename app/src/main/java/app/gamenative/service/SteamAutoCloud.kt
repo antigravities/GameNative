@@ -579,14 +579,21 @@ object SteamAutoCloud {
                         "and ${filesToUpload.size} file(s) to upload",
                 )
 
-                val uploadBatchResponse = steamCloud.beginAppUploadBatch(
-                    appId = appInfo.id,
-                    machineName = SteamUtils.getMachineName(steamInstance),
-                    clientId = clientId,
-                    filesToDelete = filesToDelete,
-                    filesToUpload = filesToUpload.map { it.first },
-                    appBuildId = appInfo.branches[SteamService.getInstalledApp(appInfo.id)?.branch ?: "public"]?.buildId ?: 0,
-                ).await()
+                val uploadBatchResponse = try {
+                    withTimeout(SteamService.requestTimeout) {
+                        steamCloud.beginAppUploadBatch(
+                            appId = appInfo.id,
+                            machineName = SteamUtils.getMachineName(steamInstance),
+                            clientId = clientId,
+                            filesToDelete = filesToDelete,
+                            filesToUpload = filesToUpload.map { it.first },
+                            appBuildId = appInfo.branches[SteamService.getInstalledApp(appInfo.id)?.branch ?: "public"]?.buildId ?: 0,
+                        ).await()
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    Timber.w(e, "Cloud sync timed out beginning upload batch for appId=${appInfo.id}")
+                    return@async UserFilesUploadResult(false, 0L, 0, 0L)
+                }
 
                 var uploadBatchSuccess = true
 
@@ -606,30 +613,38 @@ object SteamAutoCloud {
                     // Report start of upload
                     onProgress?.invoke("Uploading ${file.filename}", 0f)
 
-                    val uploadInfo = steamCloud.beginFileUpload(
-                        appId = appInfo.id,
-                        filename = if (appInfo.ufs.saveFilePatterns.isEmpty()) {
-                            // For SteamUserData files, use just the filename without folder prefix
-                            if (file.root == PathType.SteamUserData) {
-                                file.filename
-                            } else {
-                                file.path + file.filename
-                            }
-                        } else {
-                            // For SteamUserData files, use just the filename to avoid folder prefix
-                            if (file.root == PathType.SteamUserData) {
-                                file.filename
-                            } else {
-                                file.prefixPath
-                            }
-                        },
-                        fileSize = fileSize,
-                        rawFileSize = fileSize,
-                        fileSha = file.sha,
-                        // timestamp = prootTimestampToDate(file.timestamp),
-                        timestamp = Date(file.timestamp),
-                        uploadBatchId = uploadBatchResponse.batchID,
-                    ).await()
+                    val uploadInfo = try {
+                        withTimeout(SteamService.requestTimeout) {
+                            steamCloud.beginFileUpload(
+                                appId = appInfo.id,
+                                filename = if (appInfo.ufs.saveFilePatterns.isEmpty()) {
+                                    // For SteamUserData files, use just the filename without folder prefix
+                                    if (file.root == PathType.SteamUserData) {
+                                        file.filename
+                                    } else {
+                                        file.path + file.filename
+                                    }
+                                } else {
+                                    // For SteamUserData files, use just the filename to avoid folder prefix
+                                    if (file.root == PathType.SteamUserData) {
+                                        file.filename
+                                    } else {
+                                        file.prefixPath
+                                    }
+                                },
+                                fileSize = fileSize,
+                                rawFileSize = fileSize,
+                                fileSha = file.sha,
+                                // timestamp = prootTimestampToDate(file.timestamp),
+                                timestamp = Date(file.timestamp),
+                                uploadBatchId = uploadBatchResponse.batchID,
+                            ).await()
+                        }
+                    } catch (e: TimeoutCancellationException) {
+                        Timber.w(e, "Cloud sync timed out beginning file upload for ${file.prefixPath}")
+                        uploadBatchSuccess = false
+                        return@forEachIndexed
+                    }
 
                     var uploadFileSuccess = true
                     var bytesUploadedForFile = 0L
@@ -733,35 +748,50 @@ object SteamAutoCloud {
                         bytesUploaded += fileSize
                     }
 
-                    val commitSuccess = steamCloud.commitFileUpload(
-                        transferSucceeded = uploadFileSuccess,
-                        appId = appInfo.id,
-                        fileSha = file.sha,
-                        filename = if (appInfo.ufs.saveFilePatterns.isEmpty()) {
-                            // For SteamUserData files, use just the filename without folder prefix
-                            if (file.root == PathType.SteamUserData) {
-                                file.filename
-                            } else {
-                                file.path + file.filename
-                            }
-                        } else {
-                            // For SteamUserData files, use just the filename to avoid folder prefix
-                            if (file.root == PathType.SteamUserData) {
-                                file.filename
-                            } else {
-                                file.prefixPath
-                            }
-                        },
-                    ).await()
+                    val commitSuccess = try {
+                        withTimeout(SteamService.requestTimeout) {
+                            steamCloud.commitFileUpload(
+                                transferSucceeded = uploadFileSuccess,
+                                appId = appInfo.id,
+                                fileSha = file.sha,
+                                filename = if (appInfo.ufs.saveFilePatterns.isEmpty()) {
+                                    // For SteamUserData files, use just the filename without folder prefix
+                                    if (file.root == PathType.SteamUserData) {
+                                        file.filename
+                                    } else {
+                                        file.path + file.filename
+                                    }
+                                } else {
+                                    // For SteamUserData files, use just the filename to avoid folder prefix
+                                    if (file.root == PathType.SteamUserData) {
+                                        file.filename
+                                    } else {
+                                        file.prefixPath
+                                    }
+                                },
+                            ).await()
+                        }
+                    } catch (e: TimeoutCancellationException) {
+                        Timber.w(e, "Cloud sync timed out committing upload for ${file.prefixPath}")
+                        uploadBatchSuccess = false
+                        false
+                    }
 
                     Timber.i("File ${file.prefixPath} commit success: $commitSuccess")
                 }
 
-                steamCloud.completeAppUploadBatch(
-                    appId = appInfo.id,
-                    batchId = uploadBatchResponse.batchID,
-                    batchEResult = if (uploadBatchSuccess) EResult.OK else EResult.Fail,
-                ).await()
+                try {
+                    withTimeout(SteamService.requestTimeout) {
+                        steamCloud.completeAppUploadBatch(
+                            appId = appInfo.id,
+                            batchId = uploadBatchResponse.batchID,
+                            batchEResult = if (uploadBatchSuccess) EResult.OK else EResult.Fail,
+                        ).await()
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    Timber.w(e, "Cloud sync timed out completing upload batch for appId=${appInfo.id}")
+                    uploadBatchSuccess = false
+                }
 
                 if (totalFiles > 0) {
                     onProgress?.invoke("Upload complete", 1.0f)
@@ -803,7 +833,17 @@ object SteamAutoCloud {
             val cachedFileList = steamInstance.fileChangeListsDao.getByAppId(appInfo.id)
             val cacheIsAbsentOrEmpty = cachedFileList == null || cachedFileList.userFileInfo.isEmpty()
             val changeNumber = if (!cacheIsAbsentOrEmpty && localAppChangeNumber >= 0) localAppChangeNumber else 0L
-            val appFileListChange = steamCloud.getAppFileListChange(appInfo.id, changeNumber).await()
+            // Wrap in withTimeout so an unresponsive Steam session fails fast rather than
+            // suspending forever and leaving the loading spinner up indefinitely.
+            val appFileListChange = try {
+                withTimeout(SteamService.requestTimeout) {
+                    steamCloud.getAppFileListChange(appInfo.id, changeNumber).await()
+                }
+            } catch (e: TimeoutCancellationException) {
+                Timber.w(e, "Cloud sync timed out fetching file list for appId=${appInfo.id}")
+                syncResult = SyncResult.UnknownFail
+                return@async PostSyncInfo(SyncResult.UnknownFail)
+            }
 
             val cloudAppChangeNumber = appFileListChange.currentChangeNumber
             lastCloudAppChangeNumber = cloudAppChangeNumber

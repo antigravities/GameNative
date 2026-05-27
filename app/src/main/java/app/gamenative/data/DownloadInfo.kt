@@ -37,7 +37,14 @@ data class DownloadInfo(
     private val statusMessage = MutableStateFlow<String?>(null)
     private val postInstallSyncing = MutableStateFlow(false)
 
+    // True when the user explicitly stopped this download (cancel/pause), as opposed to a
+    // system failure routed through failedToDownload(). The download-failure listener checks
+    // this so a user-initiated stop is never auto-retried. @Volatile for cross-thread visibility.
+    @Volatile private var userCancelled = false
+    fun isUserCancelled(): Boolean = userCancelled
+
     fun cancel() {
+        userCancelled = true
         cancel("Cancelled by user")
     }
 

@@ -1128,6 +1128,11 @@ class SteamAppScreen : BaseAppScreen() {
                 installSizeInfo = null
                 return@LaunchedEffect
             }
+            // Already computed for this gameId (installSizeInfo is remember(gameId), so it
+            // survives recompositions and resets only on a real game change). The result only
+            // depends on gameId + container language, so skip the expensive getDownloadableDepots
+            // recompute when a value is already present — this is the depot-size hot path.
+            if (installSizeInfo != null) return@LaunchedEffect
             try {
                 val info = withContext(Dispatchers.IO) {
                     val container = ContainerManager(context).getContainerById("STEAM_$gameId")

@@ -9,6 +9,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Base64
 import app.gamenative.ui.util.SnackbarManager
 import androidx.room.withTransaction
@@ -408,6 +409,13 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         private val downloadJobs = ConcurrentHashMap<Int, DownloadInfo>()
 
+        // Tracks how many times a given app's download has been auto-retried after a transient
+        // failure (e.g. a JavaSteam CM job timeout). Bounds retries so a genuinely broken
+        // download fails after MAX_DOWNLOAD_RETRIES. Cleared on success and in deleteApp.
+        private val downloadRetryCount = ConcurrentHashMap<Int, Int>()
+        private const val MAX_DOWNLOAD_RETRIES = 1
+        private const val DOWNLOAD_RETRY_DELAY_MS = 4_000L
+
         // Tracks apps currently going through the download setup flow but not yet
         // inserted into downloadJobs. Closes the TOCTOU gap between the
         // downloadJobs.contains() check and the downloadJobs[appId] = info
@@ -576,6 +584,21 @@ class SteamService : Service(), IChallengeUrlChanged {
         // instead of a Boolean so concurrent on-demand calls are handled correctly — the
         // counter only reaches 0 once ALL callers finish, not just the first one.
         private val onDemandPicsCount = AtomicInteger(0)
+
+        // De-duplication state for requestAppInfoNow. A single game-page open fires several
+        // callers (getGameDisplayInfo Phase 2, isValidToDownloadAsync, etc.); without this they
+        // each issue a full PICS round trip, saturating Dispatchers.IO and stalling the main
+        // thread's runBlocking DB reads (the source of the depot-size ANR).
+        //   - appInfoInFlight: appId -> the shared Deferred for an in-progress fetch, so
+        //     concurrent callers await the SAME request instead of starting new ones.
+        //   - appInfoLastFetched: appId -> elapsedRealtime() of the last successful fetch, used
+        //     to skip the network entirely when a fetch completed within APP_INFO_TTL_MS.
+        //   - appInfoScope: an independent scope so a caller cancelling its await() (e.g. the
+        //     modal closing) does NOT cancel the shared fetch other callers are waiting on.
+        private val appInfoInFlight = ConcurrentHashMap<Int, Deferred<Unit>>()
+        private val appInfoLastFetched = ConcurrentHashMap<Int, Long>()
+        private const val APP_INFO_TTL_MS = 60_000L
+        private val appInfoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
         // Tracks how many app PICS requests are queued to appPicsChannel but not yet
         // processed and written to the DB. Incremented at each appPicsChannel.send() call
@@ -961,10 +984,18 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         suspend fun getOwnedAppDlc(appId: Int): Map<Int, DepotInfo> {
             val client = instance?.steamClient ?: return emptyMap()
-            val accountId = client.steamID?.accountID?.toInt() ?: return emptyMap()
-            val ownedGameIds = getOwnedGames(userSteamId!!.convertToUInt64()).map { it.appId }.toHashSet()
+            client.steamID ?: return emptyMap()
 
-            return getAppDlc(appId).filter { (_, depot) ->
+            // Resolve owned DLC entirely from the DB. Steam pushes the license list at login
+            // (onLicenseList), which is processed into steam_license and PICS-synced into
+            // steam_app, so ownership is fully derivable locally. We deliberately do NOT call
+            // getOwnedGames here: it is a live Steam job that, early in a session, queues behind
+            // the bulk PICS sync and times out, throwing a CancellationException that previously
+            // failed the entire depot-size calc and blocked installs.
+            val dlc = getAppDlc(appId)
+            if (dlc.isEmpty()) return emptyMap() // base-only games never need DLC ownership logic
+
+            return dlc.filter { (_, depot) ->
                 when {
                     /* Base-game depots always download */
                     depot.dlcAppId == INVALID_APP_ID -> true
@@ -972,13 +1003,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                     /* ① licence cache */
                     instance?.licenseDao?.findLicense(depot.dlcAppId) != null -> true
 
-                    /* ② PICS row */
+                    /* ② synced PICS row — present for any DLC the DB knows is owned */
                     instance?.appDao?.findApp(depot.dlcAppId) != null -> true
 
-                    /* ③ owned-games list */
-                    depot.dlcAppId in ownedGameIds -> true
-
-                    /* ④ final online / cached call */
                     else -> false
                 }
             }.toMap()
@@ -1180,7 +1207,6 @@ class SteamService : Service(), IChallengeUrlChanged {
         }
 
         fun getMainAppDepots(appId: Int, containerLanguage: String): Map<Int, DepotInfo> {
-            val appInfo = getAppInfoOf(appId) ?: return emptyMap()
             val ownedDlc = runBlocking { getOwnedAppDlc(appId) }
             val hasSteamUnlockedBranch = runBlocking { getSteamUnlockedBranches(appId).isNotEmpty() }
             // null means "license unknown — bypass the license check entirely"
@@ -1188,6 +1214,22 @@ class SteamService : Service(), IChallengeUrlChanged {
             // .orEmpty() would convert null → empty set, activating the check and
             // blocking every non-DLC base depot when the license cache is cold.
             val licensedDepots: MutableSet<Int>? = getLicensedDepotIds(appId)?.toMutableSet()
+            return getMainAppDepots(appId, containerLanguage, ownedDlc, licensedDepots, hasSteamUnlockedBranch)
+        }
+
+        // Overload that takes the owned-DLC / licensed-depot / unlocked-branch values already
+        // computed by the caller, so callers like getDownloadableDepots don't recompute them
+        // (getOwnedAppDlc in particular performs a getOwnedGames network round trip). The passed
+        // licensedDepots is mutated (DLC depots are added), so callers that reuse their own copy
+        // afterwards must pass a defensive copy.
+        private fun getMainAppDepots(
+            appId: Int,
+            containerLanguage: String,
+            ownedDlc: Map<Int, DepotInfo>,
+            licensedDepots: MutableSet<Int>?,
+            hasSteamUnlockedBranch: Boolean,
+        ): Map<Int, DepotInfo> {
+            val appInfo = getAppInfoOf(appId) ?: return emptyMap()
 
             // Use the dlcAppID of the ownedDlc, to find the licensed depotIds from steam_license
             val mainPackageDepotIds = getPkgInfoOf(appId)?.depotIds.orEmpty().toSet()
@@ -1242,7 +1284,17 @@ class SteamService : Service(), IChallengeUrlChanged {
             val hasSteamUnlockedBranch = runBlocking { getSteamUnlockedBranches(appId).isNotEmpty() }
             val licensedDepots: MutableSet<Int>? = getLicensedDepotIds(appId)?.toMutableSet()
 
-            val map = getMainAppDepots(appId, preferredLanguage).toMutableMap()
+            // Pass the values we already computed above so getMainAppDepots doesn't repeat the
+            // getOwnedAppDlc/getOwnedGames network call. A copy of licensedDepots is passed
+            // because getMainAppDepots mutates it (adds DLC depots) — our local set must stay
+            // unmutated for the eligibleDepots() call below, matching the prior behavior.
+            val map = getMainAppDepots(
+                appId,
+                preferredLanguage,
+                ownedDlc,
+                licensedDepots?.toMutableSet(),
+                hasSteamUnlockedBranch,
+            ).toMutableMap()
 
             // parent app's arch applies to DLC arch selection
             val has64Bit = eligibleDepots(appInfo.depots, preferredLanguage, ownedDlc, licensedDepots)
@@ -1566,6 +1618,8 @@ class SteamService : Service(), IChallengeUrlChanged {
         }
 
         fun deleteApp(appId: Int): Boolean {
+            // Clear any auto-retry budget — a delete (user cancel / uninstall) is a fresh start.
+            downloadRetryCount.remove(appId)
             // snapshot path before marker removal (removing the marker changes resolution)
             val appInfo = getInstalledApp(appId)
             val result = if (appInfo?.isImported == true) {
@@ -2417,6 +2471,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                         // progress tile is immediately replaced by the "ready to play" banner.
                         instance?.notificationHelper?.notifyDownloadComplete(appId, appName)
                         removeDownloadJob(appId)
+                        downloadRetryCount.remove(appId) // success — reset the auto-retry budget
                         PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(appId, GameSource.STEAM))
 
                         // Remove the downloading app info
@@ -2614,15 +2669,41 @@ class SteamService : Service(), IChallengeUrlChanged {
 
             override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
                 Timber.e(error, "Item ${item.appId} failed to download")
+                val appId = downloadInfo.gameId
+
+                // Auto-retry once on a transient failure (e.g. a JavaSteam CM job timeout). Skip
+                // when the user stopped the download themselves, and bound by a per-app counter
+                // so a genuinely broken download still fails after MAX_DOWNLOAD_RETRIES.
+                val attempts = downloadRetryCount.getOrDefault(appId, 0)
+                if (!downloadInfo.isUserCancelled() && attempts < MAX_DOWNLOAD_RETRIES) {
+                    downloadRetryCount[appId] = attempts + 1
+                    // Tear down the current job but DO NOT delete the downloadingAppInfo row or
+                    // the partial files — downloadApp(appId) resumes from them.
+                    downloadInfo.failedToDownload() // persists progress snapshot
+                    instance?.notificationHelper?.cancelDownloadNotification(appId)
+                    removeDownloadJob(appId)
+                    instance?.let { service ->
+                        SnackbarManager.show(service.getString(R.string.download_retrying))
+                    }
+                    appInfoScope.launch {
+                        delay(DOWNLOAD_RETRY_DELAY_MS)
+                        // Only restart if nothing else has already picked the download back up.
+                        if (downloadJobs[appId] == null) downloadApp(appId)
+                    }
+                    return
+                }
+
+                // Out of retries (or user-cancelled): give up and clean up fully.
+                downloadRetryCount.remove(appId)
                 downloadInfo.failedToDownload()
-                instance?.notificationHelper?.cancelDownloadNotification(downloadInfo.gameId)
+                instance?.notificationHelper?.cancelDownloadNotification(appId)
 
                 // Remove the downloading app info
                 runBlocking {
-                    instance?.downloadingAppInfoDao?.deleteApp(downloadInfo.gameId)
+                    instance?.downloadingAppInfoDao?.deleteApp(appId)
                 }
 
-                removeDownloadJob(downloadInfo.gameId)
+                removeDownloadJob(appId)
                 instance?.let { service ->
                     SnackbarManager.show(service.getString(R.string.download_failed_try_again))
                 }
@@ -2911,6 +2992,22 @@ class SteamService : Service(), IChallengeUrlChanged {
                             }
                         }
                         break
+                    } catch (e: CancellationException) {
+                        // java.util.concurrent.CancellationException (see import). JavaSteam's
+                        // AsyncJobManager throws it when a UFS job exceeds its timeout. kotlinx's
+                        // CancellationException is a *subclass*, so a real cancellation is
+                        // indistinguishable from a timed-out Steam job here. Rethrow genuine
+                        // (kotlinx) cancellations to honor structured concurrency; treat the bare
+                        // JavaSteam timeout as a retryable sync failure so it doesn't tear down the
+                        // preLaunchApp launch coroutine and hang the spinner. Mirrors getOwnedGames().
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        if (attempt == maxAttempts) {
+                            Timber.e(e, "Cloud sync timed out (JavaSteam job cancelled) after $maxAttempts attempts")
+                            syncResult = PostSyncInfo(SyncResult.UnknownFail)
+                        } else {
+                            Timber.w("Cloud sync attempt $attempt timed out (JavaSteam job cancelled), retrying...")
+                            delay(1000L * attempt)
+                        }
                     } catch (e: AsyncJobFailedException) {
                         if (attempt == maxAttempts) {
                             Timber.e(e, "Cloud sync failed after $maxAttempts attempts")
@@ -3462,7 +3559,20 @@ class SteamService : Service(), IChallengeUrlChanged {
         }
 
         suspend fun getOwnedGames(friendID: Long): List<OwnedGames> = withContext(Dispatchers.IO) {
-            instance?._unifiedFriends!!.getOwnedGames(friendID)
+            try {
+                instance?._unifiedFriends?.getOwnedGames(friendID) ?: emptyList()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Our coroutine was genuinely cancelled — must propagate to honor structured
+                // concurrency. (kotlinx CancellationException is a subclass of the JavaSteam one,
+                // so this branch must come first.)
+                throw e
+            } catch (e: Exception) {
+                // JavaSteam AsyncJobManager cancels jobs that exceed their timeout, surfacing a
+                // java.util.concurrent.CancellationException here. Degrade to empty so callers
+                // (e.g. the cosmetic playtime read) don't crash on a timed-out job.
+                Timber.w(e, "getOwnedGames($friendID) failed; returning empty")
+                emptyList()
+            }
         }
 
         // Add helper to detect if any downloads or cloud sync are in progress
@@ -3516,18 +3626,52 @@ class SteamService : Service(), IChallengeUrlChanged {
         // Writes unconditionally — unlike the bulk sync which checks lastChangeNumber, we
         // specifically want to overwrite stub rows written by license processing before
         // the full PICS product info had been synced.
-        suspend fun requestAppInfoNow(appId: Int): Unit = withContext(Dispatchers.IO) {
+        //
+        // De-duplicating wrapper around [performRequestAppInfoNow]. Coalesces concurrent callers
+        // onto a single in-flight fetch and skips the network for repeat calls within
+        // APP_INFO_TTL_MS. Pass force = true to bypass the TTL when a guaranteed-fresh fetch is
+        // required (e.g. an explicit user-triggered refresh).
+        suspend fun requestAppInfoNow(appId: Int, force: Boolean = false) {
+            if (!force) {
+                val last = appInfoLastFetched[appId]
+                if (last != null && SystemClock.elapsedRealtime() - last < APP_INFO_TTL_MS) return
+            }
+
+            // computeIfAbsent is atomic on ConcurrentHashMap, so only the first caller for a
+            // given appId starts the async; the rest receive the same Deferred and await it.
+            val deferred = appInfoInFlight.computeIfAbsent(appId) {
+                appInfoScope.async {
+                    try {
+                        // Only record the timestamp on a genuine successful write so transient
+                        // failures (offline, missing token, network error) are retried by the
+                        // next caller rather than suppressed for the full TTL window.
+                        if (performRequestAppInfoNow(appId)) {
+                            appInfoLastFetched[appId] = SystemClock.elapsedRealtime()
+                        }
+                    } finally {
+                        // Remove before completion so a later call can start a fresh fetch once
+                        // the TTL expires; the map only ever holds genuinely in-flight requests.
+                        appInfoInFlight.remove(appId)
+                    }
+                }
+            }
+            deferred.await()
+        }
+
+        // Returns true only when fresh PICS data was actually written to the DB; false on any
+        // skip/failure so the caller can decide whether to cache the result (see requestAppInfoNow).
+        private suspend fun performRequestAppInfoNow(appId: Int): Boolean = withContext(Dispatchers.IO) {
             val service = instance ?: run {
                 Timber.w("requestAppInfoNow($appId): skipped — SteamService instance is null")
-                return@withContext
+                return@withContext false
             }
             val steamApps = service._steamApps ?: run {
                 Timber.w("requestAppInfoNow($appId): skipped — _steamApps is null")
-                return@withContext
+                return@withContext false
             }
             if (!isConnected) {
                 Timber.d("requestAppInfoNow($appId): skipped — not connected")
-                return@withContext
+                return@withContext false
             }
 
             // Signal that an on-demand request is in flight. The bulk consumer checks this
@@ -3555,14 +3699,14 @@ class SteamService : Service(), IChallengeUrlChanged {
                     ?.apps
                     ?.values
                     ?.firstOrNull()
-                    ?: return@withContext
+                    ?: return@withContext false
 
                 // Guard: if we still got no buffer despite providing the token (network glitch,
                 // or app genuinely requires something else), skip to avoid writing a garbage row
                 // at id=INVALID_APP_ID.
                 if (remoteAppInfo.isMissingToken) {
                     Timber.w("requestAppInfoNow($appId): isMissingToken=true even after token fetch, skipping insert")
-                    return@withContext
+                    return@withContext false
                 }
 
                 // Preserve license-derived fields from the existing DB row, if any.
@@ -3580,8 +3724,10 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                 service.appDao.insert(newApp)
                 Timber.i("On-demand PICS completed for appId=$appId (depots=${newApp.depots.size})")
+                true
             } catch (e: Exception) {
                 Timber.e(e, "On-demand PICS request failed for appId=$appId")
+                false
             } finally {
                 // Always decrement — even if an exception was thrown or the coroutine
                 // was cancelled — so the bulk consumer is never permanently stalled.
