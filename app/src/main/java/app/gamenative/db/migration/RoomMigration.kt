@@ -6,6 +6,31 @@ import androidx.sqlite.execSQL
 
 private const val DROP_TABLE = "DROP TABLE IF EXISTS " // Trailing Space
 
+// SQLite has no ADD COLUMN IF NOT EXISTS — every defensive migration below checks via PRAGMA first.
+private fun SQLiteConnection.hasColumn(table: String, column: String): Boolean {
+    var found = false
+    prepare("PRAGMA table_info($table)").use { stmt ->
+        while (stmt.step()) {
+            // Index 1 is the column name in PRAGMA table_info output.
+            if (stmt.getText(1) == column) {
+                found = true
+                break
+            }
+        }
+    }
+    return found
+}
+
+// Devices already past the v20/v21 jump (real old-numbering v22 through v27) never ran either jump
+// migration, so they never got vertical_cover_url — it's purely a master-merged column, never part
+// of any pre-rebase fork build. Every step from v23→v24 through v27→v28 calls this so the column
+// lands exactly once on the way to v28, regardless of which real version the device starts at.
+private fun SQLiteConnection.addVerticalCoverUrlIfMissing() {
+    if (!hasColumn("gog_games", "vertical_cover_url")) {
+        execSQL("ALTER TABLE gog_games ADD COLUMN vertical_cover_url TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 internal val ROOM_MIGRATION_V7_to_V8 = object : Migration(7, 8) {
     override fun migrate(connection: SQLiteConnection) {
         // Dec 5, 2025: Friends and Chat features removed
@@ -47,6 +72,26 @@ internal val ROOM_MIGRATION_V20_to_V23 = object : Migration(20, 23) {
         connection.execSQL(
             "ALTER TABLE gog_games ADD COLUMN vertical_cover_url TEXT NOT NULL DEFAULT ''"
         )
+    }
+}
+
+// v24 adds the precomputed size_bytes column to steam_app. MANUAL migration (not AutoMigration)
+// because Room's KSP processor needs a prior schema snapshot (23.json) to diff against to generate
+// an AutoMigration body, and 23.json doesn't exist — it was deleted along with the v22 collision's
+// schema files during the v22→v23 renumbering (see the comment block above and docs/migrations.md).
+//
+// Defensive: devices that already ran this fork's pre-renumbering build reached the *old* v24+
+// using the same column adds under different version numbers. Room matches migrations purely by
+// version number, so a device already on old-v24 (or later) would otherwise hit a duplicate-column
+// crash here instead of a clean no-op. Every ALTER TABLE ADD COLUMN below is guarded accordingly.
+internal val ROOM_MIGRATION_V23_to_V24 = object : Migration(23, 24) {
+    override fun migrate(connection: SQLiteConnection) {
+        if (!connection.hasColumn("steam_app", "size_bytes")) {
+            connection.execSQL(
+                "ALTER TABLE steam_app ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0"
+            )
+        }
+        connection.addVerticalCoverUrlIfMissing()
     }
 }
 
