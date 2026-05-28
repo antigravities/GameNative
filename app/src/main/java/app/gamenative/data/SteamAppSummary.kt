@@ -21,6 +21,8 @@ data class SteamAppSummary(
     val installDir: String = "",
     @ColumnInfo("content_descriptors")
     val contentDescriptors: List<Int> = emptyList(),
+    @ColumnInfo("size_bytes")
+    val sizeBytes: Long = 0,
 ) {
     val headerUrl: String
         get() = "https://shared.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg"

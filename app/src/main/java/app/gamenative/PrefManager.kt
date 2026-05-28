@@ -166,6 +166,21 @@ object PrefManager {
         get() = getPref(REFRESH_ALL_APPS_PENDING, false)
         set(value) { setPref(REFRESH_ALL_APPS_PENDING, value) }
 
+    // One-shot guard for the size_bytes backfill (SteamService.backfillSizesOnce). Rows synced
+    // before the size_bytes column existed have 0; the backfill computes them once, then sets this.
+    private val LIBRARY_SIZE_BACKFILL_DONE = booleanPreferencesKey("library_size_backfill_done")
+    var librarySizeBackfillDone: Boolean
+        get() = getPref(LIBRARY_SIZE_BACKFILL_DONE, false)
+        set(value) { setPref(LIBRARY_SIZE_BACKFILL_DONE, value) }
+
+    // Resume cursor (highest processed app id) for the size_bytes backfill. Persisted per page so a
+    // restart continues forward instead of re-walking rows that computed to 0 (which stay matching
+    // the `size_bytes = 0` filter and so can't be skipped by it alone). Irrelevant once *Done is set.
+    private val LIBRARY_SIZE_BACKFILL_CURSOR = intPreferencesKey("library_size_backfill_cursor")
+    var librarySizeBackfillCursor: Int
+        get() = getPref(LIBRARY_SIZE_BACKFILL_CURSOR, 0)
+        set(value) { setPref(LIBRARY_SIZE_BACKFILL_CURSOR, value) }
+
     // How many apps have been successfully sent to the PICS channel in the current refresh run.
     // On resume after crash, refreshAllApps() drops this many IDs from the front of the list.
     private val REFRESH_ALL_APPS_OFFSET = intPreferencesKey("refresh_all_apps_offset")

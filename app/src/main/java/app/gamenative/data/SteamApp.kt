@@ -27,6 +27,11 @@ data class SteamApp(
     val lastChangeNumber: Int = 0,
     @ColumnInfo("ufs_parse_version", defaultValue = "0")
     val ufsParseVersion: Int = 0,
+    // Precomputed sum of public-branch depot manifest sizes, written when PICS parses this app
+    // (depots are already in memory at that point). Lets the library size sort/display read a
+    // single column instead of deserializing the depots blob for every owned app.
+    @ColumnInfo("size_bytes", defaultValue = "0")
+    val sizeBytes: Long = 0,
 
     @ColumnInfo("depots")
     val depots: Map<Int, DepotInfo> = emptyMap(),
