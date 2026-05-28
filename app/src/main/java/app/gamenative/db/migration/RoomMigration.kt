@@ -27,6 +27,13 @@ internal val ROOM_MIGRATION_V24_to_V25 = object : Migration(24, 25) {
     }
 }
 
+internal val ROOM_MIGRATION_V25_to_V26 = object : Migration(25, 26) {
+    override fun migrate(connection: SQLiteConnection) {
+        // Precomputed sum of public-branch depot manifest sizes for the library size sort/display.
+        connection.execSQL("ALTER TABLE steam_app ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 private fun migrateManagedModSourcesToV25(connection: SQLiteConnection) {
     connection.execSQL(
         """
