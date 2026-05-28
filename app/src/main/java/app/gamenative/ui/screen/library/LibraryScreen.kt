@@ -955,6 +955,14 @@ private fun LibraryScreenContent(
                         onSignInClick = onAction,
                         modifier = Modifier.fillMaxSize(),
                     )
+                } else if (state.appInfoList.isEmpty() && state.picsSyncPending > 0) {
+                    // Empty grid but PICS sync in flight — show a centered spinner. The sync
+                    // banner above shows the progress count. Purely presentational: this reads
+                    // state only and does NOT gate the data flow (gating the flow was the bug
+                    // in reverted commit a2c5d501 — it cancelled the in-progress library load).
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 } else {
                     // Library list (content scrolls behind tab bar)
                     if (currentPaneType == PaneType.CAROUSEL) {
