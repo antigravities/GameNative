@@ -57,7 +57,13 @@ object Net {
         return http.newBuilder()
             .dispatcher(dispatcher)
             .readTimeout(5, TimeUnit.MINUTES)
-            .callTimeout(0, TimeUnit.MILLISECONDS)
+            // Hard cap on the whole call. callTimeout is the only OkHttp setting that bounds the
+            // entire request and actively interrupts a stalled socket — `execute()` is a blocking
+            // call, so the kotlinx `withTimeout` wrapped around it can't cancel it (a thread inside
+            // a blocking JVM call isn't at a cancellable suspension point). Without this a
+            // half-open/trickling connection could keep a cloud-save download alive indefinitely
+            // and hang the pre-launch syncing dialog.
+            .callTimeout(2, TimeUnit.MINUTES)
             .protocols(listOf(Protocol.HTTP_1_1))
             .build()
     }
