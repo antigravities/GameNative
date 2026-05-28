@@ -29,6 +29,7 @@ import app.gamenative.data.LaunchInfo
 import app.gamenative.data.OwnedGames
 import app.gamenative.data.PostSyncInfo
 import app.gamenative.data.SteamApp
+import app.gamenative.data.SteamAppDepots
 import app.gamenative.data.SteamAppSummary
 import app.gamenative.data.SteamControllerConfigDetail
 import app.gamenative.data.SteamFriend
@@ -167,6 +168,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -1208,6 +1210,96 @@ class SteamService : Service(), IChallengeUrlChanged {
                     ownedDlc, licensedDepotIds,
                     dlcAppIdsWithSingleDepots = dlcAppIdsWithSingleDepots
                 )
+            }
+        }
+
+        /**
+         * Approximate total install size from an in-memory depot map: sum of each depot's
+         * public-branch manifest size (falling back to the first manifest). Deliberately NOT
+         * license/language-filtered so it can be computed cheaply at PICS-write time without extra
+         * DB lookups — it is only used as the library size sort/display key, where approximate
+         * ordering is sufficient.
+         */
+        fun computeApproxSizeBytes(depots: Map<Int, DepotInfo>): Long =
+            depots.values.sumOf { depot ->
+                depot.manifests["public"]?.size
+                    ?: depot.manifests.values.firstOrNull()?.size
+                    ?: 0L
+            }
+
+        /**
+         * One-time population of [SteamApp.sizeBytes] for rows that were synced before the column
+         * existed. Steady-state writes happen inline during PICS insert, so this only matters once
+         * after the v22→v23 migration; the [PrefManager.librarySizeBackfillDone] flag makes it a
+         * no-op on every subsequent launch. Pages the owned set so the depot blobs are never all
+         * resident at once, waits out any active download (to avoid competing for heap), and yields
+         * between pages so it stays in the background.
+         */
+        suspend fun backfillSizesOnce() {
+            if (PrefManager.librarySizeBackfillDone) {
+                Timber.i("size_bytes backfill: already done, skipping")
+                return
+            }
+            val svc = instance ?: run {
+                Timber.w("size_bytes backfill: no SteamService instance, skipping")
+                return
+            }
+            withContext(Dispatchers.IO) {
+                try {
+                    // A one-time pass — a coarse wait for downloads to finish is far cheaper than
+                    // contending with DepotDownloader workers for the 512 MB heap.
+                    if (svc.downloadingAppInfoDao.getAll().isNotEmpty()) {
+                        Timber.i("size_bytes backfill: waiting for active downloads to finish")
+                        while (svc.downloadingAppInfoDao.getAll().isNotEmpty()) {
+                            delay(2_000L)
+                        }
+                    }
+
+                    // Resume from the persisted cursor. The size_bytes = 0 filter alone can't resume:
+                    // rows that compute to 0 stay matching it, so without a persisted high-water id a
+                    // restart would re-walk every zero-row from the start. The cursor tracks forward
+                    // progress independent of the computed value.
+                    var afterId = PrefManager.librarySizeBackfillCursor
+                    Timber.i("size_bytes backfill: starting from afterId=$afterId")
+                    var updated = 0
+                    while (true) {
+                        // Adaptive paging mirrors SteamAppDao.getAllOwnedAppDepotsPaged: halve the
+                        // page on an oversized CursorWindow row rather than failing the whole pass.
+                        var pageSize = 500
+                        var page: List<SteamAppDepots>
+                        while (true) {
+                            try {
+                                page = svc.appDao._getOwnedAppDepotsAfter(afterId, pageSize)
+                                break
+                            } catch (e: android.database.sqlite.SQLiteBlobTooBigException) {
+                                if (pageSize <= 1) throw e
+                                pageSize = (pageSize / 2).coerceAtLeast(1)
+                            }
+                        }
+                        if (page.isEmpty()) break
+
+                        // Batch each page's writes into one transaction instead of 500 commits.
+                        svc.db.withTransaction {
+                            for (entry in page) {
+                                svc.appDao._updateSizeBytes(entry.id, computeApproxSizeBytes(entry.depots))
+                            }
+                        }
+                        updated += page.size
+                        afterId = page.last().id
+                        // Persist the high-water mark so a restart resumes here instead of re-walking.
+                        PrefManager.librarySizeBackfillCursor = afterId
+                        Timber.d("size_bytes backfill: processed $updated apps so far (afterId=$afterId)")
+                        // Inter-page delay (on top of yield) keeps this one-time scan cool — it runs
+                        // in the background after the library is already visible, so slower is fine.
+                        yield()
+                        delay(75L)
+                    }
+
+                    PrefManager.librarySizeBackfillDone = true
+                    Timber.i("size_bytes backfill complete: updated $updated apps")
+                } catch (e: Exception) {
+                    Timber.e(e, "size_bytes backfill failed; will retry on next launch")
+                }
             }
         }
 
@@ -3722,12 +3814,14 @@ class SteamService : Service(), IChallengeUrlChanged {
                 val packageId = appFromDb?.packageId ?: INVALID_PKG_ID
                 val packageFromDb = if (packageId != INVALID_PKG_ID) service.licenseDao.findLicense(packageId) else null
 
-                val newApp = remoteAppInfo.keyValues.generateSteamApp().copy(
+                val generatedApp = remoteAppInfo.keyValues.generateSteamApp()
+                val newApp = generatedApp.copy(
                     packageId = packageId,
                     ownerAccountId = packageFromDb?.ownerAccountId ?: emptyList(),
                     receivedPICS = true,
                     lastChangeNumber = remoteAppInfo.changeNumber,
                     licenseFlags = packageFromDb?.licenseFlags ?: EnumSet.noneOf(ELicenseFlags::class.java),
+                    sizeBytes = computeApproxSizeBytes(generatedApp.depots),
                 )
 
                 service.appDao.insert(newApp)
@@ -5551,12 +5645,14 @@ class SteamService : Service(), IChallengeUrlChanged {
                                 val ufsParseVersionOutdated = appFromDb != null && appFromDb.ufsParseVersion < CURRENT_UFS_PARSE_VERSION
 
                                 if (app.changeNumber != appFromDb?.lastChangeNumber || ufsParseVersionOutdated) {
-                                    val newApp = app.keyValues.generateSteamApp().copy(
+                                    val generatedApp = app.keyValues.generateSteamApp()
+                                    val newApp = generatedApp.copy(
                                         packageId = packageId,
                                         ownerAccountId = ownerAccountId,
                                         receivedPICS = true,
                                         lastChangeNumber = app.changeNumber,
                                         licenseFlags = packageFromDb?.licenseFlags ?: EnumSet.noneOf(ELicenseFlags::class.java),
+                                        sizeBytes = computeApproxSizeBytes(generatedApp.depots),
                                     )
                                     if (ufsParseVersionOutdated && newApp.ufs.saveFilePatterns.any { it.uploadRoot != it.root || it.uploadPath != it.path }) {
                                         // UFS path logic changed and this app has rootoverrides: store 0 to force one

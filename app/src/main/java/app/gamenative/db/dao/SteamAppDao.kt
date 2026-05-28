@@ -142,7 +142,7 @@ interface SteamAppDao {
 
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, content_descriptors " +
+            "owner_account_id, install_dir, content_descriptors, size_bytes " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "ORDER BY LOWER(app.name), app.id LIMIT :limit OFFSET :offset",
     )
@@ -157,7 +157,7 @@ interface SteamAppDao {
     // Caller must guard against empty [ids] — Room generates invalid SQL for IN ().
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, content_descriptors " +
+            "owner_account_id, install_dir, content_descriptors, size_bytes " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.id IN (:ids)",
     )
@@ -231,7 +231,7 @@ interface SteamAppDao {
     // An FTS5 virtual table (proposal #4) would fix this properly.
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, content_descriptors " +
+            "owner_account_id, install_dir, content_descriptors, size_bytes " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.type IN (:types) " +
             "AND LOWER(app.name) LIKE '%' || LOWER(:searchQuery) || '%' " +
@@ -254,6 +254,29 @@ interface SteamAppDao {
     suspend fun _getOwnedAppDepotsPage(
         limit: Int,
         offset: Int,
+        invalidPkgId: Int = INVALID_PKG_ID,
+        includeExpired: Int = 0,
+    ): List<SteamAppDepots>
+
+    // Writes the precomputed depot size for a single app. Used only by the one-time backfill
+    // (SteamService.backfillSizesOnce) that populates rows synced before the size_bytes column
+    // existed; steady-state writes happen inline during PICS insert.
+    @Query("UPDATE steam_app SET size_bytes = :sizeBytes WHERE id = :appId")
+    suspend fun _updateSizeBytes(appId: Int, sizeBytes: Long)
+
+    // Pages owned apps by an ascending-id cursor for the one-time size_bytes backfill. Resume is
+    // driven by the persisted cursor (PrefManager.librarySizeBackfillCursor), NOT by a `size_bytes
+    // = 0` filter: filtering on size=0 makes matches sparse at high ids (apps that genuinely compute
+    // to 0 never drop out), forcing OWNED_APPS_WHERE's correlated EXISTS subqueries to run over a
+    // growing range and slowing each page badly. Walking every owned row keeps matches dense; the
+    // backfill re-writing an already-correct size is a harmless idempotent write.
+    @Query(
+        "SELECT id, depots FROM steam_app AS app " + OWNED_APPS_WHERE +
+            "AND app.id > :afterId ORDER BY app.id LIMIT :limit",
+    )
+    suspend fun _getOwnedAppDepotsAfter(
+        afterId: Int,
+        limit: Int,
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Int = 0,
     ): List<SteamAppDepots>
