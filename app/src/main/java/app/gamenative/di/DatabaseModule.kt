@@ -18,6 +18,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.util.concurrent.Executors
 import javax.inject.Singleton
 
 @InstallIn(SingletonComponent::class)
@@ -32,6 +33,17 @@ class DatabaseModule {
         return Room.databaseBuilder(context, PluviaDatabase::class.java, DATABASE_NAME)
             .addMigrations(ROOM_MIGRATION_V7_to_V8, ROOM_MIGRATION_V20_to_V22, ROOM_MIGRATION_V21_to_V22)
             .fallbackToDestructiveMigration(true)
+            // Use SEPARATE executors for queries and transactions. By default Room shares one
+            // small fixed pool for both, which deadlocks under load: every open suspend
+            // `withTransaction` pins one thread to host the transaction, while the DAO calls
+            // inside it need another thread from the same pool to run. With enough concurrent
+            // transactions at launch time (cloud-save sync + the PICS product-info pipeline +
+            // license processing) the pool is fully consumed by transaction hosts, so the
+            // queries they're waiting on can never get a thread — and the whole DB locks up.
+            // Cached pools grow on demand and reap idle threads after 60s, so they self-bound;
+            // SQLite still serializes writers, so this only removes the scheduling deadlock.
+            .setQueryExecutor(Executors.newCachedThreadPool())
+            .setTransactionExecutor(Executors.newCachedThreadPool())
             .build()
     }
 
