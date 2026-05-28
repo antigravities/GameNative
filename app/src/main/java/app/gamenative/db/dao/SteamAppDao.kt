@@ -4,7 +4,6 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Transaction
 import androidx.room.Update
 import app.gamenative.data.SteamApp
 import app.gamenative.data.SteamAppDepots
@@ -63,6 +62,16 @@ interface SteamAppDao {
     @Update
     suspend fun update(app: SteamApp)
 
+    // Insert a stub row only if the app doesn't already exist. IGNORE (not REPLACE) so a row
+    // the app PICS consumer wrote concurrently — with full depot/manifest data — is preserved.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfMissing(app: SteamApp)
+
+    // Update only the package_id column so a concurrent depot/manifest write to the same row
+    // (from the app PICS consumer) is not clobbered by a whole-row rewrite.
+    @Query("UPDATE steam_app SET package_id = :pkgId WHERE id = :appId")
+    suspend fun updatePackageId(appId: Int, pkgId: Int)
+
     // observe change count — triggers re-load without pulling all blobs into one CursorWindow
     @Query(
         "SELECT COUNT(*) FROM steam_app AS app " + OWNED_APPS_WHERE,
@@ -84,7 +93,11 @@ interface SteamAppDao {
         includeExpired: Int = 0,
     ): List<SteamApp>
 
-    @Transaction
+    // NOT @Transaction on purpose: wrapping this whole multi-page loop in one transaction
+    // holds SQLite's write connection for the entire (tens-of-seconds) load on large
+    // libraries, blocking PICS inserts and deadlocking the sync pipeline. Without it each
+    // page is a short reader that interleaves with writes under WAL; the count observer
+    // reloads on the next change if a concurrent insert shifts OFFSET paging.
     suspend fun _getAllOwnedAppsPaged(
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Int = 0,
@@ -154,7 +167,9 @@ interface SteamAppDao {
         includeExpired: Int = 0,
     ): List<SteamAppSummary>
 
-    @Transaction
+    // NOT @Transaction: see _getAllOwnedAppsPaged — a single enclosing transaction here held
+    // the write connection for the whole 45k-row library load, blocking PICS inserts and
+    // stalling sync (the deadlock this fix targets).
     suspend fun _getAllOwnedAppSummariesPaged(
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Int = 0,
@@ -243,7 +258,8 @@ interface SteamAppDao {
         includeExpired: Int = 0,
     ): List<SteamAppDepots>
 
-    @Transaction
+    // NOT @Transaction: see _getAllOwnedAppsPaged. This background sizeBytes scan is long too,
+    // so a single transaction would contend with PICS writes the same way.
     suspend fun getAllOwnedAppDepotsPaged(invalidPkgId: Int = INVALID_PKG_ID): List<SteamAppDepots> {
         val result = mutableListOf<SteamAppDepots>()
         var offset = 0

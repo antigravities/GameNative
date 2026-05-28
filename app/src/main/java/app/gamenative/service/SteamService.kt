@@ -353,6 +353,11 @@ class SteamService : Service(), IChallengeUrlChanged {
         // syncs for games with many leaderboards. See the performance note in syncLeaderboardsFromSteam.
         private const val LEADERBOARD_FETCH_COUNT = 50
 
+        // Overall wall-clock budget for fetching leaderboard score entries during pre-launch sync.
+        // Bounds total time for games with many leaderboards (2 serial Steam calls each) so the
+        // syncing screen can't stall the launch; scores gathered before the budget elapses are kept.
+        private val LEADERBOARD_SYNC_BUDGET = 60.seconds
+
         /**
          * Default timeout to use when making requests
          */
@@ -3457,7 +3462,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                         // one. _picsSyncPending is decremented after each batch is fully processed
                         // by the consumer, so this limits memory to ~2 batches at a time instead
                         // of all ~176 (for a 45k library) flooding the channel at once and OOMing.
-                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2) { delay(500) }
+                        // Also bail out of the wait while an on-demand PICS request is active: the
+                        // app consumer pauses for those, so _picsSyncPending won't drain — spinning
+                        // here would livelock. The channel's own SUSPEND backpressure still bounds depth.
+                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2 && onDemandPicsCount.get() == 0) { delay(500) }
                         val requests = chunk.map { PICSRequest(id = it) }
                         _picsSyncPending.update { it + requests.size }
                         service.appPicsChannel.send(requests)
@@ -4107,8 +4115,6 @@ class SteamService : Service(), IChallengeUrlChanged {
         /**
          * Downloads leaderboard definitions and score entries from Steam and seeds GBE Fork's
          * leaderboard files so the game starts with real scores on its first launch.
-         *
-         * Mirrors [downloadAchievementsFromSteam] in structure:
          *   1. Resolve/create the steam_settings directory.
          *   2. Load cached definitions (with numeric IDs) from steam_settings/leaderboards.json,
          *      or fall back to the Steam Community public XML endpoint on first run.
@@ -4185,41 +4191,63 @@ class SteamService : Service(), IChallengeUrlChanged {
             // meaning sync time scales linearly with both N and LEADERBOARD_FETCH_COUNT.
             // Games with hundreds of leaderboards (e.g. daily/weekly boards) will be slow.
             // Consider limiting the definitions list or parallelizing calls if that becomes an issue.
-            for (def in definitions) {
-                try {
-                    val globalCb = statsHandler.getLeaderboardEntries(
-                        appId, def.id, 1, LEADERBOARD_FETCH_COUNT,
-                        ELeaderboardDataRequest.Global,
-                    ).await()
+            // Overall budget for the score-fetch loop. Each leaderboard issues 2 serial Steam
+            // calls, so a game with hundreds of boards could otherwise dominate launch time even
+            // with per-call timeouts. On budget exhaustion we stop fetching and write whatever
+            // scores were gathered so far (best-effort), rather than aborting the whole step.
+            try {
+                withTimeout(LEADERBOARD_SYNC_BUDGET) {
+                    for (def in definitions) {
+                        try {
+                            // Bound each await: a half-open Steam connection can leave the
+                            // JavaSteam job's future uncompleted forever, hanging the launch.
+                            val globalCb = withTimeout(requestTimeout) {
+                                statsHandler.getLeaderboardEntries(
+                                    appId, def.id, 1, LEADERBOARD_FETCH_COUNT,
+                                    ELeaderboardDataRequest.Global,
+                                ).await()
+                            }
 
-                    // GlobalAroundUser uses a symmetric ±range; half the constant on each side.
-                    val halfCount = LEADERBOARD_FETCH_COUNT / 2
-                    val aroundCb = statsHandler.getLeaderboardEntries(
-                        appId, def.id, -halfCount, halfCount,
-                        ELeaderboardDataRequest.GlobalAroundUser,
-                    ).await()
+                            // GlobalAroundUser uses a symmetric ±range; half the constant on each side.
+                            val halfCount = LEADERBOARD_FETCH_COUNT / 2
+                            val aroundCb = withTimeout(requestTimeout) {
+                                statsHandler.getLeaderboardEntries(
+                                    appId, def.id, -halfCount, halfCount,
+                                    ELeaderboardDataRequest.GlobalAroundUser,
+                                ).await()
+                            }
 
-                    if (globalCb.result != EResult.OK && aroundCb.result != EResult.OK) continue
+                            if (globalCb.result != EResult.OK && aroundCb.result != EResult.OK) continue
 
-                    // Merge the two lists, deduplicating by SteamID.
-                    // Global entries come first so their rank order is preserved when deduplicated.
-                    val seen = mutableSetOf<Long>()
-                    val merged = mutableListOf<LeaderboardScoreEntry>()
-                    for (entry in (globalCb.entries.orEmpty() + aroundCb.entries.orEmpty())) {
-                        val id64 = entry.steamID.convertToUInt64()
-                        if (seen.add(id64)) {
-                            merged += LeaderboardScoreEntry(
-                                steamId = id64,
-                                score   = entry.score,
-                                details = entry.details ?: emptyList(),
-                            )
+                            // Merge the two lists, deduplicating by SteamID.
+                            // Global entries come first so their rank order is preserved when deduplicated.
+                            val seen = mutableSetOf<Long>()
+                            val merged = mutableListOf<LeaderboardScoreEntry>()
+                            for (entry in (globalCb.entries.orEmpty() + aroundCb.entries.orEmpty())) {
+                                val id64 = entry.steamID.convertToUInt64()
+                                if (seen.add(id64)) {
+                                    merged += LeaderboardScoreEntry(
+                                        steamId = id64,
+                                        score   = entry.score,
+                                        details = entry.details ?: emptyList(),
+                                    )
+                                }
+                            }
+                            if (merged.isNotEmpty()) scores[def.name] = merged
+
+                        } catch (e: TimeoutCancellationException) {
+                            // Per-call timeout: skip this board and move on. (Caught explicitly so a
+                            // single slow board doesn't trip the outer budget. The outer withTimeout's
+                            // own TimeoutCancellationException is NOT caught here — it propagates out.)
+                            if (!isActive) throw e
+                            Timber.tag("LeaderboardSync").w(e, "Timed out fetching entries for '${def.name}' (appId=$appId)")
+                        } catch (e: Exception) {
+                            Timber.tag("LeaderboardSync").w(e, "Failed to fetch entries for '${def.name}' (appId=$appId)")
                         }
                     }
-                    if (merged.isNotEmpty()) scores[def.name] = merged
-
-                } catch (e: Exception) {
-                    Timber.tag("LeaderboardSync").w(e, "Failed to fetch entries for '${def.name}' (appId=$appId)")
                 }
+            } catch (e: TimeoutCancellationException) {
+                Timber.tag("LeaderboardSync").w(e, "Leaderboard score-fetch budget exceeded for appId=$appId — writing ${scores.size} gathered so far")
             }
 
             // --- Write files via LeaderboardsGenerator ---
@@ -4357,7 +4385,10 @@ class SteamService : Service(), IChallengeUrlChanged {
 
             for (name in unknownNames) {
                 try {
-                    val cb = statsHandler.findLeaderBoard(appId, name).await()
+                    // Bound the await so a stalled Steam connection can't hang the launch indefinitely.
+                    val cb = withTimeout(requestTimeout) {
+                        statsHandler.findLeaderBoard(appId, name).await()
+                    }
                     if (cb.result == EResult.OK && cb.id != 0) {
                         discovered += LeaderboardDefinition(
                             name        = name,
@@ -5294,13 +5325,19 @@ class SteamService : Service(), IChallengeUrlChanged {
             // Chunked writes: each chunk serializes CACHED_LICENSE_CHUNK_SIZE licenses and writes
             // them in their own short transaction. This keeps the peak allocation to ~700 KB per
             // chunk (vs. ~23 MB for all 59k at once) and each write lock window to milliseconds.
-            db.withTransaction { cachedLicenseDao.deleteAll() }
-            pending.licenseList.chunked(CACHED_LICENSE_CHUNK_SIZE).forEach { chunk ->
-                val cachedChunk = chunk.map { license ->
-                    CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
+            // Single transaction around the whole rewrite so a concurrent reader
+            // (getLicensesFromDb, which only falls back to in-memory when the table is *empty*)
+            // never sees a partial license set mid-rewrite. Serialization stays chunked, so peak
+            // allocation is still ~700 KB per chunk — only the commit boundary changes.
+            db.withTransaction {
+                cachedLicenseDao.deleteAll()
+                pending.licenseList.chunked(CACHED_LICENSE_CHUNK_SIZE).forEach { chunk ->
+                    val cachedChunk = chunk.map { license ->
+                        CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
+                    }
+                    cachedLicenseDao.insertAll(cachedChunk)
+                    // cachedChunk goes out of scope here; GC may reclaim before the next chunk is built
                 }
-                db.withTransaction { cachedLicenseDao.insertAll(cachedChunk) }
-                // cachedChunk goes out of scope here; GC may reclaim before the next chunk is built
             }
         }
     }
@@ -5380,7 +5417,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                                 ensureActive()
                                 // Same backpressure as refreshAllApps: wait until fewer than 2
                                 // batches are in-flight before queuing the next one.
-                                while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2) { delay(500) }
+                                while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2 && onDemandPicsCount.get() == 0) { delay(500) }
                                 val picsRequests = chunk.map { PICSRequest(id = it) }
                                 _picsSyncPending.update { it + picsRequests.size }
                                 appPicsChannel.send(picsRequests)
@@ -5630,7 +5667,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                                     val existing = appsStateMap[appid]  // pre-loaded map, no DB query
                                     if (existing == null) {
                                         val newApp = SteamApp(id = appid, packageId = pkg.id)
-                                        appDao.insert(newApp)
+                                        // insertIfMissing (IGNORE) so a row the app PICS consumer
+                                        // wrote concurrently — with full depot data — is preserved.
+                                        appDao.insertIfMissing(newApp)
                                         appsStateMap[appid] = newApp  // track so later pkgs see it
                                         return@forEach
                                     }
@@ -5652,9 +5691,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                                             return@forEach
                                         }
                                     }
-                                    val updated = existing.copy(packageId = pkg.id)
-                                    appDao.update(updated)
-                                    appsStateMap[appid] = updated  // track update
+                                    // Targeted column update (not a whole-row .copy()+update) so a
+                                    // concurrent depot/manifest write to this row survives.
+                                    appDao.updatePackageId(appid, pkg.id)
+                                    appsStateMap[appid] = existing.copy(packageId = pkg.id)  // track update
                                 }
 
                                 queue.addAll(appIds)
@@ -5693,7 +5733,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                                     .forEach { chunk ->
                                         // Mirror refreshAllApps: let the app consumer catch up
                                         // before queuing more to cap in-flight app PICS work.
-                                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2) { delay(500) }
+                                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2 && onDemandPicsCount.get() == 0) { delay(500) }
                                         Timber.d("bufferedPICSGetProductInfo: Queueing ${chunk.size} for PICS")
                                         _picsSyncPending.update { it + chunk.size }
                                         appPicsChannel.send(chunk)

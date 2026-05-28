@@ -1167,7 +1167,19 @@ object SteamAutoCloud {
         Timber.i("$prefixedPath -> $actualFilePath")
 
         val fileDownloadInfo = try {
-            steamCloud.clientFileDownload(appInfo.id, prefixedPath).await()
+            // Bound the await: a half-open Steam connection can leave this JavaSteam job's future
+            // uncompleted forever, which would hang the cloud-save sync and the launch dialog.
+            withTimeout(SteamService.requestTimeout) {
+                steamCloud.clientFileDownload(appInfo.id, prefixedPath).await()
+            }
+        } catch (e: TimeoutCancellationException) {
+            // Must precede the java.util.concurrent.CancellationException catch below:
+            // TimeoutCancellationException is a subtype, and rethrowing it would propagate up to
+            // beginLaunchApp's kotlinx-cancellation rethrow and tear down the whole launch coroutine.
+            // Treat a timeout as a failed download (return null) so the sync degrades to a retry/
+            // DownloadFail instead of hanging.
+            Timber.w(e, "Timed out fetching download info for %s", prefixedPath)
+            return null
         } catch (e: java.util.concurrent.CancellationException) {
             throw e
         } catch (e: Exception) {

@@ -132,7 +132,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -1257,7 +1260,14 @@ fun PluviaMain(
     }
 
     BackHandler(enabled = state.loadingDialogVisible && !SteamService.keepAlive) {
-        // TODO: Make prelaunch/loading operations cancellable so Back can exit safely.
+        // Escape hatch for a stuck pre-launch sync. Cancel the launch coroutine and hide the
+        // dialog immediately — the UI must not wait on the coroutine actually stopping, since it
+        // may be parked in a non-cancellable blocking call (OkHttp execute, Room transaction).
+        // When that call eventually returns, the coroutine unwinds and beginLaunchApp's finally
+        // releases the per-app sync lock, so a later relaunch isn't stuck on InProgress.
+        activePreLaunchJob?.cancel()
+        activePreLaunchJob = null
+        viewModel.setLoadingDialogVisible(false)
     }
 
     PluviaTheme(
@@ -1795,6 +1805,14 @@ fun PluviaMain(
     }
 }
 
+/**
+ * The currently-running [preLaunchApp] coroutine, if any. Held at file scope (rather than threaded
+ * through preLaunchApp's ~12 call sites) so the BackHandler can cancel an in-progress launch sync.
+ * Marked @Volatile because it's written from the launching thread and read/cancelled from the UI thread.
+ */
+@Volatile
+private var activePreLaunchJob: Job? = null
+
 fun preLaunchApp(
     context: Context,
     appId: String,
@@ -1812,12 +1830,12 @@ fun preLaunchApp(
     bootToContainer: Boolean = false,
 ) {
     setLoadingDialogVisible(true)
-    // TODO: add a way to cancel
     // TODO: add fail conditions
 
     val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
 
-    CoroutineScope(Dispatchers.IO).launch {
+    val job = CoroutineScope(Dispatchers.IO).launch {
+      try {
         // create container if it does not already exist
         // TODO: combine somehow with container creation in HomeLibraryAppScreen
         val containerManager = ContainerManager(context)
@@ -2704,5 +2722,15 @@ fun preLaunchApp(
                 onSuccess(context, appId)
             }
         }
+      } catch (e: CancellationException) {
+          // Back-button cancellation lands here. Hide the dialog defensively (the BackHandler
+          // already does, but the coroutine may be cancelled mid-flight from elsewhere too).
+          // NonCancellable so the hide still runs while the coroutine is being torn down.
+          withContext(NonCancellable) { setLoadingDialogVisible(false) }
+          throw e
+      } finally {
+          activePreLaunchJob = null
+      }
     }
+    activePreLaunchJob = job
 }
