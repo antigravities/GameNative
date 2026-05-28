@@ -3290,7 +3290,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                         // one. _picsSyncPending is decremented after each batch is fully processed
                         // by the consumer, so this limits memory to ~2 batches at a time instead
                         // of all ~176 (for a 45k library) flooding the channel at once and OOMing.
-                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2) { delay(500) }
+                        // Also bail out of the wait while an on-demand PICS request is active: the
+                        // app consumer pauses for those, so _picsSyncPending won't drain — spinning
+                        // here would livelock. The channel's own SUSPEND backpressure still bounds depth.
+                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2 && onDemandPicsCount.get() == 0) { delay(500) }
                         val requests = chunk.map { PICSRequest(id = it) }
                         _picsSyncPending.update { it + requests.size }
                         service.appPicsChannel.send(requests)
@@ -4910,13 +4913,19 @@ class SteamService : Service(), IChallengeUrlChanged {
             // Chunked writes: each chunk serializes CACHED_LICENSE_CHUNK_SIZE licenses and writes
             // them in their own short transaction. This keeps the peak allocation to ~700 KB per
             // chunk (vs. ~23 MB for all 59k at once) and each write lock window to milliseconds.
-            db.withTransaction { cachedLicenseDao.deleteAll() }
-            pending.licenseList.chunked(CACHED_LICENSE_CHUNK_SIZE).forEach { chunk ->
-                val cachedChunk = chunk.map { license ->
-                    CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
+            // Single transaction around the whole rewrite so a concurrent reader
+            // (getLicensesFromDb, which only falls back to in-memory when the table is *empty*)
+            // never sees a partial license set mid-rewrite. Serialization stays chunked, so peak
+            // allocation is still ~700 KB per chunk — only the commit boundary changes.
+            db.withTransaction {
+                cachedLicenseDao.deleteAll()
+                pending.licenseList.chunked(CACHED_LICENSE_CHUNK_SIZE).forEach { chunk ->
+                    val cachedChunk = chunk.map { license ->
+                        CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
+                    }
+                    cachedLicenseDao.insertAll(cachedChunk)
+                    // cachedChunk goes out of scope here; GC may reclaim before the next chunk is built
                 }
-                db.withTransaction { cachedLicenseDao.insertAll(cachedChunk) }
-                // cachedChunk goes out of scope here; GC may reclaim before the next chunk is built
             }
         }
     }
@@ -4996,7 +5005,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                                 ensureActive()
                                 // Same backpressure as refreshAllApps: wait until fewer than 2
                                 // batches are in-flight before queuing the next one.
-                                while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2) { delay(500) }
+                                while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2 && onDemandPicsCount.get() == 0) { delay(500) }
                                 val picsRequests = chunk.map { PICSRequest(id = it) }
                                 _picsSyncPending.update { it + picsRequests.size }
                                 appPicsChannel.send(picsRequests)
@@ -5248,7 +5257,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                                     val existing = appsStateMap[appid]  // pre-loaded map, no DB query
                                     if (existing == null) {
                                         val newApp = SteamApp(id = appid, packageId = pkg.id)
-                                        appDao.insert(newApp)
+                                        // insertIfMissing (IGNORE) so a row the app PICS consumer
+                                        // wrote concurrently — with full depot data — is preserved.
+                                        appDao.insertIfMissing(newApp)
                                         appsStateMap[appid] = newApp  // track so later pkgs see it
                                         return@forEach
                                     }
@@ -5270,9 +5281,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                                             return@forEach
                                         }
                                     }
-                                    val updated = existing.copy(packageId = pkg.id)
-                                    appDao.update(updated)
-                                    appsStateMap[appid] = updated  // track update
+                                    // Targeted column update (not a whole-row .copy()+update) so a
+                                    // concurrent depot/manifest write to this row survives.
+                                    appDao.updatePackageId(appid, pkg.id)
+                                    appsStateMap[appid] = existing.copy(packageId = pkg.id)  // track update
                                 }
 
                                 queue.addAll(appIds)
@@ -5311,7 +5323,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                                     .forEach { chunk ->
                                         // Mirror refreshAllApps: let the app consumer catch up
                                         // before queuing more to cap in-flight app PICS work.
-                                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2) { delay(500) }
+                                        while (_picsSyncPending.value >= MAX_PICS_BUFFER * 2 && onDemandPicsCount.get() == 0) { delay(500) }
                                         Timber.d("bufferedPICSGetProductInfo: Queueing ${chunk.size} for PICS")
                                         _picsSyncPending.update { it + chunk.size }
                                         appPicsChannel.send(chunk)
