@@ -411,6 +411,31 @@ object PrefManager {
             setPref(SCREENSHOT_PRIVACY, value)
         }
 
+    private val REPLAY_BUFFER_ENABLED = booleanPreferencesKey("replay_buffer_enabled")
+    // Default false — the rolling encoder is opt-in so users who don't want it pay no overhead.
+    // Read at GL-surface creation; toggling takes effect on the next game launch.
+    var replayBufferEnabled: Boolean
+        get() = getPref(REPLAY_BUFFER_ENABLED, false)
+        set(value) {
+            setPref(REPLAY_BUFFER_ENABLED, value)
+        }
+
+    private val REPLAY_BUFFER_SECONDS = intPreferencesKey("replay_buffer_seconds")
+    // How many seconds of gameplay the rolling buffer retains before flushing to a clip.
+    var replayBufferSeconds: Int
+        get() = getPref(REPLAY_BUFFER_SECONDS, 30)
+        set(value) {
+            setPref(REPLAY_BUFFER_SECONDS, value)
+        }
+
+    private val REPLAY_BUFFER_BITRATE_MBPS = intPreferencesKey("replay_buffer_bitrate_mbps")
+    // H.264 target bitrate for the replay encoder, in megabits/sec.
+    var replayBufferBitrateMbps: Int
+        get() = getPref(REPLAY_BUFFER_BITRATE_MBPS, 12)
+        set(value) {
+            setPref(REPLAY_BUFFER_BITRATE_MBPS, value)
+        }
+
     private val PERFORMANCE_HUD_COMPACT_MODE = booleanPreferencesKey("performance_hud_compact_mode")
     var performanceHudCompactMode: Boolean
         get() = getPref(PERFORMANCE_HUD_COMPACT_MODE, false)

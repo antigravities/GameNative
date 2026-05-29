@@ -112,6 +112,7 @@ import app.gamenative.ui.widget.PerformanceHudView
 import app.gamenative.utils.AssetUtils
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.IntentLaunchManager
+import app.gamenative.utils.RecordingUtils
 import app.gamenative.utils.ScreenshotUtils
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ExecutableSelectionUtils
@@ -2265,6 +2266,39 @@ fun XServerScreen(
                             withContext(Dispatchers.Main) { SnackbarManager.show(message) }
                         }
                     }
+                }
+            }
+
+            // Wire SAVE_CLIP overlay button type — flushes the rolling replay buffer to an mp4.
+            // Fires on the UI thread; saveReplay()/snapshot() are thread-safe, muxing runs on IO.
+            icView.setSaveClipCallback {
+                val renderer = xServerView?.getxServer()?.renderer
+                when (renderer) {
+                    is GLRenderer -> {
+                        val snapshot = renderer.saveReplay()
+                        if (snapshot == null) {
+                            SnackbarManager.show(context.getString(R.string.replay_unavailable))
+                        } else {
+                            scope.launch(Dispatchers.IO) {
+                                val uri = RecordingUtils.saveClip(
+                                    context = context,
+                                    snapshot = snapshot,
+                                    label = container?.name ?: "replay",
+                                )
+                                if (uri != null && shutterSoundId.intValue != 0) {
+                                    shutterPool.play(shutterSoundId.intValue, 1f, 1f, 1, 0, 1f)
+                                }
+                                val message = if (uri != null) {
+                                    context.getString(R.string.replay_saved)
+                                } else {
+                                    context.getString(R.string.replay_failed)
+                                }
+                                withContext(Dispatchers.Main) { SnackbarManager.show(message) }
+                            }
+                        }
+                    }
+                    // The Vulkan compositor has no GL-thread capture path yet (future work).
+                    else -> SnackbarManager.show(context.getString(R.string.replay_not_supported_backend))
                 }
             }
 

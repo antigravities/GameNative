@@ -306,6 +306,15 @@
     <string name="settings_screenshot_privacy_friends">Friends Only</string>
     <string name="settings_screenshot_privacy_public">Public</string>
     <string name="settings_screenshots_title">Screenshots</string>
+    <string name="replay_saved">Replay clip saved to gallery</string>
+    <string name="replay_failed">Failed to save replay clip</string>
+    <string name="replay_unavailable">No replay footage available yet</string>
+    <string name="replay_not_supported_backend">Replay clips require the OpenGL renderer</string>
+    <string name="settings_replay_title">Instant replay buffer</string>
+    <string name="settings_replay_enabled_title">Enable replay buffer</string>
+    <string name="settings_replay_enabled_subtitle">Continuously record recent gameplay so you can save the last few seconds as a video. OpenGL renderer only; takes effect on next launch.</string>
+    <string name="settings_replay_seconds_title">Replay length</string>
+    <string name="settings_replay_seconds_subtitle">How many seconds of gameplay to keep in the rolling buffer</string>
     <string name="performance_hud">Performance HUD</string>
     <string name="performance_hud_description">Show or hide the in-game overlay.</string>
     <string name="performance_hud_fps_limiter">FPS limiter</string>
