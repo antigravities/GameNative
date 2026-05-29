@@ -764,6 +764,18 @@ fun SettingsGroupInterface(
                     PrefManager.replayBufferSeconds = secondsValues[idx]
                 },
             )
+            // Optional audio capture (no permission prompt; ALSA tee or PulseAudio monitor).
+            var replayAudioEnabled by rememberSaveable { mutableStateOf(PrefManager.replayAudioEnabled) }
+            SettingsSwitch(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.settings_replay_audio_title)) },
+                subtitle = { Text(text = stringResource(R.string.settings_replay_audio_subtitle)) },
+                state = replayAudioEnabled,
+                onCheckedChange = {
+                    replayAudioEnabled = it
+                    PrefManager.replayAudioEnabled = it
+                },
+            )
         }
     }
 

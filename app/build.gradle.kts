@@ -35,6 +35,15 @@ android {
     // https://developer.android.com/ndk/downloads
     ndkVersion = "27.3.13750724"
 
+    // Build ONLY the small libpulse_capture.so (replay-clip audio capture) from source.
+    // This points at an isolated CMakeLists — it does NOT build the main cpp/CMakeLists.txt
+    // tree (proot/virgl/winlator/etc. remain prebuilt in jniLibs and intentionally disabled).
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/pulsecapture/CMakeLists.txt")
+        }
+    }
+
     signingConfigs {
         create("pluvia") {
             if (keystoreProperties != null) {

@@ -436,6 +436,15 @@ object PrefManager {
             setPref(REPLAY_BUFFER_BITRATE_MBPS, value)
         }
 
+    private val REPLAY_AUDIO_ENABLED = booleanPreferencesKey("replay_audio_enabled")
+    // When the replay buffer is on, also capture game audio (ALSA tee or PulseAudio monitor).
+    // Default true; no permission prompt either way. Read at GL-session start.
+    var replayAudioEnabled: Boolean
+        get() = getPref(REPLAY_AUDIO_ENABLED, true)
+        set(value) {
+            setPref(REPLAY_AUDIO_ENABLED, value)
+        }
+
     private val PERFORMANCE_HUD_COMPACT_MODE = booleanPreferencesKey("performance_hud_compact_mode")
     var performanceHudCompactMode: Boolean
         get() = getPref(PERFORMANCE_HUD_COMPACT_MODE, false)

@@ -448,6 +448,14 @@ fun XServerScreen(
             .build()
     }
     val shutterSoundId = remember { mutableIntStateOf(0) }
+    // Holds the rolling audio buffer for replay clips (started during session setup if enabled).
+    val audioReplayRecorder = remember { mutableStateOf<app.gamenative.utils.AudioReplayRecorder?>(null) }
+    DisposableEffect(Unit) {
+        onDispose {
+            audioReplayRecorder.value?.stop()
+            audioReplayRecorder.value = null
+        }
+    }
     DisposableEffect(Unit) {
         // Try the two standard system camera-click paths; most stock and OEM ROMs have one.
         // If neither exists, shutterSoundId stays 0 and we simply skip playing the sound.
@@ -2279,11 +2287,13 @@ fun XServerScreen(
                         if (snapshot == null) {
                             SnackbarManager.show(context.getString(R.string.replay_unavailable))
                         } else {
+                            val audioSnapshot = audioReplayRecorder.value?.snapshot()
                             scope.launch(Dispatchers.IO) {
                                 val uri = RecordingUtils.saveClip(
                                     context = context,
                                     snapshot = snapshot,
                                     label = container?.name ?: "replay",
+                                    audioPcm = audioSnapshot,
                                 )
                                 if (uri != null && shutterSoundId.intValue != 0) {
                                     shutterPool.play(shutterSoundId.intValue, 1f, 1f, 1, 0, 1f)
@@ -2299,6 +2309,40 @@ fun XServerScreen(
                     }
                     // The Vulkan compositor has no GL-thread capture path yet (future work).
                     else -> SnackbarManager.show(context.getString(R.string.replay_not_supported_backend))
+                }
+            }
+
+            // Start the rolling audio buffer for replay clips (GL renderer only; opt-in). Driver-
+            // aware: ALSA feeds via the Java tap, PulseAudio via the native sink-monitor client.
+            run {
+                val activeRenderer = xServerView?.getxServer()?.renderer
+                if (activeRenderer is GLRenderer &&
+                    PrefManager.replayBufferEnabled && PrefManager.replayAudioEnabled &&
+                    audioReplayRecorder.value == null
+                ) {
+                    val recorder = app.gamenative.utils.AudioReplayRecorder(PrefManager.replayBufferSeconds)
+                    audioReplayRecorder.value = recorder
+                    when (container?.audioDriver) {
+                        "alsa" -> recorder.startAlsaTee()
+                        "pulseaudio" -> {
+                            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+                            val sampleRate = audioManager
+                                ?.getProperty(android.media.AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
+                                ?.toIntOrNull() ?: 48000
+                            val server = "unix:" + ImageFs.find(context).rootDir.path + UnixSocketConfig.PULSE_SERVER_PATH
+                            // The PulseAudio daemon may not be ready the instant the view is set
+                            // up, so retry the connection briefly on a background thread.
+                            scope.launch(Dispatchers.IO) {
+                                var ok = false
+                                repeat(20) {
+                                    if (recorder.startPulseMonitor(server, sampleRate, 2)) { ok = true; return@launch }
+                                    kotlinx.coroutines.delay(500)
+                                }
+                                if (!ok) Timber.tag("ReplayAudio").w("pulse monitor failed after 20 attempts")
+                            }
+                        }
+                        else -> Timber.tag("ReplayAudio").w("unhandled audio driver: ${container?.audioDriver}")
+                    }
                 }
             }
 

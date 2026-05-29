@@ -315,6 +315,8 @@
     <string name="settings_replay_enabled_subtitle">Continuously record recent gameplay so you can save the last few seconds as a video. OpenGL renderer only; takes effect on next launch.</string>
     <string name="settings_replay_seconds_title">Replay length</string>
     <string name="settings_replay_seconds_subtitle">How many seconds of gameplay to keep in the rolling buffer</string>
+    <string name="settings_replay_audio_title">Capture audio</string>
+    <string name="settings_replay_audio_subtitle">Include game audio in replay clips. No permission prompt; takes effect on next launch.</string>
     <string name="performance_hud">Performance HUD</string>
     <string name="performance_hud_description">Show or hide the in-game overlay.</string>
     <string name="performance_hud_fps_limiter">FPS limiter</string>
