@@ -68,6 +68,8 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private boolean sceneInitialized = false;
     private final EffectComposer effectComposer;
     private FrameRating frameRating;
+    // Rolling "instant replay" recorder. Null when the feature is disabled in settings.
+    private GLContinuousRecorder replayRecorder;
 
     public GLRenderer(XServerViewGL xServerView, XServer xServer) {
         this.xServerView = xServerView;
@@ -111,6 +113,20 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
             rootCursorDrawable.getTexture().invalidate();
         }
         updateScene();
+
+        // Create/destroy the replay recorder based on the user setting. The actual encoder +
+        // GL objects are (re)built in onSurfaceChanged once the surface size is known, which
+        // GLSurfaceView always invokes after onSurfaceCreated.
+        boolean replayEnabled = app.gamenative.PrefManager.INSTANCE.getReplayBufferEnabled();
+        if (replayEnabled && replayRecorder == null) {
+            replayRecorder = new GLContinuousRecorder(
+                app.gamenative.PrefManager.INSTANCE.getReplayBufferSeconds(),
+                app.gamenative.PrefManager.INSTANCE.getReplayBufferBitrateMbps());
+        } else if (!replayEnabled && replayRecorder != null) {
+            replayRecorder.stop();
+            replayRecorder = null;
+        }
+
         xServerView.requestRender();
     }
 
@@ -129,6 +145,10 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         surfaceHeight = height;
         viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height);
         viewportNeedsUpdate = true;
+
+        // (Re)build the recorder's encoder + EGL surface for the new size. start() tears down
+        // any previous generation first, so this also covers the post-context-loss rebuild.
+        if (replayRecorder != null) replayRecorder.start(width, height);
     }
 
     @Override
@@ -151,6 +171,12 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         }
         if (onFrameRenderedListener != null) {
             onFrameRenderedListener.run();
+        }
+
+        // Feed the rolling replay buffer. FBO 0 still holds this frame (not yet swapped) and the
+        // window surface is current; the recorder restores both before returning.
+        if (replayRecorder != null && replayRecorder.isRecording()) {
+            replayRecorder.onFrameRendered(surfaceWidth, surfaceHeight);
         }
 
         // Consume a one-shot screenshot request if one was queued via captureFrame().
@@ -606,5 +632,18 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
 
     public void setFrameRating(FrameRating frameRating) {
         this.frameRating = frameRating;
+    }
+
+    /** True if the rolling replay buffer is active and has frames available. */
+    public boolean isReplayActive() {
+        return replayRecorder != null && replayRecorder.isRecording();
+    }
+
+    /**
+     * Returns a keyframe-aligned copy of the last X seconds of encoded frames for muxing, or
+     * null if the buffer is unavailable/empty. Thread-safe — callable from the UI thread.
+     */
+    public GLContinuousRecorder.ClipSnapshot saveReplay() {
+        return replayRecorder != null ? replayRecorder.snapshot() : null;
     }
 }
