@@ -29,7 +29,7 @@ public class ControlElement {
     public static final byte TRACKPAD_ACCELERATION_THRESHOLD = 4;
     public static final short BUTTON_MIN_TIME_TO_KEEP_PRESSED = 300;
     public enum Type {
-        BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, SHOOTER_MODE, SCREENSHOT;
+        BUTTON, D_PAD, RANGE_BUTTON, STICK, TRACKPAD, SHOOTER_MODE, SCREENSHOT, SAVE_CLIP;
 
         public static String[] names() {
             Type[] types = values();
@@ -127,13 +127,14 @@ public class ControlElement {
             shooterLookSensitivity = 1.0f;
             shooterJoystickSize = 1.0f;
         }
-        else if (type == Type.SCREENSHOT) {
+        else if (type == Type.SCREENSHOT || type == Type.SAVE_CLIP) {
             shape = Shape.CIRCLE;
         }
 
         text = "";
-        // Screenshot button uses "SS" as its label; assigned after the blanket clear above.
+        // Screenshot/replay buttons use short labels; assigned after the blanket clear above.
         if (type == Type.SCREENSHOT) text = "SS";
+        else if (type == Type.SAVE_CLIP) text = "REC";
         if (type != Type.SHOOTER_MODE) iconId = 0;
         range = null;
         boundingBoxNeedsUpdate = true;
@@ -362,7 +363,8 @@ public class ControlElement {
                 break;
             }
             case SHOOTER_MODE:
-            case SCREENSHOT: {
+            case SCREENSHOT:
+            case SAVE_CLIP: {
                 halfWidth = snappingSize * 3;
                 halfHeight = snappingSize * 3;
                 break;
@@ -645,6 +647,7 @@ public class ControlElement {
                 }
                 break;
             }
+            case SAVE_CLIP:
             case SCREENSHOT: {
                 float cx = boundingBox.centerX();
                 float cy = boundingBox.centerY();
@@ -747,7 +750,7 @@ public class ControlElement {
                 // Toggle handled on touch up
                 return true;
             }
-            else if (type == Type.SCREENSHOT) {
+            else if (type == Type.SCREENSHOT || type == Type.SAVE_CLIP) {
                 // Action fires on touch up; repaint now for press-down visual feedback.
                 inputControlsView.invalidate();
                 return true;
@@ -919,6 +922,10 @@ public class ControlElement {
             }
             else if (type == Type.SCREENSHOT) {
                 inputControlsView.triggerScreenshot();
+                inputControlsView.invalidate(); // clear press highlight
+            }
+            else if (type == Type.SAVE_CLIP) {
+                inputControlsView.triggerSaveClip();
                 inputControlsView.invalidate(); // clear press highlight
             }
             currentPointerId = -1;
