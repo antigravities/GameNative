@@ -171,6 +171,13 @@ public class ALSAClient {
         } else if (dataType == DataType.S16BE || dataType == DataType.FLOATBE) {
             data.order(ByteOrder.BIG_ENDIAN);
         }
+        // Tee a copy to the replay recorder (no-op unless a listener is registered). A duplicate
+        // gives the listener an independent position so it can't disturb the AudioTrack write.
+        if (this.audioTrack != null && AudioTap.active()) {
+            ByteBuffer tap = data.duplicate();
+            tap.position(0);
+            AudioTap.onPcm(tap, this.dataType, this.channels, this.sampleRate);
+        }
         if (this.audioTrack != null) {
             data.position(0);
             do {
