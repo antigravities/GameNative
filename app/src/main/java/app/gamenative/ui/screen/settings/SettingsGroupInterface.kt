@@ -727,6 +727,46 @@ fun SettingsGroupInterface(
         )
     }
 
+    SettingsGroup(
+        modifier = Modifier.background(Color.Transparent),
+        title = { Text(text = stringResource(R.string.settings_replay_title)) },
+    ) {
+        // Rolling replay buffer — opt-in (defaults off) so users who don't want it pay no
+        // overhead. Read at GL-surface creation, so a change applies on the next game launch.
+        var replayBufferEnabled by rememberSaveable { mutableStateOf(PrefManager.replayBufferEnabled) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_replay_enabled_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_replay_enabled_subtitle)) },
+            state = replayBufferEnabled,
+            onCheckedChange = {
+                replayBufferEnabled = it
+                PrefManager.replayBufferEnabled = it
+            },
+        )
+        if (replayBufferEnabled) {
+            // Buffer length dropdown — the values list mirrors the labels by index.
+            val secondsValues = listOf(15, 30, 60, 120)
+            val secondsLabels = secondsValues.map { "${it}s" }
+            var secondsIndex by rememberSaveable {
+                mutableStateOf(
+                    secondsValues.indexOf(PrefManager.replayBufferSeconds).takeIf { it >= 0 } ?: 1
+                )
+            }
+            SettingsListDropdown(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.settings_replay_seconds_title)) },
+                subtitle = { Text(text = stringResource(R.string.settings_replay_seconds_subtitle)) },
+                items = secondsLabels,
+                value = secondsIndex,
+                onItemSelected = { idx ->
+                    secondsIndex = idx
+                    PrefManager.replayBufferSeconds = secondsValues[idx]
+                },
+            )
+        }
+    }
+
     // Steam Download Server choice dialog
     SingleChoiceDialog(
         openDialog = openRegionDialog,

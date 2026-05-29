@@ -96,6 +96,9 @@ public class InputControlsView extends View {
     // Callback invoked when a SCREENSHOT overlay element is tapped
     private Runnable screenshotCallback;
 
+    // Callback invoked when a SAVE_CLIP (replay) overlay element is tapped
+    private Runnable saveClipCallback;
+
     @SuppressLint("ResourceType")
     public InputControlsView(Context context) {
         super(context);
@@ -420,6 +423,15 @@ public class InputControlsView extends View {
     /** Called by ControlElement when a SCREENSHOT-type button is tapped. */
     public void triggerScreenshot() {
         if (screenshotCallback != null) screenshotCallback.run();
+    }
+
+    public void setSaveClipCallback(Runnable callback) {
+        this.saveClipCallback = callback;
+    }
+
+    /** Called by ControlElement when a SAVE_CLIP-type button is tapped. */
+    public void triggerSaveClip() {
+        if (saveClipCallback != null) saveClipCallback.run();
     }
 
     /** Check if a STICK element should be hidden because container shooter mode replaces it. */
