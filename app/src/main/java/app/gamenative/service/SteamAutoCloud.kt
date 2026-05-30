@@ -24,6 +24,7 @@ import `in`.dragonbra.javasteam.enums.EResult
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.AppFileChangeList
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.AppFileInfo
 import `in`.dragonbra.javasteam.steam.handlers.steamcloud.SteamCloud
+import `in`.dragonbra.javasteam.types.KeyValue
 import java.io.BufferedInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -794,6 +795,7 @@ object SteamAutoCloud {
         var microsecDeleteFiles = 0L
         var microsecDownloadFiles = 0L
         var microsecUploadFiles = 0L
+        var lastCloudAppChangeNumber = -1L
 
         microsecTotal = measureTime {
             val localAppChangeNumber = overrideLocalChangeNumber ?: steamInstance.changeNumbersDao.getByAppId(appInfo.id)?.changeNumber ?: -1
@@ -804,6 +806,7 @@ object SteamAutoCloud {
             val appFileListChange = steamCloud.getAppFileListChange(appInfo.id, changeNumber).await()
 
             val cloudAppChangeNumber = appFileListChange.currentChangeNumber
+            lastCloudAppChangeNumber = cloudAppChangeNumber
 
             Timber.i("AppChangeNumber: $localAppChangeNumber -> $cloudAppChangeNumber")
 
@@ -909,6 +912,7 @@ object SteamAutoCloud {
                     filesManaged = allLocalUserFiles.size
 
                     if (uploadResult.uploadBatchSuccess) {
+                        lastCloudAppChangeNumber = uploadResult.appChangeNumber
                         with(steamInstance) {
                             db.withTransaction {
                                 fileChangeListsDao.insert(appInfo.id, allLocalUserFiles)
@@ -1077,6 +1081,24 @@ object SteamAutoCloud {
             microsecDownloadFiles = microsecDownloadFiles,
             microsecUploadFiles = microsecUploadFiles,
         )
+
+        // Write remotecache.vdf after successful sync
+        if (syncResult == SyncResult.Success || syncResult == SyncResult.UpToDate) {
+            try {
+                val allFiles = getLocalUserFilesAsPrefixMap().values.flatten()
+
+                writeRemoteCacheVdf(
+                    appId = appInfo.id,
+                    userdataPath = Paths.get(prefixToPath(PathType.SteamUserData.name)).parent,
+                    changeNumber = lastCloudAppChangeNumber,
+                    files = allFiles,
+                    prefixToPath = prefixToPath,
+                    syncState = 1, // 1 = syncing (matches Windows behavior)
+                )
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to write remotecache.vdf for app ${appInfo.id}")
+            }
+        }
 
         postSyncInfo
     }
@@ -1299,6 +1321,85 @@ object SteamAutoCloud {
                             "\n\t\tmachineNameIndex: ${it.machineNameIndex}"
                     },
             )
+        }
+    }
+
+    /**
+     * Writes a remotecache.vdf file for the given app in the Steam userdata directory.
+     * This file tracks Steam Cloud sync metadata for save files.
+     *
+     * @param appId The Steam app ID
+     * @param userdataPath Path to the app-specific userdata directory (e.g., "userdata/steamid/appid/")
+     * @param changeNumber Cloud change number (0 if not synced)
+     * @param files List of UserFileInfo representing the synced files
+     * @param prefixToPath Function to convert path prefix to absolute path
+     * @param syncState Sync state: 0=unknown, 1=syncing, 2=pending, 3=synced
+     */
+    fun writeRemoteCacheVdf(
+        appId: Int,
+        userdataPath: Path,
+        changeNumber: Long = 0,
+        files: List<UserFileInfo>,
+        prefixToPath: (String) -> String,
+        syncState: Int = 1,
+    ) {
+        try {
+            Files.createDirectories(userdataPath)
+
+            val remoteCacheFile = userdataPath.resolve("remotecache.vdf")
+
+            // Build VDF structure using KeyValue
+            val root = KeyValue(appId.toString())
+            root.children.add(KeyValue("ChangeNumber", changeNumber.toString()))
+            root.children.add(KeyValue("OSType", "-500")) // -500 = Windows
+
+            // Create an entry for each file using the filename as the key
+            // Sort files by their cloud path for consistent ordering
+            files.sortedBy { fileInfo ->
+                if (fileInfo.cloudPath.isBlank() || fileInfo.cloudPath == ".") {
+                    fileInfo.filename
+                } else {
+                    "${fileInfo.cloudPath}/${fileInfo.filename}".replace("\\", "/")
+                }.replace("{64BitSteamID}", SteamUtils.getSteamId64().toString())
+                    .replace("{Steam3AccountID}", SteamUtils.getSteam3AccountId().toString())
+            }.forEach { fileInfo ->
+                val fileSize = try {
+                    Files.size(fileInfo.getAbsPath(prefixToPath))
+                } catch (e: Exception) {
+                    0L
+                }
+
+                val fileSha = fileInfo.sha.joinToString("") { "%02x".format(it) }
+                val fileTimestamp = fileInfo.timestamp / 1000 // Convert to seconds
+
+                // Use the cloud path (cloudPath + filename) as the key
+                val cloudFilePath = if (fileInfo.cloudPath.isBlank() || fileInfo.cloudPath == ".") {
+                    fileInfo.filename
+                } else {
+                    "${fileInfo.cloudPath}/${fileInfo.filename}".replace("\\", "/")
+                }.replace("{64BitSteamID}", SteamUtils.getSteamId64().toString())
+                    .replace("{Steam3AccountID}", SteamUtils.getSteam3AccountId().toString())
+
+                val fileEntry = KeyValue(cloudFilePath)
+                fileEntry.children.add(KeyValue("root", "0"))
+                fileEntry.children.add(KeyValue("size", fileSize.toString()))
+                fileEntry.children.add(KeyValue("localtime", fileTimestamp.toString()))
+                fileEntry.children.add(KeyValue("time", fileTimestamp.toString()))
+                fileEntry.children.add(KeyValue("remotetime", fileTimestamp.toString()))
+                fileEntry.children.add(KeyValue("sha", fileSha))
+                fileEntry.children.add(KeyValue("syncstate", syncState.toString()))
+                fileEntry.children.add(KeyValue("persiststate", "0"))
+                fileEntry.children.add(KeyValue("platformstosync2", "-1"))
+
+                root.children.add(fileEntry)
+            }
+
+            // Write to file
+            root.saveToFile(remoteCacheFile.toFile(), false)
+
+            Timber.i("Wrote remotecache.vdf for app $appId to ${remoteCacheFile.toAbsolutePath()}")
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to write remotecache.vdf for app $appId")
         }
     }
 }
