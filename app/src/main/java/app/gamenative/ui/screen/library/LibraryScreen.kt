@@ -1320,7 +1320,7 @@ private suspend fun performLibraryUninstall(context: android.content.Context, it
             val steamAppId = item.appId.removePrefix("${GameSource.STEAM.name}_").toIntOrNull()
                 ?: return
             val success = SteamService.deleteApp(steamAppId)
-            PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(steamAppId))
+            PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(steamAppId, GameSource.STEAM))
             if (success) {
                 SnackbarManager.show(context.getString(R.string.steam_uninstall_success, item.name))
             } else {
