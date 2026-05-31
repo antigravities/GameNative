@@ -298,8 +298,8 @@
     <string name="settings_report_non_steam_subtitle">Show Epic, GOG, and Amazon game activity on your Steam profile as a non-Steam game</string>
     <string name="settings_screenshot_post_effects_title">Screenshot mode</string>
     <string name="settings_screenshot_post_effects_subtitle">Off: raw game frame (no effects). On: capture screen as shown (CRT, FSR, FXAA applied)</string>
-    <string name="settings_four_finger_screenshot_title">4-finger tap screenshot</string>
-    <string name="settings_four_finger_screenshot_subtitle">Tap with 4 fingers simultaneously to take a screenshot</string>
+    <string name="settings_four_finger_screenshot_title">4-finger tap gestures</string>
+    <string name="settings_four_finger_screenshot_subtitle">Tap with 4 fingers to take a screenshot; double-tap to save a replay clip</string>
     <string name="settings_screenshot_privacy_title">Screenshot Privacy</string>
     <string name="settings_screenshot_privacy_subtitle">Visibility when uploaded to Steam</string>
     <string name="settings_screenshot_privacy_private">Private</string>

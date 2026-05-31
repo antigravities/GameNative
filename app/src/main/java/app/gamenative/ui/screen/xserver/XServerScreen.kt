@@ -564,8 +564,11 @@ fun XServerScreen(
     var performanceHudDragOffsetX by remember { mutableStateOf(0f) }
     var performanceHudDragOffsetY by remember { mutableStateOf(0f) }
     val performanceHudTouchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
-    // Armed when 4 fingers are simultaneously down; fires a screenshot on the first lift.
+    // Armed when 4 fingers are simultaneously down.
     var fourFingerTapActive by remember { mutableStateOf(false) }
+    // Pending screenshot coroutine; non-null means we're inside the double-tap window.
+    // Cancelling it suppresses the screenshot so only the clip fires on a double-tap.
+    var fourFingerScreenshotJob by remember { mutableStateOf<Job?>(null) }
 
     fun persistPerformanceHudConfig(config: PerformanceHudConfig) {
         PrefManager.performanceHudShowFrameRate = config.showFrameRate
@@ -1672,8 +1675,10 @@ fun XServerScreen(
                     }
                 }
 
-                // 4-finger tap screenshot — outside the HUD null-guard so it fires
+                // 4-finger tap gestures — outside the HUD null-guard so they fire
                 // whether or not the performance HUD is enabled.
+                // Single tap → screenshot (after 500 ms); double tap → clip only (screenshot cancelled).
+                val FOUR_FINGER_DOUBLE_TAP_MS = 500L
                 when (event.actionMasked) {
                     MotionEvent.ACTION_POINTER_DOWN -> {
                         // Arm when the 4th finger touches down.
@@ -1683,10 +1688,23 @@ fun XServerScreen(
                     }
                     MotionEvent.ACTION_POINTER_UP -> {
                         // ACTION_POINTER_UP still counts the lifting pointer, so
-                        // pointerCount == 4 means we're transitioning 4 → 3: fire screenshot.
+                        // pointerCount == 4 means we're transitioning 4 → 3: one tap completed.
                         if (fourFingerTapActive && event.pointerCount == 4) {
                             fourFingerTapActive = false
-                            PluviaApp.inputControlsView?.triggerScreenshot()
+                            val pendingJob = fourFingerScreenshotJob
+                            if (pendingJob != null && pendingJob.isActive) {
+                                // Second tap within the window — cancel the screenshot, save a clip.
+                                pendingJob.cancel()
+                                fourFingerScreenshotJob = null
+                                PluviaApp.inputControlsView?.triggerSaveClip()
+                            } else {
+                                // First tap — delay the screenshot so a second tap can cancel it.
+                                fourFingerScreenshotJob = scope.launch {
+                                    delay(FOUR_FINGER_DOUBLE_TAP_MS)
+                                    PluviaApp.inputControlsView?.triggerScreenshot()
+                                    fourFingerScreenshotJob = null
+                                }
+                            }
                         } else if (event.pointerCount < 4) {
                             // A finger lifted before we reached 4 — disarm.
                             fourFingerTapActive = false
