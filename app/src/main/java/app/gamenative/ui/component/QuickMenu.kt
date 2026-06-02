@@ -109,6 +109,9 @@ object QuickMenuAction {
     const val PERFORMANCE_HUD = 6
     const val TOUCHSCREEN_MODE = 7
     const val DISABLE_MOUSE = 8
+
+    // HTML5-only QuickMenu actions. Wine path never emits these.
+    const val EDIT_OVERLAY = 9
 }
 
 private object QuickMenuTab {
@@ -257,6 +260,10 @@ fun QuickMenu(
     isTouchscreenModeActive: Boolean = false,
     onTouchGestureSettingsClick: () -> Unit = {},
     activeToggleIds: Set<Int> = emptySet(),
+    // HTML5 mode hides KEYBOARD / PERFORMANCE_HUD and shows EDIT_OVERLAY instead. uses the same
+    // TOUCHSCREEN_MODE entry as wine -- toggle + gear (gear opens gesture settings when ON).
+    // default false so wine path is unchanged.
+    isHtml5: Boolean = false,
     // LSFG hot-reload state (tab only visible when isLsfgAvailable)
     isLsfgAvailable: Boolean = false,
     lsfgMultiplier: Int = 2,
@@ -275,66 +282,44 @@ fun QuickMenu(
         accentColor = PluviaTheme.colors.accentDanger,
     )
 
+    val accentPurple = PluviaTheme.colors.accentPurple
+    // shared controller item -- both runtimes build it identically. branch only on diverging items.
+    fun quickItem(id: Int, icon: ImageVector, labelResId: Int) =
+        QuickMenuItem(id = id, icon = icon, labelResId = labelResId, accentColor = accentPurple)
+
     val controllerItems = buildList {
-        add(
-            QuickMenuItem(
-                id = QuickMenuAction.DISABLE_MOUSE,
-                icon = Icons.Filled.Mouse,
-                labelResId = R.string.disable_mouse_input,
-                accentColor = PluviaTheme.colors.accentPurple,
-            )
-        )
-        add(
-            QuickMenuItem(
-                id = QuickMenuAction.KEYBOARD,
-                icon = Icons.Default.Keyboard,
-                labelResId = R.string.keyboard,
-                accentColor = PluviaTheme.colors.accentPurple,
-            )
-        )
-        add(
-            QuickMenuItem(
-                id = QuickMenuAction.INPUT_CONTROLS,
-                icon = Icons.Default.TouchApp,
-                labelResId = R.string.input_controls,
-                accentColor = PluviaTheme.colors.accentPurple,
-            )
-        )
-        if (hasPhysicalController) {
-            add(
-                QuickMenuItem(
-                    id = QuickMenuAction.EDIT_PHYSICAL_CONTROLLER,
-                    icon = Icons.Default.Gamepad,
-                    labelResId = R.string.edit_physical_controller,
-                    accentColor = PluviaTheme.colors.accentPurple,
-                )
-            )
+        if (isHtml5) {
+            // HTML5 path: EDIT_OVERLAY mirrors wine's EDIT_CONTROLS (sets ICV.editMode=true).
+            // INPUT_CONTROLS opens overlay opacity / visibility dialog. TOUCHSCREEN_MODE toggles
+            // touch.js -- gear icon opens TouchGestureSettingsDialog when ON (wine parity).
+            add(quickItem(QuickMenuAction.EDIT_OVERLAY, Icons.Default.Edit, R.string.quickmenu_edit_overlay))
+        } else {
+            // Wine path leads with mouse + keyboard toggles.
+            add(quickItem(QuickMenuAction.DISABLE_MOUSE, Icons.Filled.Mouse, R.string.disable_mouse_input))
+            add(quickItem(QuickMenuAction.KEYBOARD, Icons.Default.Keyboard, R.string.keyboard))
         }
-        add(
-            QuickMenuItem(
-                id = QuickMenuAction.EDIT_CONTROLS,
-                icon = Icons.Default.Edit,
-                labelResId = R.string.edit_controls,
-                accentColor = PluviaTheme.colors.accentPurple,
-            )
-        )
-        add(
-            QuickMenuItem(
-                id = QuickMenuAction.TOUCHSCREEN_MODE,
-                icon = Icons.Default.Fingerprint,
-                labelResId = R.string.touchscreen_mode,
-                accentColor = PluviaTheme.colors.accentPurple,
-            )
-        )
+        // shared middle: input controls + (optional) physical controller editor.
+        add(quickItem(QuickMenuAction.INPUT_CONTROLS, Icons.Default.TouchApp, R.string.input_controls))
+        if (hasPhysicalController) {
+            add(quickItem(QuickMenuAction.EDIT_PHYSICAL_CONTROLLER, Icons.Default.Gamepad, R.string.edit_physical_controller))
+        }
+        // wine adds an overlay editor before the shared touchscreen-mode entry.
+        if (!isHtml5) {
+            add(quickItem(QuickMenuAction.EDIT_CONTROLS, Icons.Default.Edit, R.string.edit_controls))
+        }
+        add(quickItem(QuickMenuAction.TOUCHSCREEN_MODE, Icons.Default.Fingerprint, R.string.touchscreen_mode))
     }
 
-    var selectedTab by rememberSaveable {
-        mutableIntStateOf(
-            if (PrefManager.quickMenuLastTab == QuickMenuTab.LSFG && !isLsfgAvailable)
-                QuickMenuTab.HUD
-            else PrefManager.quickMenuLastTab
-        )
+    // HTML5 mode hides EFFECTS/TOOLS/HUD/LSFG -- coerce a stale persisted tab to CONTROLLER.
+    // Also coerce LSFG → HUD when LSFG isn't available on this container (master).
+    val initialTab = PrefManager.quickMenuLastTab.let { saved ->
+        when {
+            isHtml5 && (saved == QuickMenuTab.EFFECTS || saved == QuickMenuTab.TOOLS || saved == QuickMenuTab.LSFG) -> QuickMenuTab.CONTROLLER
+            saved == QuickMenuTab.LSFG && !isLsfgAvailable -> QuickMenuTab.HUD
+            else -> saved
+        }
     }
+    var selectedTab by rememberSaveable(isHtml5) { mutableIntStateOf(initialTab) }
     val selectedTabLabelResId = when (selectedTab) {
         QuickMenuTab.HUD -> R.string.performance_hud
         QuickMenuTab.LSFG -> R.string.lsfg_tab_title
@@ -457,6 +442,8 @@ fun QuickMenu(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
+                                // HUD tab works for both runtimes (FPS source differs but the
+                                // HUD view is renderer-agnostic). EFFECTS / TOOLS stay Wine-only.
                                 QuickMenuTabButton(
                                     icon = Icons.Default.QueryStats,
                                     contentDescriptionResId = R.string.performance_hud,
@@ -469,7 +456,7 @@ fun QuickMenu(
                                     modifier = Modifier.width(56.dp),
                                     focusRequester = hudTabFocusRequester,
                                 )
-                                if (isLsfgAvailable) {
+                                if (!isHtml5 && isLsfgAvailable) {
                                     QuickMenuTabButton(
                                         icon = Icons.Default.Speed,
                                         contentDescriptionResId = R.string.lsfg_tab_title,
@@ -483,7 +470,7 @@ fun QuickMenu(
                                         focusRequester = lsfgTabFocusRequester,
                                     )
                                 }
-                                if (renderer != null || glRenderer != null) {
+                                if (!isHtml5 && (renderer != null || glRenderer != null)) {
                                     QuickMenuTabButton(
                                         icon = Icons.Default.AutoFixHigh,
                                         contentDescriptionResId = R.string.screen_effects,
@@ -509,15 +496,20 @@ fun QuickMenu(
                                     modifier = Modifier.width(56.dp),
                                     focusRequester = controllerTabFocusRequester,
                                 )
+                                if (!isHtml5) {
                                 QuickMenuTabButton(
                                     icon = Icons.Default.BarChart,
                                     contentDescriptionResId = R.string.task_manager,
                                     selected = selectedTab == QuickMenuTab.TOOLS,
-                                    accentColor = PluviaTheme.colors.accentPurple,
-                                    onSelected = { selectedTab = QuickMenuTab.TOOLS },
+                                        accentColor = PluviaTheme.colors.accentPurple,
+                                        onSelected = {
+                                            selectedTab = QuickMenuTab.TOOLS
+                                            PrefManager.quickMenuLastTab = selectedTab
+                                        },
                                     modifier = Modifier.width(56.dp),
                                     focusRequester = toolsTabFocusRequester,
-                                )
+                                    )
+                                }
                             }
 
                             Box(
@@ -687,6 +679,7 @@ fun QuickMenu(
         if (isVisible) {
             repeat(3) {
                 try {
+                    // EFFECTS unreachable on html5 (tab hidden), so the when still routes correctly.
                     when (selectedTab) {
                         QuickMenuTab.HUD -> hudItemFocusRequester.requestFocus()
                         QuickMenuTab.LSFG -> lsfgItemFocusRequester.requestFocus()
@@ -1088,6 +1081,112 @@ private fun PerformanceHudQuickMenuTab(
             onToggle = {
                 onPerformanceHudConfigChanged(
                     performanceHudConfig.copy(showGpuTemperature = !performanceHudConfig.showGpuTemperature),
+                )
+            },
+            accentColor = accentColor,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        QuickMenuSectionHeader(
+            title = stringResource(R.string.performance_hud_metrics_advanced),
+            subtitle = stringResource(R.string.performance_hud_metrics_advanced_description),
+        )
+
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_frame_time),
+            enabled = performanceHudConfig.showFrameTime,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showFrameTime = !performanceHudConfig.showFrameTime),
+                )
+            },
+            accentColor = accentColor,
+        )
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_low_1_pct),
+            enabled = performanceHudConfig.showLow1Pct,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showLow1Pct = !performanceHudConfig.showLow1Pct),
+                )
+            },
+            accentColor = accentColor,
+        )
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_low_01_pct),
+            enabled = performanceHudConfig.showLow01Pct,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showLow01Pct = !performanceHudConfig.showLow01Pct),
+                )
+            },
+            accentColor = accentColor,
+        )
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_cpu_cores),
+            enabled = performanceHudConfig.showCpuCores,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showCpuCores = !performanceHudConfig.showCpuCores),
+                )
+            },
+            accentColor = accentColor,
+        )
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_thermal_status),
+            enabled = performanceHudConfig.showThermalStatus,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showThermalStatus = !performanceHudConfig.showThermalStatus),
+                )
+            },
+            accentColor = accentColor,
+        )
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_gpu_memory),
+            enabled = performanceHudConfig.showGpuMemory,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showGpuMemory = !performanceHudConfig.showGpuMemory),
+                )
+            },
+            accentColor = accentColor,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        QuickMenuSectionHeader(
+            title = stringResource(R.string.performance_hud_metrics_energy),
+            subtitle = stringResource(R.string.performance_hud_metrics_energy_description),
+        )
+
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_avg_power),
+            enabled = performanceHudConfig.showAvgPower,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showAvgPower = !performanceHudConfig.showAvgPower),
+                )
+            },
+            accentColor = accentColor,
+        )
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_energy_session),
+            enabled = performanceHudConfig.showEnergySession,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showEnergySession = !performanceHudConfig.showEnergySession),
+                )
+            },
+            accentColor = accentColor,
+        )
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_mah_used),
+            enabled = performanceHudConfig.showMahUsed,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showMahUsed = !performanceHudConfig.showMahUsed),
                 )
             },
             accentColor = accentColor,
@@ -1900,7 +1999,8 @@ private fun QuickMenuProcessRow(
                     when (keyEvent.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_BUTTON_A,
                         KeyEvent.KEYCODE_DPAD_CENTER,
-                        KeyEvent.KEYCODE_ENTER -> {
+                        KeyEvent.KEYCODE_ENTER,
+                        -> {
                             onEndProcess()
                             true
                         }
@@ -2031,7 +2131,9 @@ private fun QuickMenuItemRow(
                 .then(
                     if (isActive) {
                         Modifier.border(BorderStroke(2.dp, accentColor), CircleShape)
-                    } else Modifier
+                    } else {
+                        Modifier
+                    },
                 )
                 .clip(CircleShape)
                 .background(

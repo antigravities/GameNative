@@ -465,7 +465,9 @@ internal fun LibraryCarouselPane(
                                                 val tiltInfluence = if (CAROUSEL_TILT_ANGLE > 0.1f) tiltAngle / CAROUSEL_TILT_ANGLE else 1f
                                                 val baseOffsetRatio = CAROUSEL_SIDE_OFFSET_RATIO + (distanceInSteps * CAROUSEL_STEP_OFFSET_RATIO)
                                                 val baseShift = direction * cardWidthPx * baseOffsetRatio * tiltInfluence
-                                                val edgeOffset = if (listIndex == 0 && layoutInfo.visibleItemsInfo.firstOrNull()?.index == 0) {
+                                                val edgeOffset = if (listIndex == 0 &&
+                                                    layoutInfo.visibleItemsInfo.firstOrNull()?.index == 0
+                                                ) {
                                                     firstTileOffsetPx
                                                 } else {
                                                     0f

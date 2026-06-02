@@ -68,9 +68,11 @@ class CustomGameAppScreen : BaseAppScreen() {
         fun findSteamGridDBImage(folder: File, imageType: String): String? {
             return folder.listFiles()?.firstOrNull { file ->
                 file.name.startsWith("steamgriddb_$imageType") &&
-                (file.name.endsWith(".png", ignoreCase = true) ||
-                 file.name.endsWith(".jpg", ignoreCase = true) ||
-                 file.name.endsWith(".webp", ignoreCase = true))
+                    (
+                        file.name.endsWith(".png", ignoreCase = true) ||
+                            file.name.endsWith(".jpg", ignoreCase = true) ||
+                            file.name.endsWith(".webp", ignoreCase = true)
+                        )
             }?.let { Uri.fromFile(it).toString() }
         }
 
@@ -167,6 +169,7 @@ class CustomGameAppScreen : BaseAppScreen() {
             logoUrl = logoUrl,
             capsuleUrl = capsuleUrl,
             headerUrl = headerUrl,
+            runtime = ContainerUtils.resolveRuntime(context, libraryItem.appId),
         )
     }
 
@@ -442,12 +445,14 @@ class CustomGameAppScreen : BaseAppScreen() {
 
     override fun loadContainerData(context: Context, libraryItem: LibraryItem): ContainerData {
         val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
-        return ContainerUtils.toContainerData(container)
+        return ContainerUtils.mergeHtml5SidecarFields(
+            ContainerUtils.toContainerData(container),
+            libraryItem.appId,
+        )
     }
 
-    override fun saveContainerConfig(context: Context, libraryItem: LibraryItem, config: ContainerData) {
-        ContainerUtils.applyToContainer(context, libraryItem.appId, config)
-    }
+    override suspend fun saveContainerConfig(context: Context, libraryItem: LibraryItem, config: ContainerData): Boolean =
+        ContainerUtils.applyToContainerGated(context, libraryItem.appId, config)
 
     override fun supportsContainerConfig(): Boolean = true
 
@@ -458,7 +463,8 @@ class CustomGameAppScreen : BaseAppScreen() {
         libraryItem: LibraryItem,
         onDismiss: () -> Unit,
         onEditContainer: () -> Unit,
-        onBack: () -> Unit
+        onBack: () -> Unit,
+        onClickPlay: (Boolean) -> Unit,
     ) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
