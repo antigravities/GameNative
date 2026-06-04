@@ -55,6 +55,9 @@ object SteamUtils {
         val exeRunDirOverride: String? = null,
     )
 
+    fun getBaseAchievementIconUrl(appId: Int): String =
+        "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/$appId/"
+
     /**
      * True when a stored Steam session exists (offline-launch gate).
      * Matches GOG/Epic/Amazon AuthManager.hasStoredCredentials convention.

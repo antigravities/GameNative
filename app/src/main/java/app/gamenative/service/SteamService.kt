@@ -122,6 +122,7 @@ import `in`.dragonbra.javasteam.steam.handlers.steamuser.callback.PlayingSession
 import `in`.dragonbra.javasteam.enums.ELeaderboardDataRequest
 import `in`.dragonbra.javasteam.steam.handlers.steamuserstats.Stats
 import `in`.dragonbra.javasteam.steam.handlers.steamuserstats.SteamUserStats
+import app.gamenative.ui.data.Achievement
 import app.gamenative.statsgen.LeaderboardDefinition
 import app.gamenative.statsgen.LeaderboardScoreEntry
 import app.gamenative.statsgen.LeaderboardsGenerator
@@ -4010,6 +4011,31 @@ class SteamService : Service(), IChallengeUrlChanged {
             return runCatching { handler.getUserStats(appId, steamId).await() }
                 .onFailure { Timber.tag("SteamService").w(it, "fetchUserStatsForApp failed for appId=$appId") }
                 .getOrNull()
+        }
+
+        // Fetches achievements for a Steam app for display in the game details page.
+        suspend fun fetchAchievementsForDisplay(appId: Int): List<Achievement>? {
+            if (!isConnected) return null
+            return try {
+                val steamUser = instance?._steamUser ?: return null
+                val userStats = instance?._steamUserStats?.getUserStats(appId, steamUser.steamID!!)?.await() ?: return null
+                val baseIconUrl = SteamUtils.getBaseAchievementIconUrl(appId)
+                userStats.getExpandedAchievements().map { block ->
+                    Achievement(
+                        displayName = block.displayName ?: block.name ?: "",
+                        name = block.name,
+                        isUnlocked = block.isUnlocked,
+                        description = block.description ?: "",
+                        unlockTimestamp = block.unlockTimestamp,
+                        hidden = block.hidden,
+                        icon = if (!block.icon.isNullOrEmpty()) "$baseIconUrl${block.icon}" else "",
+                        iconGray = if (!block.iconGray.isNullOrEmpty()) "$baseIconUrl${block.iconGray}" else null,
+                    )
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "fetchAchievementsForDisplay failed for appId=$appId")
+                null
+            }
         }
 
         suspend fun generateAchievements(appId: Int, configDirectory: String) {
