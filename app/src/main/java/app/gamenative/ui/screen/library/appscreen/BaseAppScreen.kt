@@ -36,6 +36,8 @@ import app.gamenative.ui.enums.AppOptionMenuType
 import app.gamenative.ui.util.ContainerConfigTransfer
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.component.dialog.LoadingDialog
+import app.gamenative.ui.data.Achievement
+import app.gamenative.ui.data.DownloadDisplayDetails
 import app.gamenative.utils.BestConfigService
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.GameCompatibilityCache
@@ -1019,6 +1021,32 @@ abstract class BaseAppScreen {
         var hasPartialDownloadState by remember(libraryItem.appId) { mutableStateOf(false) }
         var isQueuedState by remember(libraryItem.appId) { mutableStateOf(false) }
 
+        var achievementsState by remember(libraryItem.gameId) {
+            mutableStateOf<List<Achievement>?>(null)
+        }
+
+        // Fetch achievements for display on the game details page (Steam only for now).
+        LaunchedEffect(libraryItem.gameId) {
+            when (libraryItem.gameSource) {
+                GameSource.STEAM -> {
+                    try {
+                        achievementsState = withContext(Dispatchers.IO) {
+                            app.gamenative.service.SteamService.fetchAchievementsForDisplay(libraryItem.gameId)
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to fetch achievements for gameId=${libraryItem.gameId}: ${e.message}")
+                        achievementsState = null
+                    }
+                }
+                GameSource.EPIC -> { }
+                GameSource.GOG -> { }
+                GameSource.AMAZON -> { }
+                GameSource.CUSTOM_GAME -> { }
+            }
+        }
+
         val uiScope = rememberCoroutineScope()
 
         suspend fun performStateRefresh(includeUpdatePending: Boolean) {
@@ -1289,17 +1317,22 @@ abstract class BaseAppScreen {
         val launchActivity = context as? android.app.Activity
         var showReadiness by remember { mutableStateOf(false) }
 
-        // Render the common UI
-        app.gamenative.ui.screen.library.AppScreenContent(
-            displayInfo = displayInfo,
+        val downloadDisplayDetails = DownloadDisplayDetails(
             isInstalled = isInstalledState,
             isValidToDownload = isValidToDownloadState,
             isDownloading = isDownloadingState,
             downloadProgress = downloadProgressState,
             hasPartialDownload = hasPartialDownloadState,
-            isQueued = isQueuedState,
             isUpdatePending = isUpdatePendingState,
+        )
+
+        // Render the common UI
+        app.gamenative.ui.screen.library.AppScreenContent(
+            displayInfo = displayInfo,
+            downloadDisplayDetails = downloadDisplayDetails,
+            isQueued = isQueuedState,
             downloadInfo = downloadInfo,
+            achievements = achievementsState,
             onDownloadInstallClick = {
                 if (app.gamenative.launch.LaunchReadiness.pending) {
                     showReadiness = true
