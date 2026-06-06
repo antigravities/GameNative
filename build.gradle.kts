@@ -13,6 +13,7 @@ plugins {
 }
 
 configurations.configureEach {
-    resolutionStrategy.cacheChangingModulesFor(0, TimeUnit.SECONDS)
-    resolutionStrategy.cacheDynamicVersionsFor(0, TimeUnit.SECONDS)
+    // 1-hour TTL for SNAPSHOTs (e.g. JavaSteam). Use --refresh-dependencies to force an immediate re-check.
+    resolutionStrategy.cacheChangingModulesFor(1, TimeUnit.HOURS)
+    resolutionStrategy.cacheDynamicVersionsFor(1, TimeUnit.HOURS)
 }
