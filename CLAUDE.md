@@ -61,12 +61,14 @@ Services act as the repository layer for platform data.
 
 #### Database — `app/src/main/java/app/gamenative/db/`
 
-- **ORM**: Room 2.8.4; database class `PluviaDatabase` (currently schema v19)
+- **ORM**: Room 2.8.4; database class `PluviaDatabase` (currently schema v23 — see the `version =` field in `PluviaDatabase.kt` for the authoritative value)
 - **Schema migrations**: `app/schemas/` — auto-migrations enabled; destructive fallback for dev
 - **DAOs**: `SteamAppDao`, `GOGGameDao`, `EpicGameDao`, `AmazonGameDao`, `SteamLicenseDao`, `CachedLicenseDao`, `AppInfoDao`, `DownloadingAppInfoDao`, and more
 - **Entities**: `app/src/main/java/app/gamenative/data/` — `SteamApp`, `GOGGame`, `EpicGame`, `AmazonGame`, `UserFileInfo`, `SteamFriend`, etc.
 
 When making a schema change, increment the schema version in `PluviaDatabase` and add a migration (or auto-migration spec).
+
+> To add a whole new storefront (entity + DAO + service + UI wiring), follow `docs/new-store.md`.
 
 #### Dependency Injection — `app/src/main/java/app/gamenative/di/`
 
