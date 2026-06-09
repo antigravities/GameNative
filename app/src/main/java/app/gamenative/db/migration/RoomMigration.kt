@@ -64,6 +64,14 @@ internal val ROOM_MIGRATION_V23_to_V24 = object : Migration(23, 24) {
         connection.execSQL(
             "ALTER TABLE steam_app ADD COLUMN is_adult INTEGER NOT NULL DEFAULT 0"
         )
+        // Seed name_sort_key with an ASCII-lowercased name so the very first post-upgrade render
+        // already orders the page by name. Without this, every existing row has name_sort_key = ''
+        // until the ICU backfill (backfillSortKeysOnce) runs, so the paginated query's ORDER BY
+        // name_sort_key, id falls back to id — showing the lowest-appid rows instead of the
+        // alphabetical page. LOWER(name) ≈ the ICU key for Latin titles, so the later backfill
+        // refinement is invisible for those; only punctuation/diacritic/non-Latin titles shift
+        // slightly once the ICU key lands. One bulk UPDATE, one-time, on the upgrade.
+        connection.execSQL("UPDATE steam_app SET name_sort_key = LOWER(name)")
         // Drop the onOpen-created indexes so the migrated schema matches the (index-less) expected
         // v24 TableInfo. onOpen recreates them (idempotently) on this same open, after validation.
         connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_dlc_for_app_id")
