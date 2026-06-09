@@ -2,6 +2,7 @@ package app.gamenative.data
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import app.gamenative.enums.AppType
 import app.gamenative.enums.ControllerSupport
@@ -12,7 +13,14 @@ import app.gamenative.service.SteamService
 import `in`.dragonbra.javasteam.enums.ELicenseFlags
 import java.util.EnumSet
 
-@Entity("steam_app")
+@Entity(
+    "steam_app",
+    indices = [
+        Index("dlc_for_app_id"),
+        Index("package_id"),
+        Index(value = ["name_sort_key", "id"]),
+    ],
+)
 data class SteamApp(
     @PrimaryKey val id: Int,
     @ColumnInfo("package_id")
@@ -32,6 +40,13 @@ data class SteamApp(
     // single column instead of deserializing the depots blob for every owned app.
     @ColumnInfo("size_bytes", defaultValue = "0")
     val sizeBytes: Long = 0,
+
+    // Precomputed locale-invariant sort key (see NameSortKey), written at PICS-parse time so the
+    // library pagination query can ORDER BY it in SQL instead of transliterating ~45k names in
+    // Kotlin on every filter. Empty on rows synced before this column existed until the one-time
+    // backfill (SteamService.backfillSortKeysOnce) populates them.
+    @ColumnInfo("name_sort_key", defaultValue = "")
+    val nameSortKey: String = "",
 
     @ColumnInfo("depots")
     val depots: Map<Int, DepotInfo> = emptyMap(),

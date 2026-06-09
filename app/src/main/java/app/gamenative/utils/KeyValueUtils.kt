@@ -50,7 +50,9 @@ fun KeyValue.vrClassification(): VrClassification? {
 
 fun KeyValue.generateSteamApp(): SteamApp {
     val vr = vrClassification()
-
+    // Hoisted so the precomputed nameSortKey column below can reuse it without
+    // re-parsing the KeyValue tree.
+    val name = this["common"]["name"].value.orEmpty()
     return SteamApp(
         id = this["appid"].asInteger(INVALID_APP_ID),
         depots = this["depots"].children
@@ -90,7 +92,8 @@ fun KeyValue.generateSteamApp(): SteamApp {
                 timeUpdated = Date(it["timeupdated"].asLong() * 1000L),
             )
         },
-        name = this["common"]["name"].value.orEmpty(),
+        name = name,
+        nameSortKey = NameSortKey.of(name),
         type = AppType.from(this["common"]["type"].value),
         osList = OS.from(this["common"]["oslist"].value),
         releaseState = ReleaseState.from(this["common"]["releasestate"].value),
