@@ -58,10 +58,12 @@ import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.FileUtils
 import app.gamenative.utils.LicenseSerializer
 import app.gamenative.utils.MarkerUtils
+import app.gamenative.utils.NameSortKey
 import app.gamenative.utils.Net
 import app.gamenative.utils.SteamUtils
 import app.gamenative.utils.CURRENT_UFS_PARSE_VERSION
 import app.gamenative.utils.generateSteamApp
+import app.gamenative.data.ADULT_CONTENT_DESCRIPTOR_IDS
 import app.gamenative.workshop.WorkshopManager
 import com.winlator.container.Container
 import com.winlator.xenvironment.ImageFs
@@ -1305,6 +1307,58 @@ class SteamService : Service(), IChallengeUrlChanged {
                     Timber.i("size_bytes backfill complete: updated $updated apps")
                 } catch (e: Exception) {
                     Timber.e(e, "size_bytes backfill failed; will retry on next launch")
+                }
+            }
+        }
+
+        // One-time backfill of name_sort_key + is_adult for rows synced before those columns
+        // existed (they default to '' / 0). New PICS writes populate them inline via
+        // generateSteamApp(), so this only matters for existing installs upgrading to v24. Mirrors
+        // backfillSizesOnce: id-cursor paging (persisted so a restart resumes), per-page transaction,
+        // and inter-page yields so this one-time scan stays off the hot path. Projection is tiny
+        // (id, name, content_descriptors) so no depots/config blobs are loaded and no adaptive
+        // CursorWindow handling is needed.
+        suspend fun backfillSortKeysOnce() {
+            if (PrefManager.librarySortKeyBackfillDone) {
+                Timber.i("name_sort_key backfill: already done, skipping")
+                return
+            }
+            val svc = instance ?: run {
+                Timber.w("name_sort_key backfill: no SteamService instance, skipping")
+                return
+            }
+            withContext(Dispatchers.IO) {
+                try {
+                    var afterId = PrefManager.librarySortKeyBackfillCursor
+                    Timber.i("name_sort_key backfill: starting from afterId=$afterId")
+                    var updated = 0
+                    while (true) {
+                        val page = svc.appDao._getSortKeyBackfillRowsAfter(afterId, 500)
+                        if (page.isEmpty()) break
+
+                        // Batch each page's writes into one transaction instead of 500 commits.
+                        svc.db.withTransaction {
+                            for (row in page) {
+                                svc.appDao._updateSortKeyAndAdult(
+                                    appId = row.id,
+                                    sortKey = NameSortKey.of(row.name),
+                                    isAdult = row.contentDescriptors.any { it in ADULT_CONTENT_DESCRIPTOR_IDS },
+                                )
+                            }
+                        }
+                        updated += page.size
+                        afterId = page.last().id
+                        // Persist the high-water mark so a restart resumes here.
+                        PrefManager.librarySortKeyBackfillCursor = afterId
+                        Timber.d("name_sort_key backfill: processed $updated apps so far (afterId=$afterId)")
+                        yield()
+                        delay(75L)
+                    }
+
+                    PrefManager.librarySortKeyBackfillDone = true
+                    Timber.i("name_sort_key backfill complete: updated $updated apps")
+                } catch (e: Exception) {
+                    Timber.e(e, "name_sort_key backfill failed; will retry on next launch")
                 }
             }
         }

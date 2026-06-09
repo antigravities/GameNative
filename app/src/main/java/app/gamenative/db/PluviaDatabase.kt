@@ -58,7 +58,7 @@ const val DATABASE_NAME = "pluvia.db"
         DownloadingAppInfo::class,
         SteamUnlockedBranch::class,
     ],
-    version = 25,
+    version = 26,
     // For db migration, visit https://developer.android.com/training/data-storage/room/migrating-db-versions for more information
     exportSchema = true, // It is better to handle db changes carefully, as GN is getting much more users.
     autoMigrations = [
@@ -83,6 +83,7 @@ const val DATABASE_NAME = "pluvia.db"
         AutoMigration(from = 22, to = 23), // Added local library play history table
         AutoMigration(from = 23, to = 24), // Added content_descriptors to steam_app (hide-adult-games)
         AutoMigration(from = 24, to = 25), // Added size_bytes to steam_app (precomputed download size)
+        AutoMigration(from = 25, to = 26), // Added name_sort_key + is_adult + steam_app indexes (SQL library pagination)
     ]
 )
 @TypeConverters(

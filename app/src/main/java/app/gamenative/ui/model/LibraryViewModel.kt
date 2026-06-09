@@ -24,6 +24,9 @@ import app.gamenative.db.dao.SteamAppDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.EpicGameDao
 import app.gamenative.db.dao.AmazonGameDao
+import app.gamenative.db.dao.buildLibraryPageQuery
+import app.gamenative.manager.CategoryManager
+import app.gamenative.utils.NameSortKey
 import app.gamenative.service.DownloadService
 import app.gamenative.service.SteamService
 import app.gamenative.service.amazon.AmazonArtwork
@@ -166,16 +169,6 @@ class LibraryViewModel @Inject constructor(
     // Pairs a LibraryItem with its installed state for sorting and final list assembly.
     private data class LibraryEntry(val item: LibraryItem, val isInstalled: Boolean, val lastPlayed: Long = 0L)
 
-    // Converts any-script game names to lowercase Latin for locale-invariant sorting (e.g. Cyrillic
-    // "А" sorts alongside Latin "A"). lazy{} defers construction to first use; getInstance() is
-    // thread-safe. The rule chain: transliterate script → Latin, NFD-decompose, strip diacritics,
-    // NFC-recompose, then lowercase.
-    private val nameTransliterator by lazy {
-        android.icu.text.Transliterator.getInstance(
-            "Any-Latin; NFD; [:Nonspacing Mark:] Remove; NFC; Lower",
-        )
-    }
-
     init {
         viewModelScope.launch(Dispatchers.IO) {
             if (gpuName != "Unknown GPU") {
@@ -267,6 +260,10 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             SteamService.picsSyncPending.first { it == 0 }
             delay(5_000L)
+            // Sort-key backfill first: it drives the library's visible ordering, so existing
+            // installs upgrading to v24 get correct ordering before the (informational) size
+            // backfill runs. Both are no-ops after their first successful run.
+            SteamService.backfillSortKeysOnce()
             SteamService.backfillSizesOnce()
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -686,8 +683,26 @@ class LibraryViewModel @Inject constructor(
         Timber.tag("LibraryViewModel").d("onFilterApps - appList.size: ${appList.size}, isFirstLoad: $isFirstLoad")
         return viewModelScope.launch(Dispatchers.IO) {
             _state.update { it.copy(isLoading = true) }
-
             val currentState = _state.value
+            // Route the COMPATIBLE filter (a name-keyed network/in-memory cache) and family-sharing
+            // (a multi-valued owner JSON column) through the original in-memory path — neither can be
+            // expressed in SQL, and both yield small or rare result sets. Everything else (the common
+            // browse/search case) takes the SQL fast path, which materializes only the visible page.
+            if (currentState.appInfoSortType.contains(AppFilter.COMPATIBLE) ||
+                SteamService.familyMembers.isNotEmpty()
+            ) {
+                filterAppsInMemory(currentState, paginationPage)
+            } else {
+                filterAppsSql(currentState, paginationPage)
+            }
+            if (isFirstLoad) isFirstLoad = false
+        }
+    }
+
+    // Original full-list filtering, retained verbatim as the fallback for filters that can't be
+    // expressed in SQL (COMPATIBLE, family-sharing). Loads the whole appList, filters/sorts it all,
+    // then paginates with take(endIndex).
+    private suspend fun filterAppsInMemory(currentState: LibraryState, paginationPage: Int) {
             val currentFilter = AppFilter.getAppType(currentState.appInfoSortType)
 
             // Fetch download directory apps once on IO thread and cache as a HashSet for O(1) lookups
@@ -775,17 +790,14 @@ class LibraryViewModel @Inject constructor(
                         .toList()
                 }
 
-            // Filter Steam apps first (no pagination yet)
-            // Note: Don't sort individual lists - we'll sort the combined list for consistent ordering
+            // Filter Steam apps (no sort here): the combined list is fully re-sorted below by
+            // sortComparator, so any ordering applied at this stage was pure wasted work — a full
+            // ~45k sort (with a per-comparison String.lowercase() allocation) whose result was
+            // immediately discarded. Just apply the compatibility filter and move on.
             val filteredSteamApps: List<SteamAppSummary> = steamFilteredBeforeCompatibility
                 .asSequence()
                 .filter { item -> passesCompatibleFilter(item.name) }
                 .filter { item -> passesStatsFilters(currentState, GameSource.STEAM, item.name) }
-                .sortedWith(
-                    compareByDescending<SteamAppSummary> {
-                        isInDownloadDirectory(it)
-                    }.thenBy { it.name.lowercase(java.util.Locale.ROOT) },
-                )
                 .toList()
 
             // Map Steam apps to UI items.
@@ -1030,14 +1042,11 @@ class LibraryViewModel @Inject constructor(
                 if (includeAmazon) addAll(amazonEntries)
             }
 
-            // Pre-compute one sort key per entry. trim() removes surrounding whitespace;
-            // trimStart strips leading punctuation/symbols so titles like "!AnyWay!" sort at A and
-            // ""Glow Ball"" sorts at G, matching Steam's behaviour. Transliteration then converts
-            // any script to lowercase Latin so Cyrillic "А" sorts alongside Latin "A", etc.
+            // Pre-compute one sort key per entry via the shared NameSortKey (locale-invariant: any
+            // script → lowercase Latin, leading punctuation stripped). Identical to the key persisted
+            // in steam_app.name_sort_key, so this path and the SQL path order names the same way.
             val sortKeyOf = combined.associate { entry ->
-                entry.item.appId to nameTransliterator.transliterate(
-                    entry.item.name.trim().trimStart { !it.isLetterOrDigit() }
-                )
+                entry.item.appId to NameSortKey.of(entry.item.name)
             }
 
             // Pre-fetch favorites set once — O(1) ConcurrentHashMap lookup on the live Set reference.
@@ -1187,7 +1196,408 @@ class LibraryViewModel @Inject constructor(
                     localCount = if (currentState.showCustomGamesInLibrary) customEntries.size else 0,
                 )
             }
+    }
+
+    /**
+     * SQL fast path: filtering, sorting, and LIMIT happen in SQLite so only the visible page of Steam
+     * rows is materialized (instead of all ~45k). Non-Steam sources (small) are loaded in memory and
+     * merged with the Steam page. Used for the common case; [filterAppsInMemory] handles COMPATIBLE /
+     * family-sharing. Note: pagination here is cumulative (take first endIndex), matching the existing
+     * "load more" behaviour — so deep paging approaches a full load, but early pages stay cheap.
+     */
+    private suspend fun filterAppsSql(currentState: LibraryState, paginationPage: Int) {
+        val currentFilter = AppFilter.getAppType(currentState.appInfoSortType)
+        val typeCodes = currentFilter.map { it.code }
+        val currentTab = currentState.currentTab
+
+        // Filesystem-based installed detection, used for the per-item badge (and the comparator's
+        // installed tier) so the displayed "installed" state stays accurate even though the SQL
+        // ORDER BY uses app_info.is_downloaded as its tier proxy.
+        val downloadDirectorySet =
+            (DownloadService.getDownloadDirectoryApps() + SteamService.getImportedAppDirs()).toHashSet()
+        fun isInDownloadDirectory(item: SteamAppSummary): Boolean {
+            val primaryName = SteamService.getAppDirName(item)
+            val altName = item.name
+            return downloadDirectorySet.contains(primaryName) ||
+                (altName.isNotEmpty() && altName != primaryName && downloadDirectorySet.contains(altName))
         }
+
+        // Source include flags: ALL tab honours user prefs, other tabs use their presets.
+        val includeSteam = if (currentTab == LibraryTab.ALL) currentState.showSteamInLibrary else currentTab.showSteam
+        val includeOpen = if (currentTab == LibraryTab.ALL) currentState.showCustomGamesInLibrary else currentTab.showCustom
+        val includeGOG = (if (currentTab == LibraryTab.ALL) currentState.showGOGInLibrary else currentTab.showGoG) &&
+            GOGService.hasStoredCredentials(context)
+        val includeEpic = (if (currentTab == LibraryTab.ALL) currentState.showEpicInLibrary else currentTab.showEpic) &&
+            EpicService.hasStoredCredentials(context)
+        val includeAmazon = (if (currentTab == LibraryTab.ALL) currentState.showAmazonInLibrary else currentTab.showAmazon) &&
+            AmazonService.hasStoredCredentials(context)
+
+        val installedFilter = currentTab.installedOnly || currentState.appInfoSortType.contains(AppFilter.INSTALLED)
+        val hideAdult = if (PrefManager.hideAdultContent) 1 else 0
+        val includeExpired = if (currentState.appInfoSortType.contains(AppFilter.EXPIRED)) 1 else 0
+        val search = currentState.searchQuery
+
+        // Hidden / Favorites / Category live in CategoryManager as composite ids ("STEAM_570"); the
+        // SQL queries need the Steam int ids. We pass a [-1] sentinel (never a real app id) instead of
+        // an empty list so Room never emits `IN ()`.
+        val hiddenComposite = CategoryManager.getAppsInCategory(CategoryManager.HIDDEN_CATEGORY)
+        val favoriteComposite = CategoryManager.getAppsInCategory(CategoryManager.FAVORITES_CATEGORY)
+        val viewingHidden = CategoryManager.HIDDEN_CATEGORY in currentState.selectedCategories
+        val selectedCats = currentState.selectedCategories
+
+        val favSteamIds = steamIdsFrom(favoriteComposite)
+        val hiddenSteamIds = if (viewingHidden) emptyList() else steamIdsFrom(hiddenComposite)
+        val categorySteamIds = if (selectedCats.isNotEmpty()) {
+            steamIdsFrom(selectedCats.flatMapTo(HashSet()) { CategoryManager.getAppsInCategory(it) })
+        } else {
+            emptyList()
+        }
+        val filterByCategory = if (selectedCats.isNotEmpty()) 1 else 0
+
+        val favParam = favSteamIds.ifEmpty { listOf(-1) }
+        val hiddenParam = hiddenSteamIds.ifEmpty { listOf(-1) }
+        val categoryParam = categorySteamIds.ifEmpty { listOf(-1) }
+
+        // Mirrors the in-memory effectiveCombined hidden/category exclusion, applied to non-Steam
+        // entries (Steam is filtered in SQL). Returns true if the appId should be shown.
+        fun passesHiddenCategory(appId: String): Boolean = if (selectedCats.isNotEmpty()) {
+            val allowed = selectedCats.flatMapTo(HashSet()) { CategoryManager.getAppsInCategory(it) }
+            appId in allowed && (viewingHidden || appId !in hiddenComposite)
+        } else {
+            appId !in hiddenComposite
+        }
+
+        // ── Steam counts ──
+        // Badge count ignores hidden/category (matches the in-memory badge, which uses pre-hidden
+        // sizes). Total count applies them (drives totalAppsInFilter / pagination).
+        val steamCountable = typeCodes.isNotEmpty()
+        suspend fun steamCount(hidden: List<Int>, byCat: Int, cats: List<Int>): Int = if (installedFilter) {
+            steamAppDao.countInstalledOwnedAppSummaries(typeCodes, search, hideAdult, hidden, byCat, cats, includeExpired = includeExpired)
+        } else {
+            steamAppDao.countOwnedAppSummaries(typeCodes, search, hideAdult, hidden, byCat, cats, includeExpired = includeExpired)
+        }
+        val steamBadgeCount = if (steamCountable) steamCount(listOf(-1), 0, listOf(-1)) else 0
+        val steamTotalCount = if (steamCountable && includeSteam) steamCount(hiddenParam, filterByCategory, categoryParam) else 0
+
+        // ── Non-Steam sources (small; built fully in memory) ──
+        val customGameItems = if (currentState.appInfoSortType.contains(AppFilter.GAME)) {
+            CustomGameScanner.scanAsLibraryItems(query = search)
+        } else {
+            emptyList()
+        }
+        // Dedup custom games that are actually imported Steam installs: find which "STEAM_x" candidates
+        // are owned Steam apps (page-stable, unlike deduping against only the fetched Steam page).
+        val steamPrefix = "${GameSource.STEAM.name}_"
+        val steamDupAppIds: Set<String> = if (customGameItems.isNotEmpty()) {
+            val candidateIds = customGameItems.mapNotNull {
+                if (it.appId.startsWith(steamPrefix)) it.appId.removePrefix(steamPrefix).toIntOrNull() else null
+            }
+            if (candidateIds.isNotEmpty()) {
+                steamAppDao._getOwnedAppSummariesByIds(candidateIds, includeExpired = includeExpired)
+                    .mapTo(HashSet()) { "$steamPrefix${it.id}" }
+            } else {
+                emptySet()
+            }
+        } else {
+            emptySet()
+        }
+        // COMPATIBLE is never active on this path, so the compatibility predicate is a no-op.
+        val nonSteam = buildNonSteamEntries(currentState, customGameItems, steamDupAppIds) { true }
+
+        // Apply hidden/category to the included non-Steam entries (Steam already filtered in SQL).
+        val gogFinal = if (includeGOG) nonSteam.gogEntries.filter { passesHiddenCategory(it.item.appId) } else emptyList()
+        val epicFinal = if (includeEpic) nonSteam.epicEntries.filter { passesHiddenCategory(it.item.appId) } else emptyList()
+        val amazonFinal = if (includeAmazon) nonSteam.amazonEntries.filter { passesHiddenCategory(it.item.appId) } else emptyList()
+        val customFinal = if (includeOpen) nonSteam.customEntries.filter { passesHiddenCategory(it.item.appId) } else emptyList()
+        val nonSteamFinalCount = gogFinal.size + epicFinal.size + amazonFinal.size + customFinal.size
+
+        // ── Pagination math ──
+        val pageSize = PrefManager.itemsPerPage
+        paginationCurrentPage = paginationPage
+        val total = steamTotalCount + nonSteamFinalCount
+        lastPageInCurrentFilter = if (total == 0) 0 else (total - 1) / pageSize
+        val endIndex = min((paginationPage + 1) * pageSize, total)
+
+        // ── Steam page slice ──
+        // Fetch the top endIndex Steam rows (already filtered/ordered/limited in SQL). Merging these
+        // with all non-Steam and taking endIndex yields the correct global top-endIndex, because the
+        // merged top endIndex can use at most endIndex Steam rows.
+        val steamPage = if (includeSteam && steamCountable && endIndex > 0) {
+            val query = buildLibraryPageQuery(
+                types = typeCodes,
+                search = search,
+                hideAdult = hideAdult,
+                hiddenIds = hiddenParam,
+                filterByCategory = filterByCategory,
+                categoryIds = categoryParam,
+                favIds = favParam,
+                sortOption = currentState.currentSortOption,
+                installedFilter = installedFilter,
+                limit = endIndex,
+                offset = 0,
+                includeExpired = includeExpired,
+            )
+            steamAppDao.pageOwnedAppSummaries(query)
+        } else {
+            emptyList()
+        }
+        val steamPageEntries = steamPage.map { item ->
+            LibraryEntry(
+                item = LibraryItem(
+                    index = 0,
+                    appId = "$steamPrefix${item.id}",
+                    name = item.name,
+                    iconHash = item.clientIconHash,
+                    capsuleImageUrl = item.getCapsuleUrl(),
+                    headerImageUrl = item.headerUrl,
+                    heroImageUrl = item.getHeroUrl(),
+                    isShared = (PrefManager.steamUserAccountId != 0 && !item.ownerAccountId.contains(PrefManager.steamUserAccountId)),
+                    sizeBytes = item.sizeBytes,
+                ),
+                isInstalled = isInDownloadDirectory(item),
+            )
+        }
+
+        // ── Merge + sort + slice ──
+        val combined = buildList {
+            if (includeSteam) addAll(steamPageEntries)
+            if (includeOpen) addAll(customFinal)
+            if (includeGOG) addAll(gogFinal)
+            if (includeEpic) addAll(epicFinal)
+            if (includeAmazon) addAll(amazonFinal)
+        }
+        val sortKeyOf = combined.associate { it.item.appId to NameSortKey.of(it.item.name) }
+        val sortComparator = librarySortComparator(currentState, favoriteComposite, sortKeyOf)
+        var pagedList = combined.sortedWith(sortComparator).take(endIndex).mapIndexed { idx, entry ->
+            entry.item.copy(
+                index = idx,
+                isInstalled = entry.isInstalled,
+                isFavorite = entry.item.appId in favoriteComposite,
+            )
+        }
+        pagedList = withRecommendation(pagedList, currentState)
+
+        // Persist skeleton-loader counts (only when not searching, to keep them accurate).
+        if (search.isEmpty()) {
+            PrefManager.customGamesCount = customGameItems.size
+            PrefManager.steamGamesCount = steamBadgeCount
+            PrefManager.gogGamesCount = nonSteam.gogFilteredCount
+            PrefManager.gogInstalledGamesCount = nonSteam.gogInstalledCount
+            PrefManager.epicGamesCount = nonSteam.epicFilteredCount
+            PrefManager.epicInstalledGamesCount = nonSteam.epicInstalledCount
+            PrefManager.amazonInstalledGamesCount = nonSteam.amazonInstalledCount
+        }
+
+        fetchCompatibilityForPage(pagedList.map { it.name })
+
+        // Badges use prefs + auth state (not the current tab) so they stay stable across tab switches,
+        // matching the in-memory path. Steam uses the pre-hidden/category badge count; non-Steam uses
+        // pre-hidden/category entry sizes.
+        val gogHasCreds = GOGService.hasStoredCredentials(context)
+        val epicHasCreds = EpicService.hasStoredCredentials(context)
+        val amazonHasCreds = AmazonService.hasStoredCredentials(context)
+        val steamBadge = if (currentState.showSteamInLibrary) steamBadgeCount else 0
+        val gogBadge = if (currentState.showGOGInLibrary && gogHasCreds) nonSteam.gogEntries.size else 0
+        val epicBadge = if (currentState.showEpicInLibrary && epicHasCreds) nonSteam.epicEntries.size else 0
+        val amazonBadge = if (currentState.showAmazonInLibrary && amazonHasCreds) nonSteam.amazonEntries.size else 0
+        val localBadge = if (currentState.showCustomGamesInLibrary) nonSteam.customEntries.size else 0
+
+        _state.update {
+            it.copy(
+                appInfoList = pagedList,
+                currentPaginationPage = paginationPage + 1, // visual display is not 0 indexed
+                lastPaginationPage = lastPageInCurrentFilter + 1,
+                totalAppsInFilter = total,
+                isLoading = false,
+                allCount = steamBadge + localBadge + gogBadge + epicBadge + amazonBadge,
+                steamCount = steamBadge,
+                gogCount = gogBadge,
+                epicCount = epicBadge,
+                amazonCount = amazonBadge,
+                localCount = localBadge,
+            )
+        }
+    }
+
+    // Composite category ids look like "STEAM_570" / "GOG_123"; extract the Steam int ids only.
+    private fun steamIdsFrom(compositeIds: Collection<String>): List<Int> {
+        val prefix = "${GameSource.STEAM.name}_"
+        return compositeIds.mapNotNull { if (it.startsWith(prefix)) it.removePrefix(prefix).toIntOrNull() else null }
+    }
+
+    // Holds the non-Steam (GOG / Epic / Amazon / custom) library entries plus the counts the
+    // PrefManager skeleton loaders need. Entries are pre-hidden/category (the caller applies those).
+    private data class NonSteamResult(
+        val gogEntries: List<LibraryEntry>,
+        val epicEntries: List<LibraryEntry>,
+        val amazonEntries: List<LibraryEntry>,
+        val customEntries: List<LibraryEntry>,
+        val gogFilteredCount: Int,
+        val epicFilteredCount: Int,
+        val amazonFilteredCount: Int,
+        val gogInstalledCount: Int,
+        val epicInstalledCount: Int,
+        val amazonInstalledCount: Int,
+    )
+
+    // Builds non-Steam library entries from the in-memory source lists. Shared by the SQL path; the
+    // logic mirrors the in-memory path's non-Steam handling (search filter, installed filter, compat
+    // filter, custom-game dedup against imported Steam appIds).
+    private fun buildNonSteamEntries(
+        currentState: LibraryState,
+        customGameItems: List<LibraryItem>,
+        steamDupAppIds: Set<String>,
+        passesCompatibleFilter: (String) -> Boolean,
+    ): NonSteamResult {
+        val installedOnly = currentState.currentTab.installedOnly ||
+            currentState.appInfoSortType.contains(AppFilter.INSTALLED)
+        val query = currentState.searchQuery
+
+        val customEntries = customGameItems
+            .filter { !steamDupAppIds.contains(it.appId) }
+            .map { LibraryEntry(it, true) }
+
+        val filteredGOGGames = gogGameList.asSequence()
+            .filter { if (query.isNotEmpty()) matches(it.title, query) else true }
+            .filter { if (installedOnly) it.isInstalled else true }
+            .toList()
+        val gogEntries = filteredGOGGames.filter { passesCompatibleFilter(it.title) }.map { game ->
+            LibraryEntry(
+                item = LibraryItem(
+                    index = 0,
+                    appId = "${GameSource.GOG.name}_${game.id}",
+                    name = game.title,
+                    iconHash = game.iconUrl.ifEmpty { game.imageUrl },
+                    capsuleImageUrl = game.iconUrl.ifEmpty { game.imageUrl },
+                    headerImageUrl = game.imageUrl.ifEmpty { game.iconUrl },
+                    heroImageUrl = game.imageUrl.ifEmpty { game.iconUrl },
+                    isShared = false,
+                    gameSource = GameSource.GOG,
+                ),
+                isInstalled = game.isInstalled,
+            )
+        }
+
+        val filteredEpicGames = epicGameList.asSequence()
+            .filter { if (query.isNotEmpty()) matches(it.title, query) else true }
+            .filter { if (installedOnly) it.isInstalled else true }
+            .toList()
+        val epicEntries = filteredEpicGames.filter { passesCompatibleFilter(it.title) }.map { game ->
+            LibraryEntry(
+                item = LibraryItem(
+                    index = 0,
+                    appId = "${GameSource.EPIC.name}_${game.id}",
+                    name = game.title,
+                    iconHash = game.artSquare.ifEmpty { game.artCover },
+                    capsuleImageUrl = game.artCover.ifEmpty { game.artSquare },
+                    headerImageUrl = game.artPortrait.ifEmpty { game.artSquare.ifEmpty { game.artCover } },
+                    heroImageUrl = game.artPortrait.ifEmpty { game.artSquare.ifEmpty { game.artCover } },
+                    isShared = false,
+                    gameSource = GameSource.EPIC,
+                ),
+                isInstalled = game.isInstalled,
+            )
+        }
+
+        val filteredAmazonGames = amazonGameList.asSequence()
+            .filter { if (query.isNotEmpty()) matches(it.title, query) else true }
+            .filter { if (installedOnly) it.isInstalled else true }
+            .toList()
+        val amazonEntries = filteredAmazonGames.filter { passesCompatibleFilter(it.title) }.map { game ->
+            val layoutHero = AmazonArtwork.layoutHeroFromProductJson(game.productJson)
+                .ifEmpty { game.heroUrl.ifEmpty { game.artUrl } }
+            LibraryEntry(
+                item = LibraryItem(
+                    index = 0,
+                    appId = "AMAZON_${game.appId}",
+                    name = game.title,
+                    iconHash = game.artUrl,
+                    capsuleImageUrl = game.artUrl,
+                    headerImageUrl = layoutHero,
+                    heroImageUrl = layoutHero.ifEmpty { game.artUrl },
+                    gridHeroImageScale = AmazonArtwork.GRID_HERO_ZOOM_SCALE,
+                    isShared = false,
+                    gameSource = GameSource.AMAZON,
+                ),
+                isInstalled = game.isInstalled,
+            )
+        }
+
+        return NonSteamResult(
+            gogEntries = gogEntries,
+            epicEntries = epicEntries,
+            amazonEntries = amazonEntries,
+            customEntries = customEntries,
+            gogFilteredCount = filteredGOGGames.size,
+            epicFilteredCount = filteredEpicGames.size,
+            amazonFilteredCount = filteredAmazonGames.size,
+            gogInstalledCount = filteredGOGGames.count { it.isInstalled },
+            epicInstalledCount = filteredEpicGames.count { it.isInstalled },
+            amazonInstalledCount = filteredAmazonGames.count { it.isInstalled },
+        )
+    }
+
+    // Builds the library sort comparator for the current SortOption, with a favorites-first tier
+    // prepended when any favorites exist. [favoriteIds] are composite ids; [sortKeyOf] maps each
+    // entry's composite appId to its NameSortKey.
+    private fun librarySortComparator(
+        currentState: LibraryState,
+        favoriteIds: Set<String>,
+        sortKeyOf: Map<String, String>,
+    ): Comparator<LibraryEntry> {
+        val baseSortComparator: Comparator<LibraryEntry> = when (currentState.currentSortOption) {
+            SortOption.INSTALLED_FIRST -> compareBy<LibraryEntry> { if (it.isInstalled) 0 else 1 }
+                .thenBy { sortKeyOf.getValue(it.item.appId) }
+            SortOption.NAME_ASC -> compareBy { sortKeyOf.getValue(it.item.appId) }
+            SortOption.NAME_DESC -> compareByDescending { sortKeyOf.getValue(it.item.appId) }
+            SortOption.RECENTLY_PLAYED -> compareBy<LibraryEntry> { if (it.isInstalled) 0 else 1 }
+                .thenBy { sortKeyOf.getValue(it.item.appId) }
+            SortOption.SIZE_SMALLEST -> compareBy<LibraryEntry> { it.item.sizeBytes }
+                .thenBy { sortKeyOf.getValue(it.item.appId) }
+            SortOption.SIZE_LARGEST -> compareByDescending<LibraryEntry> { it.item.sizeBytes }
+                .thenBy { sortKeyOf.getValue(it.item.appId) }
+            SortOption.FPS_HIGH -> compareByDescending<LibraryEntry> {
+                currentState.statsFor(it.item)?.fps ?: -1
+            }.thenBy { sortKeyOf.getValue(it.item.appId) }
+            SortOption.RUNS_HIGH -> compareByDescending<LibraryEntry> {
+                currentState.statsFor(it.item)?.runsGpu ?: -1
+            }.thenBy { sortKeyOf.getValue(it.item.appId) }
+            SortOption.REVIEWS_HIGH -> compareByDescending<LibraryEntry> {
+                currentState.statsFor(it.item)?.reviewsDevice ?: -1
+            }.thenBy { sortKeyOf.getValue(it.item.appId) }
+            SortOption.REVIEWS_GPU_HIGH -> compareByDescending<LibraryEntry> {
+                currentState.statsFor(it.item)?.reviewsGpu ?: -1
+            }.thenBy { sortKeyOf.getValue(it.item.appId) }
+        }
+        return if (favoriteIds.isNotEmpty()) {
+            compareBy<LibraryEntry> { if (it.item.appId in favoriteIds) 0 else 1 }.then(baseSortComparator)
+        } else {
+            baseSortComparator
+        }
+    }
+
+    // Prepends the recommended game as the first item on the ALL tab when enabled and not searching.
+    private fun withRecommendation(pagedList: List<LibraryItem>, currentState: LibraryState): List<LibraryItem> {
+        val rec = cachedRecommendation
+        if (rec != null &&
+            PrefManager.showRecommendations &&
+            currentState.currentTab == LibraryTab.ALL &&
+            currentState.searchQuery.isEmpty()
+        ) {
+            val recItem = LibraryItem(
+                index = -1,
+                appId = "RECOMMENDED_${rec.id}",
+                name = rec.name,
+                heroImageUrl = rec.heroImageUrl,
+                capsuleImageUrl = rec.capsuleImageUrl,
+                iconHash = rec.iconUrl ?: rec.capsuleImageUrl,
+                isRecommended = true,
+                recommendedGameId = rec.id,
+                gameSource = GameSource.STEAM,
+            )
+            return listOf(recItem) + pagedList.map { it.copy(index = it.index + 1) }
+        }
+        return pagedList
     }
 
     /**

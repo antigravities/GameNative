@@ -2,6 +2,7 @@ package app.gamenative.data
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import app.gamenative.enums.AppType
 import app.gamenative.enums.ControllerSupport
@@ -12,7 +13,19 @@ import app.gamenative.service.SteamService
 import `in`.dragonbra.javasteam.enums.ELicenseFlags
 import java.util.EnumSet
 
-@Entity("steam_app")
+// Steam content_descriptor IDs treated as adult-only: 1 = NudityOrSexualContent,
+// 3 = AdultOnlySexualContent, 4 = GratuitousSexualContent. Single source of truth shared by the
+// PICS-write is_adult computation and the library's adult filter.
+val ADULT_CONTENT_DESCRIPTOR_IDS = setOf(1, 3, 4)
+
+@Entity(
+    "steam_app",
+    indices = [
+        Index("dlc_for_app_id"),
+        Index("package_id"),
+        Index(value = ["name_sort_key", "id"]),
+    ],
+)
 data class SteamApp(
     @PrimaryKey val id: Int,
     @ColumnInfo("package_id")
@@ -32,6 +45,18 @@ data class SteamApp(
     // single column instead of deserializing the depots blob for every owned app.
     @ColumnInfo("size_bytes", defaultValue = "0")
     val sizeBytes: Long = 0,
+
+    // Precomputed locale-invariant sort key (see NameSortKey), written at PICS-parse time so the
+    // library pagination query can ORDER BY it in SQL instead of transliterating ~45k names in
+    // Kotlin on every filter. Empty on rows synced before this column existed until the one-time
+    // backfill (SteamService.backfillSortKeysOnce) populates them.
+    @ColumnInfo("name_sort_key", defaultValue = "")
+    val nameSortKey: String = "",
+    // Precomputed adult flag: true if content_descriptors contains any adult ID (see
+    // ADULT_CONTENT_DESCRIPTOR_IDS). Lets the pagination query filter adult content in SQL without
+    // parsing the content_descriptors JSON (SQLite JSON1 is not guaranteed at our minSdk).
+    @ColumnInfo("is_adult", defaultValue = "0")
+    val isAdult: Boolean = false,
 
     @ColumnInfo("depots")
     val depots: Map<Int, DepotInfo> = emptyMap(),

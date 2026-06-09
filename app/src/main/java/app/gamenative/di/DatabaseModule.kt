@@ -2,8 +2,6 @@ package app.gamenative.di
 
 import android.content.Context
 import androidx.room.Room
-import androidx.room.RoomDatabase
-import androidx.sqlite.db.SupportSQLiteDatabase
 import app.gamenative.db.DATABASE_NAME
 import app.gamenative.db.PluviaDatabase
 import app.gamenative.db.dao.AppInfoDao
@@ -45,28 +43,6 @@ class DatabaseModule {
             // SQLite still serializes writers, so this only removes the scheduling deadlock.
             .setQueryExecutor(Executors.newCachedThreadPool())
             .setTransactionExecutor(Executors.newCachedThreadPool())
-            .addCallback(object : RoomDatabase.Callback() {
-                override fun onOpen(db: SupportSQLiteDatabase) {
-                    // These indexes are not declared in @Entity (which would require a schema
-                    // migration) — they're created here so we can add them without a version bump
-                    // while keeping upstream compatibility. IF NOT EXISTS makes them idempotent.
-                    //
-                    // dlc_for_app_id: the OWNED_APPS_WHERE DLC EXISTS arm joins back into
-                    // steam_app on this column. Without an index, SQLite scans all ~45k rows per
-                    // outer row that fails the direct-license check, turning the COUNT(*) query
-                    // O(N²) and causing 100+ second runtimes that exhaust the connection pool.
-                    db.execSQL(
-                        "CREATE INDEX IF NOT EXISTS idx_steam_app_dlc_for_app_id " +
-                            "ON steam_app(dlc_for_app_id)",
-                    )
-                    // package_id: used in the WHERE clause to exclude INVALID_PKG_ID rows and
-                    // as the lookup key for the direct-license EXISTS arm.
-                    db.execSQL(
-                        "CREATE INDEX IF NOT EXISTS idx_steam_app_package_id " +
-                            "ON steam_app(package_id)",
-                    )
-                }
-            })
             .build()
     }
 
