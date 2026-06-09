@@ -8,6 +8,7 @@ import androidx.room.RawQuery
 import androidx.room.Update
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteQuery
+import app.gamenative.data.OrderedSteamStub
 import app.gamenative.data.SteamApp
 import app.gamenative.data.SteamAppDepots
 import app.gamenative.data.SteamAppSummary
@@ -76,33 +77,52 @@ private const val SUMMARY_COLS =
     "app.id, app.name, app.type, app.package_id, app.client_icon_hash, app.library_assets, " +
     "app.owner_account_id, app.install_dir, app.size_bytes "
 
-// Builds the dynamic library page query for pageOwnedAppSummaries (@RawQuery). The ORDER BY differs
-// per [sortOption] and INSTALLED_FIRST/RECENTLY_PLAYED need an app_info join for the installed tier,
-// so the SQL can't be a single static @Query. Positional (?) args are appended in lockstep with the
-// SQL text. IN-list params (types) are expanded to N placeholders; callers pass a [-1] sentinel
-// (never a real app id) instead of an empty list so we never emit `IN ()`. [types] must be
-// non-empty (the caller returns early otherwise).
+// Projection for buildLibraryPageQuery: SUMMARY returns the full SteamAppSummary columns (one page,
+// blobs included); STUB returns only the lightweight OrderedSteamStub columns (id, name_sort_key,
+// size_bytes, is_downloaded) used to materialize the full ordered skeleton without loading blobs.
+enum class LibraryProjection { SUMMARY, STUB }
+
+// Builds the dynamic library page query for pageOwnedAppSummaries / orderedSteamRows (@RawQuery). The
+// ORDER BY differs per [sortOption] and INSTALLED_FIRST/RECENTLY_PLAYED need an app_info join for the
+// installed tier, so the SQL can't be a single static @Query. Positional (?) args are appended in
+// lockstep with the SQL text. IN-list params (types) are expanded to N placeholders; callers pass a
+// [-1] sentinel (never a real app id) instead of an empty list so we never emit `IN ()`. [types] must
+// be non-empty (the caller returns early otherwise).
 //
 // installedFilter = true INNER-JOINs app_info on is_downloaded = 1 (the Installed filter chip). The
 // INSTALLED_FIRST/RECENTLY_PLAYED sort tier uses app_info.is_downloaded as a proxy for "installed"
 // (the badge itself stays filesystem-based in the ViewModel); this keeps the ordering SQL-expressible
 // at the cost of a rare folder-present-but-not-in-app_info game not bubbling to the top tier.
+//
+// [limit] = null omits LIMIT/OFFSET entirely (used by orderedSteamRows to fetch the whole ordered
+// set). [projection] selects the SELECT column list; for STUB, is_downloaded is projected from the
+// app_info join when present (COALESCE → 0 to avoid a NULL→Boolean mapping crash on the LEFT join)
+// and a literal 0 otherwise (name/size sorts don't join app_info and never read the column).
 fun buildLibraryPageQuery(
     types: List<Int>,
     search: String,
     sortOption: SortOption,
     installedFilter: Boolean,
-    limit: Int,
-    offset: Int,
+    limit: Int? = null,
+    offset: Int = 0,
     invalidPkgId: Int = INVALID_PKG_ID,
     includeExpired: Int = 0,
+    projection: LibraryProjection = LibraryProjection.SUMMARY,
 ): SupportSQLiteQuery {
     fun placeholders(n: Int) = List(n) { "?" }.joinToString(",")
     val args = ArrayList<Any?>()
     val sb = StringBuilder()
 
-    sb.append("SELECT ").append(SUMMARY_COLS).append("FROM steam_app AS app ")
     val usesInstalledTier = sortOption == SortOption.INSTALLED_FIRST || sortOption == SortOption.RECENTLY_PLAYED
+    val joinedAppInfo = installedFilter || usesInstalledTier
+    val selectCols = when (projection) {
+        LibraryProjection.SUMMARY -> SUMMARY_COLS
+        LibraryProjection.STUB -> {
+            val downloaded = if (joinedAppInfo) "COALESCE(app_info.is_downloaded, 0)" else "0"
+            "app.id, app.name_sort_key, app.size_bytes, $downloaded AS is_downloaded "
+        }
+    }
+    sb.append("SELECT ").append(selectCols).append("FROM steam_app AS app ")
     if (installedFilter) {
         sb.append("INNER JOIN app_info ON app_info.id = app.id AND app_info.is_downloaded = 1 ")
     } else if (usesInstalledTier) {
@@ -134,8 +154,10 @@ fun buildLibraryPageQuery(
         else -> sb.append("app.name_sort_key, app.id ") // NAME_ASC and any future default
     }
 
-    sb.append("LIMIT ? OFFSET ?")
-    args.add(limit); args.add(offset)
+    if (limit != null) {
+        sb.append("LIMIT ? OFFSET ?")
+        args.add(limit); args.add(offset)
+    }
 
     return SimpleSQLiteQuery(sb.toString(), args.toArray())
 }
@@ -332,6 +354,15 @@ interface SteamAppDao {
     // methods. Returns the SteamAppSummary projection (SUMMARY_COLS).
     @RawQuery
     suspend fun pageOwnedAppSummaries(query: SupportSQLiteQuery): List<SteamAppSummary>
+
+    // The full filtered Steam set, ordered by the active sort, as lightweight stubs (no blobs). Built
+    // by buildLibraryPageQuery(projection = STUB, limit = null). Powers the ViewModel's per-filter
+    // ordered skeleton so load-more pages are served by ~50-row PK fetches instead of re-running the
+    // whole filter/sort. Safe as a single @RawQuery despite ~45k rows because the stub columns carry
+    // no large blobs (the per-row CursorWindow overflow that forces adaptive paging elsewhere can't
+    // happen here).
+    @RawQuery
+    suspend fun orderedSteamRows(query: SupportSQLiteQuery): List<OrderedSteamStub>
 
     // Total matching the same filters — for totalAppsInFilter / pagination math / tab badges.
     @Query(
