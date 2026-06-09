@@ -55,7 +55,7 @@ const val DATABASE_NAME = "pluvia.db"
         DownloadingAppInfo::class,
         SteamUnlockedBranch::class,
     ],
-    version = 24,
+    version = 25,
     // For db migration, visit https://developer.android.com/training/data-storage/room/migrating-db-versions for more information
     exportSchema = true, // It is better to handle db changes carefully, as GN is getting much more users.
     autoMigrations = [
@@ -82,6 +82,8 @@ const val DATABASE_NAME = "pluvia.db"
         // data wipe) instead of crashing on a duplicate-column error. See docs/migrations.md.
         // v23→v24 (size_bytes) is a MANUAL migration (ROOM_MIGRATION_V23_to_V24), not an
         // auto-migration, because 23.json doesn't exist for Room to diff against. See RoomMigration.kt.
+        // v24→v25 (name_sort_key + is_adult) is a MANUAL migration (ROOM_MIGRATION_V24_to_V25), not an
+        // auto-migration, because it must drop the onOpen-created indexes to pass schema validation.
     ]
 )
 @TypeConverters(

@@ -95,6 +95,44 @@ internal val ROOM_MIGRATION_V23_to_V24 = object : Migration(23, 24) {
     }
 }
 
+// v25 adds the precomputed name_sort_key + is_adult columns to steam_app (for SQL library
+// pagination). This is a MANUAL migration, not an AutoMigration, because of the indexes created in
+// DatabaseModule's onOpen callback (idx_steam_app_dlc_for_app_id, idx_steam_app_package_id): those
+// aren't declared in @Entity, so the expected v25 schema has indices = {}, but the live DB already
+// has them. Room only does a full index comparison DURING a migration, so it fails validation with
+// "Migration didn't properly handle" — Found has the indexes, Expected has none. We drop them here so
+// the post-migration schema matches; onOpen recreates all indexes (incl. the new name_sort_key one)
+// right after, before they're next needed.
+//
+// NOTE for future migrations: because those indexes live in onOpen (not @Entity), every subsequent
+// migration must likewise DROP them so post-migration validation sees indices = {}. If that ever
+// becomes painful, move the index definitions into @Entity(indices = [...]) and create them via the
+// migration with CREATE INDEX IF NOT EXISTS instead.
+internal val ROOM_MIGRATION_V24_to_V25 = object : Migration(24, 25) {
+    override fun migrate(connection: SQLiteConnection) {
+        // Defensive (see ROOM_MIGRATION_V23_to_V24): a device already on old-v25+ already has both
+        // columns under the old numbering. Only seed name_sort_key when we're the ones adding it —
+        // a device that already had it keeps whatever ICU-refined value the backfill already wrote.
+        val hadNameSortKey = connection.hasColumn("steam_app", "name_sort_key")
+        if (!hadNameSortKey) {
+            connection.execSQL(
+                "ALTER TABLE steam_app ADD COLUMN name_sort_key TEXT NOT NULL DEFAULT ''"
+            )
+        }
+        if (!connection.hasColumn("steam_app", "is_adult")) {
+            connection.execSQL(
+                "ALTER TABLE steam_app ADD COLUMN is_adult INTEGER NOT NULL DEFAULT 0"
+            )
+        }
+        connection.addVerticalCoverUrlIfMissing()
+        // Drop the onOpen-created indexes so the migrated schema matches the (index-less) expected
+        // v25 TableInfo. onOpen recreates them (idempotently) on this same open, after validation.
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_dlc_for_app_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_package_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_name_sort_key")
+    }
+}
+
 // Devices on upstream's real v21 are missing all three changes — non-defensive, matching
 // docs/migrations.md's "simple approach" (a device on the fork's v21/v22 instead would already
 // have content_descriptors and hit a duplicate-column error here, which is accepted: it falls
