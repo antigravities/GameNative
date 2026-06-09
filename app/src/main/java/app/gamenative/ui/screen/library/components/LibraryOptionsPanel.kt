@@ -288,9 +288,11 @@ fun LibraryOptionsPanel(
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             AppFilter.entries.forEach { appFilter ->
+                                // AppFilter.SHARED ("Family Sharing") is intentionally omitted: family
+                                // accounts now use the SQL fast path, which always shows shared games
+                                // (tagged with the isShared badge), so the toggle would be a no-op.
                                 if (appFilter in listOf(
                                         AppFilter.INSTALLED,
-                                        AppFilter.SHARED,
                                         AppFilter.COMPATIBLE,
                                         AppFilter.EXPIRED,
                                         AppFilter.PLAYABLE,
