@@ -11,6 +11,7 @@ import app.gamenative.data.SteamAppSummary
 import app.gamenative.service.SteamService.Companion.INVALID_PKG_ID
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -134,6 +135,7 @@ interface SteamAppDao {
     ): Flow<List<SteamApp>> {
         val includeExpiredFlag = if (includeExpired) 1 else 0
         return _observeOwnedAppCount(invalidPkgId, includeExpiredFlag)
+            .debounce(2_000) // wait for rapid PICS writes to settle before triggering a reload
             .distinctUntilChanged() // skip reload when count unchanged
             .flatMapLatest { // cancel stale reloads during rapid PICS inserts
                 flow { emit(_getAllOwnedAppsPaged(invalidPkgId, includeExpiredFlag)) }
@@ -208,6 +210,7 @@ interface SteamAppDao {
         // would re-emit favorites and replace the full list with favorites-only.
         val didFastRender = java.util.concurrent.atomic.AtomicBoolean(false)
         return _observeOwnedAppCount(invalidPkgId, includeExpiredFlag)
+            .debounce(2_000) // wait for rapid PICS writes to settle before triggering a reload
             .distinctUntilChanged()
             .flatMapLatest {
                 flow {
