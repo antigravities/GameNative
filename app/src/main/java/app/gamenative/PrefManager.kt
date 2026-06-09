@@ -184,6 +184,20 @@ object PrefManager {
         get() = getPref(LIBRARY_SIZE_BACKFILL_CURSOR, 0)
         set(value) { setPref(LIBRARY_SIZE_BACKFILL_CURSOR, value) }
 
+    // One-shot guard for the name_sort_key backfill (SteamService.backfillSortKeysOnce).
+    // Rows synced before this column existed have ''; the backfill computes it once.
+    private val LIBRARY_SORT_KEY_BACKFILL_DONE = booleanPreferencesKey("library_sort_key_backfill_done")
+    var librarySortKeyBackfillDone: Boolean
+        get() = getPref(LIBRARY_SORT_KEY_BACKFILL_DONE, false)
+        set(value) { setPref(LIBRARY_SORT_KEY_BACKFILL_DONE, value) }
+
+    // Resume cursor (highest processed app id) for the name_sort_key backfill. Persisted
+    // per page so a restart continues forward instead of re-walking. Irrelevant once *Done is set.
+    private val LIBRARY_SORT_KEY_BACKFILL_CURSOR = intPreferencesKey("library_sort_key_backfill_cursor")
+    var librarySortKeyBackfillCursor: Int
+        get() = getPref(LIBRARY_SORT_KEY_BACKFILL_CURSOR, 0)
+        set(value) { setPref(LIBRARY_SORT_KEY_BACKFILL_CURSOR, value) }
+
     // How many apps have been successfully sent to the PICS channel in the current refresh run.
     // On resume after crash, refreshAllApps() drops this many IDs from the front of the list.
     private val REFRESH_ALL_APPS_OFFSET = intPreferencesKey("refresh_all_apps_offset")

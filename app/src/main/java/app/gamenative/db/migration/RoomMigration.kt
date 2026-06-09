@@ -34,6 +34,15 @@ internal val ROOM_MIGRATION_V25_to_V26 = object : Migration(25, 26) {
     }
 }
 
+internal val ROOM_MIGRATION_V26_to_V27 = object : Migration(26, 27) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE steam_app ADD COLUMN name_sort_key TEXT NOT NULL DEFAULT ''")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS index_steam_app_dlc_for_app_id ON steam_app(dlc_for_app_id)")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS index_steam_app_package_id ON steam_app(package_id)")
+        connection.execSQL("CREATE INDEX IF NOT EXISTS index_steam_app_name_sort_key_id ON steam_app(name_sort_key, id)")
+    }
+}
+
 private fun migrateManagedModSourcesToV25(connection: SQLiteConnection) {
     connection.execSQL(
         """
