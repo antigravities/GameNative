@@ -15,6 +15,7 @@ import app.gamenative.db.dao.SteamUnlockedBranchDao
 import app.gamenative.db.migration.ROOM_MIGRATION_V7_to_V8
 import app.gamenative.db.migration.ROOM_MIGRATION_V20_to_V22
 import app.gamenative.db.migration.ROOM_MIGRATION_V21_to_V22
+import app.gamenative.db.migration.ROOM_MIGRATION_V23_to_V24
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,7 +34,7 @@ class DatabaseModule {
         // The db will be considered unstable during development.
         // Once stable we should add a (room) db migration
         return Room.databaseBuilder(context, PluviaDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ROOM_MIGRATION_V7_to_V8, ROOM_MIGRATION_V20_to_V22, ROOM_MIGRATION_V21_to_V22)
+            .addMigrations(ROOM_MIGRATION_V7_to_V8, ROOM_MIGRATION_V20_to_V22, ROOM_MIGRATION_V21_to_V22, ROOM_MIGRATION_V23_to_V24)
             .fallbackToDestructiveMigration(true)
             // Use SEPARATE executors for queries and transactions. By default Room shares one
             // small fixed pool for both, which deadlocks under load: every open suspend
@@ -65,6 +66,16 @@ class DatabaseModule {
                     db.execSQL(
                         "CREATE INDEX IF NOT EXISTS idx_steam_app_package_id " +
                             "ON steam_app(package_id)",
+                    )
+                    // (name_sort_key, id): the library pagination query orders by
+                    // name_sort_key with id as the tiebreaker, then slices with LIMIT/OFFSET.
+                    // This composite index lets SQLite satisfy ORDER BY from the index instead
+                    // of materializing + sorting the whole owned set per page. Created here (not
+                    // in @Entity) to match the existing index pattern; the column itself is added
+                    // by the v23→v24 auto-migration.
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS idx_steam_app_name_sort_key " +
+                            "ON steam_app(name_sort_key, id)",
                     )
                 }
             })

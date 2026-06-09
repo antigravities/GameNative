@@ -11,6 +11,7 @@ import app.gamenative.data.LibraryLogoInfo
 import app.gamenative.data.ManifestInfo
 import app.gamenative.data.SaveFilePattern
 import app.gamenative.data.SteamControllerConfigDetail
+import app.gamenative.data.ADULT_CONTENT_DESCRIPTOR_IDS
 import app.gamenative.data.SteamApp
 import app.gamenative.data.UFS
 import app.gamenative.enums.AppType
@@ -33,6 +34,13 @@ const val CURRENT_UFS_PARSE_VERSION = 4
  */
 
 fun KeyValue.generateSteamApp(): SteamApp {
+    // Hoisted so the precomputed nameSortKey / isAdult columns below can reuse them without
+    // re-parsing the KeyValue tree.
+    val name = this["common"]["name"].value.orEmpty()
+    // Each child's name is an index ("0", "1", …) and its value is the descriptor ID string.
+    val contentDescriptors = this["common"]["content_descriptors"].children
+        .mapNotNull { it.value?.toIntOrNull() }
+        .also { Timber.d("PICS content_descriptors for appId=${this["appid"].asInteger()}: $it") }
     return SteamApp(
         id = this["appid"].asInteger(INVALID_APP_ID),
         depots = this["depots"].children
@@ -72,7 +80,8 @@ fun KeyValue.generateSteamApp(): SteamApp {
                 timeUpdated = Date(it["timeupdated"].asLong() * 1000L),
             )
         },
-        name = this["common"]["name"].value.orEmpty(),
+        name = name,
+        nameSortKey = NameSortKey.of(name),
         type = AppType.from(this["common"]["type"].value),
         osList = OS.from(this["common"]["oslist"].value),
         releaseState = ReleaseState.from(this["common"]["releasestate"].value),
@@ -104,10 +113,8 @@ fun KeyValue.generateSteamApp(): SteamApp {
         reviewScore = this["common"]["review_score"].asByte(),
         reviewPercentage = this["common"]["review_percentage"].asByte(),
         controllerSupport = ControllerSupport.from(this["common"]["controller_support"].value),
-        // Each child's name is an index ("0", "1", …) and its value is the descriptor ID string.
-        contentDescriptors = this["common"]["content_descriptors"].children
-            .mapNotNull { it.value?.toIntOrNull() }
-            .also { Timber.d("PICS content_descriptors for appId=${this["appid"].asInteger()}: $it") },
+        contentDescriptors = contentDescriptors,
+        isAdult = contentDescriptors.any { it in ADULT_CONTENT_DESCRIPTOR_IDS },
         demoOfAppId = this["common"]["extended"]["demoofappid"].asInteger(),
         developer = this["extended"]["developer"].value.orEmpty(),
         publisher = this["extended"]["publisher"].value.orEmpty(),

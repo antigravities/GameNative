@@ -43,6 +43,35 @@ internal val ROOM_MIGRATION_V20_to_V22 = object : Migration(20, 22) {
     }
 }
 
+// v24 adds the precomputed name_sort_key + is_adult columns to steam_app (for SQL library
+// pagination). This is a MANUAL migration, not an AutoMigration, because of the indexes created in
+// DatabaseModule's onOpen callback (idx_steam_app_dlc_for_app_id, idx_steam_app_package_id): those
+// aren't declared in @Entity, so the expected v24 schema has indices = {}, but the live DB already
+// has them. Room only does a full index comparison DURING a migration, so it fails validation with
+// "Migration didn't properly handle" — Found has the indexes, Expected has none. We drop them here so
+// the post-migration schema matches; onOpen recreates all indexes (incl. the new name_sort_key one)
+// right after, before they're next needed.
+//
+// NOTE for future migrations: because those indexes live in onOpen (not @Entity), every subsequent
+// migration must likewise DROP them so post-migration validation sees indices = {}. If that ever
+// becomes painful, move the index definitions into @Entity(indices = [...]) and create them via the
+// migration with CREATE INDEX IF NOT EXISTS instead.
+internal val ROOM_MIGRATION_V23_to_V24 = object : Migration(23, 24) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "ALTER TABLE steam_app ADD COLUMN name_sort_key TEXT NOT NULL DEFAULT ''"
+        )
+        connection.execSQL(
+            "ALTER TABLE steam_app ADD COLUMN is_adult INTEGER NOT NULL DEFAULT 0"
+        )
+        // Drop the onOpen-created indexes so the migrated schema matches the (index-less) expected
+        // v24 TableInfo. onOpen recreates them (idempotently) on this same open, after validation.
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_dlc_for_app_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_package_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_name_sort_key")
+    }
+}
+
 // Devices on either v21 are missing exactly one of the two changes — both operations are defensive.
 internal val ROOM_MIGRATION_V21_to_V22 = object : Migration(21, 22) {
     override fun migrate(connection: SQLiteConnection) {
