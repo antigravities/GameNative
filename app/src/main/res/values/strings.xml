@@ -1669,6 +1669,10 @@
     <string name="hltb_hours_value">%sh</string>
     <string name="hltb_section_title">How Long to Beat</string>
 
+
+    <string name="settings_interface_show_compatibility_badges_title">Show compatibility badges</string>
+    <string name="settings_interface_show_compatibility_badges_subtitle">Show game compatibility status on library cards</string>
+
     <!-- Frontend Sync Settings -->
     <string name="settings_interface_frontend_sync_title">Frontend Sync</string>
     <string name="settings_interface_frontend_sync_subtitle">Auto-export installed games for game library frontends</string>
