@@ -1070,6 +1070,18 @@ object PrefManager {
         get() = getPref(SELECTED_CATEGORIES, emptySet())
         set(value) { setPref(SELECTED_CATEGORIES, value) }
 
+    // Selected Steam store tag IDs for the tag filter (stored as strings in a StringSet).
+    private val SELECTED_TAG_IDS = stringSetPreferencesKey("selected_tag_ids")
+    var selectedTagIds: Set<Int>
+        get() = getPref(SELECTED_TAG_IDS, emptySet()).mapNotNull { it.toIntOrNull() }.toSet()
+        set(value) { setPref(SELECTED_TAG_IDS, value.map { it.toString() }.toSet()) }
+
+    // Timestamp (epoch ms) of the last successful Steam tag list fetch. Used to enforce a 30-day TTL.
+    private val LAST_TAGS_FETCH_MS = longPreferencesKey("last_tags_fetch_ms")
+    var lastTagsFetchMs: Long
+        get() = getPref(LAST_TAGS_FETCH_MS, 0L)
+        set(value) { setPref(LAST_TAGS_FETCH_MS, value) }
+
     private val LIBRARY_FILTER = intPreferencesKey("library_filter")
     var libraryFilter: EnumSet<AppFilter>
         get() {

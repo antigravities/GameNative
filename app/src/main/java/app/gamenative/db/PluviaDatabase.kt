@@ -13,6 +13,7 @@ import app.gamenative.data.SteamLicense
 import app.gamenative.data.CachedLicense
 import app.gamenative.data.DownloadingAppInfo
 import app.gamenative.data.EncryptedAppTicket
+import app.gamenative.data.SteamTag
 import app.gamenative.data.SteamUnlockedBranch
 import app.gamenative.data.GOGGame
 import app.gamenative.data.EpicGame
@@ -32,6 +33,7 @@ import app.gamenative.db.dao.AppInfoDao
 import app.gamenative.db.dao.CachedLicenseDao
 import app.gamenative.db.dao.DownloadingAppInfoDao
 import app.gamenative.db.dao.EncryptedAppTicketDao
+import app.gamenative.db.dao.SteamTagDao
 import app.gamenative.db.dao.SteamUnlockedBranchDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.EpicGameDao
@@ -53,9 +55,10 @@ const val DATABASE_NAME = "pluvia.db"
         EpicGame::class,
         AmazonGame::class,
         DownloadingAppInfo::class,
+        SteamTag::class,
         SteamUnlockedBranch::class,
     ],
-    version = 25,
+    version = 26,
     // For db migration, visit https://developer.android.com/training/data-storage/room/migrating-db-versions for more information
     exportSchema = true, // It is better to handle db changes carefully, as GN is getting much more users.
     autoMigrations = [
@@ -83,6 +86,8 @@ const val DATABASE_NAME = "pluvia.db"
         // v23→v24 (size_bytes) is a MANUAL migration (ROOM_MIGRATION_V23_to_V24), not an
         // auto-migration, because 23.json doesn't exist for Room to diff against. See RoomMigration.kt.
         // v24→v25 (name_sort_key + is_adult) is a MANUAL migration (ROOM_MIGRATION_V24_to_V25), not an
+        // auto-migration, because it must drop the onOpen-created indexes to pass schema validation.
+        // v25→v26 (store_tags + steam_tag) is a MANUAL migration (ROOM_MIGRATION_V25_to_V26), not an
         // auto-migration, because it must drop the onOpen-created indexes to pass schema validation.
     ]
 )
@@ -121,4 +126,6 @@ abstract class PluviaDatabase : RoomDatabase() {
     abstract fun downloadingAppInfoDao(): DownloadingAppInfoDao
 
     abstract fun steamUnlockedBranchDao(): SteamUnlockedBranchDao
+
+    abstract fun steamTagDao(): SteamTagDao
 }

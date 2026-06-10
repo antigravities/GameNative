@@ -143,6 +143,27 @@ internal val ROOM_MIGRATION_V24_to_V25 = object : Migration(24, 25) {
     }
 }
 
+// v26 adds store_tags to steam_app and the steam_tag table. MANUAL migration (not AutoMigration)
+// for the same reason as v24→v25: the onOpen-created indexes must be dropped so post-migration
+// schema validation sees indices = {}. onOpen recreates them immediately after.
+internal val ROOM_MIGRATION_V25_to_V26 = object : Migration(25, 26) {
+    override fun migrate(connection: SQLiteConnection) {
+        // Defensive (see ROOM_MIGRATION_V23_to_V24): a device already on old-v26+ already has this.
+        if (!connection.hasColumn("steam_app", "store_tags")) {
+            connection.execSQL(
+                "ALTER TABLE steam_app ADD COLUMN store_tags TEXT NOT NULL DEFAULT '[]'"
+            )
+        }
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `steam_tag` (`id` INTEGER NOT NULL, `name` TEXT NOT NULL, PRIMARY KEY(`id`))"
+        )
+        connection.addVerticalCoverUrlIfMissing()
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_dlc_for_app_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_package_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_name_sort_key")
+    }
+}
+
 // Devices on upstream's real v21 are missing all three changes — non-defensive, matching
 // docs/migrations.md's "simple approach" (a device on the fork's v21/v22 instead would already
 // have content_descriptors and hit a duplicate-column error here, which is accepted: it falls

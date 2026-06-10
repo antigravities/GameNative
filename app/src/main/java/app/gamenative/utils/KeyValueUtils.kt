@@ -41,6 +41,9 @@ fun KeyValue.generateSteamApp(): SteamApp {
     val contentDescriptors = this["common"]["content_descriptors"].children
         .mapNotNull { it.value?.toIntOrNull() }
         .also { Timber.d("PICS content_descriptors for appId=${this["appid"].asInteger()}: $it") }
+    // Each child's name is an index ("0", "1", …) and its value is the tag ID string.
+    val storeTags = this["common"]["store_tags"].children
+        .mapNotNull { it.value?.toIntOrNull() }
     return SteamApp(
         id = this["appid"].asInteger(INVALID_APP_ID),
         depots = this["depots"].children
@@ -235,6 +238,7 @@ fun KeyValue.generateSteamApp(): SteamApp {
                 },
             )
         },
+        storeTags = storeTags,
     )
 }
 
