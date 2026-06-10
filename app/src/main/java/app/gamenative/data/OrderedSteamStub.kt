@@ -15,6 +15,13 @@ data class OrderedSteamStub(
     val nameSortKey: String = "",
     @ColumnInfo("size_bytes")
     val sizeBytes: Long = 0,
+    // Steam review data for the RATING sort: review_score is the 0-9 bucket ("Very Positive" = 8),
+    // review_percentage the % positive. Both are 0 for unrated apps. Int (not Byte) keeps the
+    // packed-rank math in LibraryViewModel simple; SQLite INTEGER maps to either.
+    @ColumnInfo("review_score")
+    val reviewScore: Int = 0,
+    @ColumnInfo("review_percentage")
+    val reviewPercentage: Int = 0,
     @ColumnInfo("is_downloaded")
     val isDownloaded: Boolean = false,
 )

@@ -20,6 +20,7 @@ enum class SortOption(
     RUNS_HIGH(displayTextRes = R.string.sort_runs, key = "runs_high"),
     REVIEWS_HIGH(displayTextRes = R.string.sort_reviews, key = "reviews_high"),
     REVIEWS_GPU_HIGH(displayTextRes = R.string.sort_reviews_gpu, key = "reviews_gpu_high"),
+    RATING(displayTextRes = R.string.sort_rating, key = "rating"),
     ;
 
     companion object {

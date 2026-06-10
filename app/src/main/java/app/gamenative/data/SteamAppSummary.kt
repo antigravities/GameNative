@@ -25,6 +25,12 @@ data class SteamAppSummary(
     val sizeBytes: Long = 0,
     @ColumnInfo("store_tags")
     val storeTags: List<Int> = emptyList(),
+    // Steam review data (synced via PICS) for the RATING library sort. review_score is the 0-9
+    // bucket ("Very Positive" = 8), review_percentage the % positive; both 0 when unrated.
+    @ColumnInfo("review_score")
+    val reviewScore: Int = 0,
+    @ColumnInfo("review_percentage")
+    val reviewPercentage: Int = 0,
 ) {
     val headerUrl: String
         get() = "https://shared.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg"

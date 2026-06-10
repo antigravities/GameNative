@@ -154,6 +154,11 @@ class LibraryViewModel @Inject constructor(
         abstract val sizeBytes: Long
         abstract val installedTier: Boolean   // ordering tier only (Steam: app_info; non-Steam: real install)
         abstract val isFavorite: Boolean
+        // Packed Steam review rank for the RATING sort: review_score * 1000 + review_percentage.
+        // Since percentage < 1000 a single Int comparison reproduces the two-column SQL ORDER BY
+        // (review_score DESC, review_percentage DESC). Non-Steam sources have no rating data → 0,
+        // which sinks them to the bottom alongside unrated Steam apps.
+        abstract val ratingRank: Int
 
         data class Steam(
             val appId: Int,
@@ -161,6 +166,7 @@ class LibraryViewModel @Inject constructor(
             override val sizeBytes: Long,
             override val installedTier: Boolean,
             override val isFavorite: Boolean,
+            override val ratingRank: Int,
         ) : LibraryRef()
 
         // displayInstalled is the badge value (kept verbatim from the prebuilt entry); installedTier is
@@ -172,6 +178,7 @@ class LibraryViewModel @Inject constructor(
             override val sizeBytes: Long,
             override val installedTier: Boolean,
             override val isFavorite: Boolean,
+            override val ratingRank: Int = 0,
         ) : LibraryRef()
     }
 
@@ -1157,6 +1164,13 @@ class LibraryViewModel @Inject constructor(
                 entry.item.appId to NameSortKey.of(entry.item.name)
             }
 
+            // Packed Steam review rank (score * 1000 + percentage) keyed by composite appId, for the
+            // RATING sort. Same packing as LibraryRef.ratingRank on the SQL path. Non-Steam entries
+            // are absent from the map and default to 0 in the comparator (no rating data → bottom).
+            val ratingOf = filteredSteamApps.associate { summary ->
+                "${GameSource.STEAM.name}_${summary.id}" to (summary.reviewScore * 1000 + summary.reviewPercentage)
+            }
+
             // Pre-fetch favorites set once — O(1) ConcurrentHashMap lookup on the live Set reference.
             val favoriteIds = app.gamenative.manager.CategoryManager
                 .getAppsInCategory(app.gamenative.manager.CategoryManager.FAVORITES_CATEGORY)
@@ -1195,6 +1209,9 @@ class LibraryViewModel @Inject constructor(
                 SortOption.REVIEWS_GPU_HIGH -> compareByDescending<LibraryEntry> {
                     currentState.statsFor(it.item)?.reviewsGpu ?: -1
                 }.thenBy { sortKeyOf.getValue(it.item.appId) }
+
+                SortOption.RATING -> compareByDescending<LibraryEntry> { ratingOf[it.item.appId] ?: 0 }
+                    .thenBy { sortKeyOf.getValue(it.item.appId) }
             }
 
             // Prepend favorites-first tier only when there are favorites; avoids an extra
@@ -1565,6 +1582,7 @@ class LibraryViewModel @Inject constructor(
                     sizeBytes = stub.sizeBytes,
                     installedTier = stub.isDownloaded,
                     isFavorite = stub.id in favSet,
+                    ratingRank = stub.reviewScore * 1000 + stub.reviewPercentage,
                 )
             }
         } else {
@@ -1630,6 +1648,9 @@ class LibraryViewModel @Inject constructor(
             SortOption.NAME_DESC -> compareByDescending { it.sortKey }
             SortOption.SIZE_SMALLEST -> compareBy<LibraryRef> { it.sizeBytes }.thenBy { it.sortKey }
             SortOption.SIZE_LARGEST -> compareByDescending<LibraryRef> { it.sizeBytes }.thenBy { it.sortKey }
+            // Must mirror buildLibraryPageQuery's RATING ORDER BY (score DESC, percentage DESC, name)
+            // so mergeSorted interleaves SQL-ordered Steam refs and non-Steam refs correctly.
+            SortOption.RATING -> compareByDescending<LibraryRef> { it.ratingRank }.thenBy { it.sortKey }
             // Stats sorts (FPS_HIGH, RUNS_HIGH, REVIEWS_HIGH, REVIEWS_GPU_HIGH) are routed to
             // filterAppsInMemory before refComparator is called, so this branch is unreachable.
             else -> compareBy { it.sortKey }

@@ -84,7 +84,8 @@ private const val LIBRARY_FILTERS =
 // SteamAppSummary mapping is unaffected.
 private const val SUMMARY_COLS =
     "app.id, app.name, app.type, app.package_id, app.client_icon_hash, app.library_assets, " +
-    "app.owner_account_id, app.install_dir, app.content_descriptors, app.size_bytes, app.store_tags "
+    "app.owner_account_id, app.install_dir, app.content_descriptors, app.size_bytes, app.store_tags, " +
+    "app.review_score, app.review_percentage "
 
 // Projection for buildLibraryPageQuery: SUMMARY returns the full SteamAppSummary columns (one page,
 // blobs included); STUB returns only the lightweight OrderedSteamStub columns (id, name_sort_key,
@@ -135,7 +136,7 @@ fun buildLibraryPageQuery(
         LibraryProjection.SUMMARY -> SUMMARY_COLS
         LibraryProjection.STUB -> {
             val downloaded = if (joinedAppInfo) "COALESCE(app_info.is_downloaded, 0)" else "0"
-            "app.id, app.name_sort_key, app.size_bytes, $downloaded AS is_downloaded "
+            "app.id, app.name_sort_key, app.size_bytes, app.review_score, app.review_percentage, $downloaded AS is_downloaded "
         }
     }
     sb.append("SELECT ").append(selectCols).append("FROM steam_app AS app ")
@@ -180,6 +181,10 @@ fun buildLibraryPageQuery(
         SortOption.SIZE_LARGEST -> sb.append("app.size_bytes DESC, app.name_sort_key, app.id ")
         SortOption.INSTALLED_FIRST, SortOption.RECENTLY_PLAYED ->
             sb.append("(CASE WHEN app_info.is_downloaded = 1 THEN 0 ELSE 1 END), app.name_sort_key, app.id ")
+        // Steam review bucket first (0-9; confidence-weighted by Steam), % positive as tiebreak.
+        // Unrated rows (both columns 0) sink to the bottom under DESC. Must stay in lockstep with
+        // LibraryViewModel.refComparator's RATING branch (ratingRank = score * 1000 + percentage).
+        SortOption.RATING -> sb.append("app.review_score DESC, app.review_percentage DESC, app.name_sort_key, app.id ")
         else -> sb.append("app.name_sort_key, app.id ") // NAME_ASC and any future default
     }
 
@@ -299,7 +304,8 @@ interface SteamAppDao {
 
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags " +
+            "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags, " +
+            "review_score, review_percentage " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "ORDER BY LOWER(app.name), app.id LIMIT :limit OFFSET :offset",
     )
@@ -314,7 +320,8 @@ interface SteamAppDao {
     // Caller must guard against empty [ids] — Room generates invalid SQL for IN ().
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags " +
+            "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags, " +
+            "review_score, review_percentage " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.id IN (:ids)",
     )
@@ -389,7 +396,8 @@ interface SteamAppDao {
     // An FTS5 virtual table (proposal #4) would fix this properly.
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags " +
+            "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags, " +
+            "review_score, review_percentage " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.type IN (:types) " +
             "AND LOWER(app.name) LIKE '%' || LOWER(:searchQuery) || '%' " +
