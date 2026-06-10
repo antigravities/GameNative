@@ -14,6 +14,7 @@ import app.gamenative.data.SteamLicense
 import app.gamenative.data.CachedLicense
 import app.gamenative.data.DownloadingAppInfo
 import app.gamenative.data.EncryptedAppTicket
+import app.gamenative.data.SteamTag
 import app.gamenative.data.SteamUnlockedBranch
 import app.gamenative.data.GOGGame
 import app.gamenative.data.EpicGame
@@ -34,6 +35,7 @@ import app.gamenative.db.dao.AppInfoDao
 import app.gamenative.db.dao.CachedLicenseDao
 import app.gamenative.db.dao.DownloadingAppInfoDao
 import app.gamenative.db.dao.EncryptedAppTicketDao
+import app.gamenative.db.dao.SteamTagDao
 import app.gamenative.db.dao.SteamUnlockedBranchDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.EpicGameDao
@@ -56,9 +58,10 @@ const val DATABASE_NAME = "pluvia.db"
         EpicGame::class,
         AmazonGame::class,
         DownloadingAppInfo::class,
+        SteamTag::class,
         SteamUnlockedBranch::class,
     ],
-    version = 26,
+    version = 27,
     // For db migration, visit https://developer.android.com/training/data-storage/room/migrating-db-versions for more information
     exportSchema = true, // It is better to handle db changes carefully, as GN is getting much more users.
     autoMigrations = [
@@ -84,6 +87,7 @@ const val DATABASE_NAME = "pluvia.db"
         AutoMigration(from = 23, to = 24), // Added content_descriptors to steam_app (hide-adult-games)
         AutoMigration(from = 24, to = 25), // Added size_bytes to steam_app (precomputed download size)
         AutoMigration(from = 25, to = 26), // Added name_sort_key + is_adult + steam_app indexes (SQL library pagination)
+        AutoMigration(from = 26, to = 27), // Added store_tags to steam_app + steam_tag table (tag filtering)
     ]
 )
 @TypeConverters(
@@ -123,4 +127,6 @@ abstract class PluviaDatabase : RoomDatabase() {
     abstract fun downloadingAppInfoDao(): DownloadingAppInfoDao
 
     abstract fun steamUnlockedBranchDao(): SteamUnlockedBranchDao
+
+    abstract fun steamTagDao(): SteamTagDao
 }

@@ -96,6 +96,7 @@ import app.gamenative.ui.screen.library.components.LibraryCarouselPane
 import app.gamenative.ui.screen.library.components.LibraryDetailPane
 import app.gamenative.ui.screen.library.components.LibraryListPane
 import app.gamenative.ui.component.dialog.AddToCategoryDialog
+import app.gamenative.ui.component.dialog.TagFilterDialog
 import app.gamenative.ui.screen.library.components.LibraryOptionsPanel
 import app.gamenative.ui.screen.library.components.LibrarySearchBar
 import app.gamenative.ui.screen.library.components.LibrarySourceNotLoggedInSplash
@@ -178,6 +179,8 @@ fun HomeLibraryScreen(
         onNextTab = viewModel::onNextTab,
         onCategoryFilterToggled = viewModel::onCategoryFilterToggled,
         onShowCategoryDialog = viewModel::onShowCategoryDialog,
+        onTagFilterToggled = viewModel::onTagFilterToggled,
+        onTagFilterCleared = viewModel::onTagFilterCleared,
         onToggleFavorite = viewModel::onToggleFavorite,
         onToggleHidden = viewModel::onToggleHidden,
         isOffline = isOffline,
@@ -211,6 +214,8 @@ private fun LibraryScreenContent(
     onNextTab: () -> Unit,
     onCategoryFilterToggled: (String) -> Unit = {},
     onShowCategoryDialog: (String) -> Unit = {},
+    onTagFilterToggled: (Int) -> Unit = {},
+    onTagFilterCleared: () -> Unit = {},
     onToggleFavorite: (String) -> Unit = {},
     onToggleHidden: (String) -> Unit = {},
     isOffline: Boolean = false,
@@ -345,6 +350,7 @@ private fun LibraryScreenContent(
     var pendingCarouselFocusRequest by remember { mutableStateOf(false) }
 
     var isSystemMenuOpen by remember { mutableStateOf(false) }
+    var tagFilterDialogOpen by remember { mutableStateOf(false) }
     // Track previous overlay states to detect when they close
     var wasSystemMenuOpen by remember { mutableStateOf(false) }
     var wasOptionsPanelOpen by remember { mutableStateOf(false) }
@@ -1169,6 +1175,17 @@ private fun LibraryScreenContent(
             )
         }
 
+        // Tag filter dialog — opened from the options panel.
+        if (tagFilterDialogOpen) {
+            TagFilterDialog(
+                availableTags = state.availableTags,
+                selectedTagIds = state.selectedTagIds,
+                onTagToggled = onTagFilterToggled,
+                onClear = onTagFilterCleared,
+                onDismiss = { tagFilterDialogOpen = false },
+            )
+        }
+
         // Options panel (SELECT) - renders on top of everything
         if (selectedAppId == null) {
             LibraryOptionsPanel(
@@ -1185,6 +1202,9 @@ private fun LibraryScreenContent(
                 },
                 selectedCategories = state.selectedCategories,
                 onCategoryFilterToggled = onCategoryFilterToggled,
+                selectedTagIds = state.selectedTagIds,
+                availableTags = state.availableTags,
+                onTagFilterDialogOpen = { tagFilterDialogOpen = true },
             )
 
             // System menu (START) - renders on top of everything

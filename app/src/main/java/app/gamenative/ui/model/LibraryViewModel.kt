@@ -19,13 +19,16 @@ import app.gamenative.events.AndroidEvent
 import app.gamenative.data.GOGGame
 import app.gamenative.data.EpicGame
 import app.gamenative.data.AmazonGame
+import app.gamenative.data.SteamTag
 import app.gamenative.db.dao.LibraryPlayHistoryDao
 import app.gamenative.db.dao.SteamAppDao
+import app.gamenative.db.dao.SteamTagDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.EpicGameDao
 import app.gamenative.db.dao.AmazonGameDao
 import app.gamenative.db.dao.LibraryProjection
 import app.gamenative.db.dao.buildLibraryPageQuery
+import app.gamenative.utils.fetchSteamTagsFromWeb
 import app.gamenative.manager.CategoryManager
 import app.gamenative.utils.NameSortKey
 import app.gamenative.service.DownloadService
@@ -72,6 +75,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import timber.log.Timber
 
 private const val PLAYABLE_FPS_THRESHOLD = 30
@@ -81,6 +85,7 @@ private const val PROVEN_RUNS_THRESHOLD = 5
 class LibraryViewModel @Inject constructor(
     private val libraryPlayHistoryDao: LibraryPlayHistoryDao,
     private val steamAppDao: SteamAppDao,
+    private val steamTagDao: SteamTagDao,
     private val gogGameDao: GOGGameDao,
     private val epicGameDao: EpicGameDao,
     private val amazonGameDao: AmazonGameDao,
@@ -379,6 +384,10 @@ class LibraryViewModel @Inject constructor(
             }
         }
 
+        // Load Steam store tags from DB; refresh from the web if the table is empty or
+        // the 30-day TTL has elapsed. Tags populate the "Filter by Tag" dialog.
+        viewModelScope.launch(Dispatchers.IO) { loadSteamTags() }
+
         viewModelScope.launch(Dispatchers.IO) {
             // One-time backfill: copy installDir from the config JSON blob into the flat
             // install_dir column for all rows written before the KeyValueUtils PICS key fix.
@@ -527,6 +536,48 @@ class LibraryViewModel @Inject constructor(
             s.copy(selectedCategories = updated)
         }
         onFilterApps()
+    }
+
+    // ── Tag filter ────────────────────────────────────────────────────────────
+
+    /** Toggles [tagId] in/out of the active tag filter set and re-filters the list. */
+    fun onTagFilterToggled(tagId: Int) {
+        _state.update { s ->
+            val updated = s.selectedTagIds.toMutableSet()
+            if (tagId in updated) updated.remove(tagId) else updated.add(tagId)
+            PrefManager.selectedTagIds = updated
+            s.copy(selectedTagIds = updated)
+        }
+        onFilterApps()
+    }
+
+    /** Clears all active tag filters and re-filters the list. */
+    fun onTagFilterCleared() {
+        PrefManager.selectedTagIds = emptySet()
+        _state.update { it.copy(selectedTagIds = emptySet()) }
+        onFilterApps()
+    }
+
+    /**
+     * Loads Steam tags from the DB into state, refreshing from the web if the table is empty
+     * or the 30-day TTL has elapsed. A failed web fetch keeps the existing cached tags.
+     */
+    private suspend fun loadSteamTags() {
+        val cached = steamTagDao.getAll()
+        if (cached.isNotEmpty()) {
+            _state.update { it.copy(availableTags = cached) }
+        }
+        val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000
+        val needsRefresh = cached.isEmpty() ||
+            System.currentTimeMillis() - PrefManager.lastTagsFetchMs > thirtyDaysMs
+        if (needsRefresh) {
+            val fetched = fetchSteamTagsFromWeb(OkHttpClient())
+            if (fetched.isNotEmpty()) {
+                steamTagDao.insertAll(fetched)
+                PrefManager.lastTagsFetchMs = System.currentTimeMillis()
+                _state.update { it.copy(availableTags = fetched) }
+            }
+        }
     }
 
     /** Opens the "Add to Category" dialog pre-populated with existing category names. */
@@ -852,11 +903,22 @@ class LibraryViewModel @Inject constructor(
                         .toList()
                 }
 
+            // Apply tag filter (OR logic): keep apps that have any of the selected tag IDs.
+            // This runs after the SQL/Kotlin filter above so it applies to both search and browse paths.
+            val tagFilteredSteamApps: List<SteamAppSummary> =
+                if (currentState.selectedTagIds.isNotEmpty()) {
+                    steamFilteredBeforeCompatibility.filter { summary ->
+                        summary.storeTags.any { it in currentState.selectedTagIds }
+                    }
+                } else {
+                    steamFilteredBeforeCompatibility
+                }
+
             // Filter Steam apps (no sort here): the combined list is fully re-sorted below by
             // sortComparator, so any ordering applied at this stage was pure wasted work — a full
             // ~45k sort (with a per-comparison String.lowercase() allocation) whose result was
             // immediately discarded. Just apply the compatibility filter and move on.
-            val filteredSteamApps: List<SteamAppSummary> = steamFilteredBeforeCompatibility
+            val filteredSteamApps: List<SteamAppSummary> = tagFilteredSteamApps
                 .asSequence()
                 .filter { item -> passesCompatibleFilter(item.name) }
                 .filter { item -> passesStatsFilters(currentState, GameSource.STEAM, item.name) }
@@ -1341,11 +1403,15 @@ class LibraryViewModel @Inject constructor(
         } else {
             0
         }
+        val selectedTagIds = currentState.selectedTagIds
+        val filterByTag = if (selectedTagIds.isNotEmpty()) 1 else 0
+        val tagParam = selectedTagIds.toList().ifEmpty { listOf(-1) }
         val signature = listOf(
             currentState.currentSortOption, search, currentTab,
             includeSteam, includeOpen, includeGOG, includeEpic, includeAmazon,
             installedFilter, hideAdult, includeExpired, typeCodes,
             favoriteComposite.hashCode(), hiddenComposite.hashCode(), categoryHash,
+            selectedTagIds.hashCode(),
         ).joinToString("|")
 
         // INCREMENTAL only on a genuine scroll-driven load-more: same filter, a page past 0, and the
@@ -1507,6 +1573,8 @@ class LibraryViewModel @Inject constructor(
                 limit = null,
                 includeExpired = includeExpired,
                 projection = LibraryProjection.STUB,
+                filterByTag = filterByTag,
+                tagIds = tagParam,
             )
             steamAppDao.orderedSteamRows(query).map { stub ->
                 LibraryRef.Steam(
