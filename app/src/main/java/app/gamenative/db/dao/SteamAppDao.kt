@@ -630,6 +630,14 @@ interface SteamAppDao {
     """)
     suspend fun backfillInstallDirsFromConfig()
 
+    // Resets last_change_number to 0 for fully-synced rows that still have empty store_tags.
+    // Called by refreshAllApps() before re-queuing all apps, so the PICS consumer's
+    // changeNumber guard doesn't skip apps that were synced before the store_tags column existed.
+    // received_pics = 1 excludes stub rows, whose lastChangeNumber = 0 is intentional.
+    // Self-healing: after the consumer processes each row it writes back the real lastChangeNumber.
+    @Query("UPDATE steam_app SET last_change_number = 0 WHERE received_pics = 1 AND store_tags = '[]'")
+    suspend fun resetChangeNumbersForEmptyStoreTags()
+
     @Query("SELECT * FROM steam_app WHERE id IN (:appIds)")
     suspend fun findSteamAppWithAppIds(appIds: List<Int>): List<SteamApp>
 

@@ -3656,6 +3656,13 @@ class SteamService : Service(), IChallengeUrlChanged {
                 Timber.i("refreshAllApps: All ${stubs.size} packages queued for package PICS")
 
                 // --- Phase 2: App PICS re-queue (with existing pause/resume) ---
+                // Before queuing, reset lastChangeNumber for any fully-synced row that still has
+                // empty store_tags. These were synced before the store_tags column existed, so their
+                // stored changeNumber matches Steam's current value and the consumer would skip them.
+                // Setting it to 0 forces generateSteamApp() to run for them; the consumer restores
+                // the real lastChangeNumber after writing the updated row.
+                service.appDao.resetChangeNumbersForEmptyStoreTags()
+
                 // ORDER BY id ASC ensures the list is stable across restarts so drop(offset) is correct.
                 val allIds = service.appDao.getAllAppIds()
                 val savedOffset = PrefManager.refreshAllAppsOffset
