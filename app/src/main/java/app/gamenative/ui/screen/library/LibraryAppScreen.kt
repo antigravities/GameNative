@@ -1139,20 +1139,6 @@ internal fun AppScreenContent(
                     // Logic lives in GameTitleOrLogo to avoid blowing the DEX register limit.
                     GameTitleOrLogo(name = displayInfo.name, logoUrl = displayInfo.logoUrl)
 
-                    // Developer and year
-                    val releaseYear = remember(displayInfo.releaseDate) {
-                        if (displayInfo.releaseDate > 0) {
-                            SimpleDateFormat("yyyy", Locale.getDefault()).format(Date(displayInfo.releaseDate * 1000))
-                        } else {
-                            ""
-                        }
-                    }
-                    Text(
-                        text = "${displayInfo.developer} • $releaseYear",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.85f),
-                    )
-
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Integrated action bar - overlaid on hero
