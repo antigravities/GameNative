@@ -129,6 +129,9 @@ internal fun LibraryListPane(
 ) {
     val context = LocalContext.current
     val snackBarHost = remember { SnackbarHostState() }
+    // Read once when this composable enters composition; Settings is a separate screen so
+    // navigating back here after changing the pref triggers a fresh composition.
+    val showCompatibilityBadges = remember { PrefManager.showCompatibilityBadges }
 
     // Calculate installed count based on current filter state
     val installedCount = remember(
@@ -326,7 +329,7 @@ internal fun LibraryListPane(
                                         paneType = currentLayout,
                                         onFocus = onFocus,
                                         imageRefreshCounter = state.imageRefreshCounter,
-                                        compatibilityStatus = state.compatibilityMap[item.name],
+                                        compatibilityStatus = if (showCompatibilityBadges) state.compatibilityMap[item.name] else null,
                                         gameStats = state.statsFor(item),
                                         onAddToCategory = onAddToCategoryStable,
                                         onUninstall = onUninstallStable,

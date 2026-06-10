@@ -57,6 +57,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.data.LibraryItem
 import app.gamenative.ui.data.LibraryState
@@ -220,6 +221,7 @@ internal fun LibraryCarouselPane(
     val pullToRefreshState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val showCompatibilityBadges = remember { PrefManager.showCompatibilityBadges }
 
     val configuration = LocalConfiguration.current
     val horizontalPadding = AdaptivePadding.horizontal()
@@ -522,7 +524,7 @@ internal fun LibraryCarouselPane(
                                             onFocus = carouselOnFocus,
                                             paneType = PaneType.GRID_CAPSULE,
                                             imageRefreshCounter = state.imageRefreshCounter,
-                                            compatibilityStatus = state.compatibilityMap[item.name],
+                                            compatibilityStatus = if (showCompatibilityBadges) state.compatibilityMap[item.name] else null,
                                             gameStats = state.statsFor(item),
                                             showFocusGlow = false,
                                             enableFocusScale = false,
