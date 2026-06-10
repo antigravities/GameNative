@@ -1283,6 +1283,14 @@ object PrefManager {
             setPref(SHOW_RECOMMENDATIONS, value)
         }
 
+    // Show compatibility badges (Compatible / Unknown / Not Compatible) on library cards
+    private val SHOW_COMPATIBILITY_BADGES = booleanPreferencesKey("show_compatibility_badges")
+    var showCompatibilityBadges: Boolean
+        get() = getPref(SHOW_COMPATIBILITY_BADGES, true)
+        set(value) {
+            setPref(SHOW_COMPATIBILITY_BADGES, value)
+        }
+
     // Show dialog when adding custom game folder
     private val SHOW_ADD_CUSTOM_GAME_DIALOG = booleanPreferencesKey("show_add_custom_game_dialog")
     var showAddCustomGameDialog: Boolean

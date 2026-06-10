@@ -364,6 +364,18 @@ fun SettingsGroupInterface(
             },
         )
 
+        var showCompatibilityBadges by rememberSaveable { mutableStateOf(PrefManager.showCompatibilityBadges) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_interface_show_compatibility_badges_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_interface_show_compatibility_badges_subtitle)) },
+            state = showCompatibilityBadges,
+            onCheckedChange = {
+                showCompatibilityBadges = it
+                PrefManager.showCompatibilityBadges = it
+            },
+        )
+
         if (!BuildConfig.MODERN_ANDROID) {
             val anyFrontendSyncConfigured by FrontendSyncManager.anyConfigured.collectAsState()
             SettingsMenuLink(
