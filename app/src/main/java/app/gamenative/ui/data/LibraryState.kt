@@ -4,6 +4,7 @@ import app.gamenative.PrefManager
 import app.gamenative.data.GameCompatibilityStatus
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
+import app.gamenative.data.SteamTag
 import app.gamenative.ui.component.dialog.state.CategoryDialogState
 import app.gamenative.ui.enums.AppFilter
 import app.gamenative.utils.DeviceGameStatsService.DeviceGameStats
@@ -83,6 +84,11 @@ data class LibraryState(
 
     // State for the "Add to Category" dialog triggered from the game options panel
     val categoryDialogState: CategoryDialogState = CategoryDialogState(),
+
+    // Active Steam store tag ID filters (empty = no filtering; tags are OR-ed together)
+    val selectedTagIds: Set<Int> = PrefManager.selectedTagIds,
+    // All known Steam tags, populated on first library open from the steam_tag DB table.
+    val availableTags: List<SteamTag> = emptyList(),
 )
 
 /**

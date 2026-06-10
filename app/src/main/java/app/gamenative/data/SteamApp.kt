@@ -177,6 +177,11 @@ data class SteamApp(
 
     @ColumnInfo(name = "workshop_download_pending", defaultValue = "0")
     val workshopDownloadPending: Boolean = false,
+
+    // Steam store tag IDs from PICS common/store_tags (e.g. 492 = "Indie", 1716 = "RPG").
+    // Names are resolved at display time via the steam_tag table.
+    @ColumnInfo(name = "store_tags", defaultValue = "[]")
+    val storeTags: List<Int> = emptyList(),
 ) {
     val logoUrl: String
         get() = "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/$id/$logoHash.jpg"

@@ -80,6 +80,23 @@ internal val ROOM_MIGRATION_V23_to_V24 = object : Migration(23, 24) {
     }
 }
 
+// v25 adds store_tags to steam_app and the steam_tag table. MANUAL migration (not AutoMigration)
+// for the same reason as v23→v24: the onOpen-created indexes must be dropped so post-migration
+// schema validation sees indices = {}. onOpen recreates them immediately after.
+internal val ROOM_MIGRATION_V24_to_V25 = object : Migration(24, 25) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "ALTER TABLE steam_app ADD COLUMN store_tags TEXT NOT NULL DEFAULT '[]'"
+        )
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `steam_tag` (`id` INTEGER NOT NULL, `name` TEXT NOT NULL, PRIMARY KEY(`id`))"
+        )
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_dlc_for_app_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_package_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_name_sort_key")
+    }
+}
+
 // Devices on either v21 are missing exactly one of the two changes — both operations are defensive.
 internal val ROOM_MIGRATION_V21_to_V22 = object : Migration(21, 22) {
     override fun migrate(connection: SQLiteConnection) {

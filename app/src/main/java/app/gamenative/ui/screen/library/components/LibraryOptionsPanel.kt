@@ -54,6 +54,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
@@ -74,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.ui.component.GameStatsKey
+import app.gamenative.data.SteamTag
 import app.gamenative.ui.component.OptionListItem
 import app.gamenative.ui.component.OptionRadioItem
 import app.gamenative.ui.component.OptionSectionHeader
@@ -96,6 +98,9 @@ fun LibraryOptionsPanel(
     onViewChanged: (PaneType) -> Unit,
     selectedCategories: Set<String> = emptySet(),
     onCategoryFilterToggled: (String) -> Unit = {},
+    selectedTagIds: Set<Int> = emptySet(),
+    availableTags: List<SteamTag> = emptyList(),
+    onTagFilterDialogOpen: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val firstItemFocusRequester = remember { FocusRequester() }
@@ -224,6 +229,31 @@ fun LibraryOptionsPanel(
                                 }
                             }
 
+                            Spacer(modifier = Modifier.height(20.dp))
+                        }
+
+                        // Tag filter section — single tappable row that opens the tag picker dialog.
+                        // Only shown when there are tags loaded (first run may be empty briefly).
+                        if (availableTags.isNotEmpty()) {
+                            OptionSectionHeader(text = stringResource(R.string.library_tag_filter_title))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusGroup()
+                                    .padding(horizontal = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                OptionListItem(
+                                    text = if (selectedTagIds.isEmpty())
+                                        stringResource(R.string.library_tag_filter_all)
+                                    else
+                                        stringResource(R.string.library_tag_filter_n_selected, selectedTagIds.size),
+                                    selected = selectedTagIds.isNotEmpty(),
+                                    onClick = onTagFilterDialogOpen,
+                                    icon = Icons.Default.LocalOffer,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                             Spacer(modifier = Modifier.height(20.dp))
                         }
 

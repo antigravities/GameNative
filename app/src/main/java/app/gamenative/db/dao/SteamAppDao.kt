@@ -84,7 +84,7 @@ private const val LIBRARY_FILTERS =
 // SteamAppSummary mapping is unaffected.
 private const val SUMMARY_COLS =
     "app.id, app.name, app.type, app.package_id, app.client_icon_hash, app.library_assets, " +
-    "app.owner_account_id, app.install_dir, app.content_descriptors, app.size_bytes "
+    "app.owner_account_id, app.install_dir, app.content_descriptors, app.size_bytes, app.store_tags "
 
 // Projection for buildLibraryPageQuery: SUMMARY returns the full SteamAppSummary columns (one page,
 // blobs included); STUB returns only the lightweight OrderedSteamStub columns (id, name_sort_key,
@@ -122,6 +122,8 @@ fun buildLibraryPageQuery(
     invalidPkgId: Int = INVALID_PKG_ID,
     includeExpired: Int = 0,
     projection: LibraryProjection = LibraryProjection.SUMMARY,
+    filterByTag: Int = 0,
+    tagIds: List<Int> = listOf(-1),
 ): SupportSQLiteQuery {
     fun placeholders(n: Int) = List(n) { "?" }.joinToString(",")
     val args = ArrayList<Any?>()
@@ -162,6 +164,12 @@ fun buildLibraryPageQuery(
     args.addAll(hiddenIds)
     sb.append("AND (? = 0 OR app.id IN (").append(placeholders(categoryIds.size)).append(")) ")
     args.add(filterByCategory); args.addAll(categoryIds)
+    // Tag filter: matches if the app's store_tags JSON array contains ANY of the selected tag IDs.
+    // json_each() is available on all Android versions the app targets (SQLite 3.9+ with JSON1).
+    // Callers pass [-1] as tagIds when not filtering, so the IN () case never arises.
+    sb.append("AND (? = 0 OR EXISTS (SELECT 1 FROM json_each(app.store_tags) WHERE CAST(value AS INTEGER) IN (")
+        .append(placeholders(tagIds.size)).append("))) ")
+    args.add(filterByTag); args.addAll(tagIds)
 
     // ORDER BY: favorites-first tier, then the per-option ordering, then id as a stable tiebreaker.
     sb.append("ORDER BY (CASE WHEN app.id IN (").append(placeholders(favIds.size)).append(") THEN 0 ELSE 1 END), ")
@@ -291,7 +299,7 @@ interface SteamAppDao {
 
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, content_descriptors, size_bytes " +
+            "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "ORDER BY LOWER(app.name), app.id LIMIT :limit OFFSET :offset",
     )
@@ -306,7 +314,7 @@ interface SteamAppDao {
     // Caller must guard against empty [ids] — Room generates invalid SQL for IN ().
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, content_descriptors, size_bytes " +
+            "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.id IN (:ids)",
     )
@@ -381,7 +389,7 @@ interface SteamAppDao {
     // An FTS5 virtual table (proposal #4) would fix this properly.
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, content_descriptors, size_bytes " +
+            "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.type IN (:types) " +
             "AND LOWER(app.name) LIKE '%' || LOWER(:searchQuery) || '%' " +
