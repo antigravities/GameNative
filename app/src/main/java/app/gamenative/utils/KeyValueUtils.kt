@@ -22,6 +22,7 @@ import app.gamenative.enums.OSArch
 import app.gamenative.enums.PathType
 import app.gamenative.enums.ReleaseState
 import app.gamenative.enums.SteamRealm
+import app.gamenative.PrefManager
 import app.gamenative.service.SteamService.Companion.INVALID_APP_ID
 import `in`.dragonbra.javasteam.types.KeyValue
 import java.util.Date
@@ -36,7 +37,15 @@ const val CURRENT_UFS_PARSE_VERSION = 4
 fun KeyValue.generateSteamApp(): SteamApp {
     // Hoisted so the precomputed nameSortKey / isAdult columns below can reuse them without
     // re-parsing the KeyValue tree.
-    val name = this["common"]["name"].value.orEmpty()
+    val name = run {
+        // Prefer the localized name for the user's download language over the base name.
+        // Some games (common on Chinese storefronts) have a non-English string as their
+        // canonical name but provide a translation under name_localized.
+        val baseName = this["common"]["name"].value.orEmpty()
+        val preferredLang = PrefManager.containerLanguage   // e.g. "english", "schinese"
+        val localizedName = this["common"]["name_localized"][preferredLang].value
+        if (!localizedName.isNullOrBlank()) localizedName else baseName
+    }
     // Each child's name is an index ("0", "1", …) and its value is the descriptor ID string.
     val contentDescriptors = this["common"]["content_descriptors"].children
         .mapNotNull { it.value?.toIntOrNull() }
