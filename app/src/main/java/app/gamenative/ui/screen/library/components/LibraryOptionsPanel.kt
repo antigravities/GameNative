@@ -459,4 +459,5 @@ private fun SortOption.icon(): ImageVector = when (this) {
     SortOption.RUNS_HIGH -> Icons.Rounded.SportsEsports
     SortOption.REVIEWS_HIGH -> Icons.Rounded.Star
     SortOption.REVIEWS_GPU_HIGH -> Icons.Rounded.Stars
+    SortOption.RATING -> Icons.Default.Star
 }
