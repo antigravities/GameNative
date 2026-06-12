@@ -13,10 +13,10 @@ import app.gamenative.service.SteamService
 import `in`.dragonbra.javasteam.enums.ELicenseFlags
 import java.util.EnumSet
 
-// Steam content_descriptor IDs treated as adult-only: 1 = NudityOrSexualContent,
+// Steam content_descriptor IDs treated as adult-only:
 // 3 = AdultOnlySexualContent, 4 = GratuitousSexualContent. Single source of truth shared by the
 // PICS-write is_adult computation and the library's adult filter.
-val ADULT_CONTENT_DESCRIPTOR_IDS = setOf(1, 3, 4)
+val ADULT_CONTENT_DESCRIPTOR_IDS = setOf(3, 4)
 
 @Entity(
     "steam_app",
