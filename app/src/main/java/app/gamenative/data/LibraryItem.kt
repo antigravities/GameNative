@@ -45,6 +45,9 @@ data class LibraryItem(
     val hasWorkshop: Boolean = false,
     // True when the app is in the Favorites magic category; drives sort priority and amber highlight.
     val isFavorite: Boolean = false,
+    // True when Steam PICS content_descriptors contains an adult-only ID (NudityOrSexualContent,
+    // AdultOnlySexualContent, GratuitousSexualContent). Drives the red border in library cards.
+    val isAdult: Boolean = false,
 ) {
     val clientIconUrl: String
         get() = when (gameSource) {
