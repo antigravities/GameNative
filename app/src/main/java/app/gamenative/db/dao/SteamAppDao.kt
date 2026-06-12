@@ -131,12 +131,16 @@ fun buildLibraryPageQuery(
     val sb = StringBuilder()
 
     val usesInstalledTier = sortOption == SortOption.INSTALLED_FIRST || sortOption == SortOption.RECENTLY_PLAYED
+    val usesPurchaseDate = sortOption == SortOption.PURCHASE_DATE
     val joinedAppInfo = installedFilter || usesInstalledTier
     val selectCols = when (projection) {
         LibraryProjection.SUMMARY -> SUMMARY_COLS
         LibraryProjection.STUB -> {
             val downloaded = if (joinedAppInfo) "COALESCE(app_info.is_downloaded, 0)" else "0"
-            "app.id, app.name_sort_key, app.size_bytes, app.review_score, app.review_percentage, $downloaded AS is_downloaded "
+            // Project the license purchase timestamp only when sorting by it; otherwise use a
+            // literal 0 so the column is always present in the cursor for OrderedSteamStub.
+            val purchaseDate = if (usesPurchaseDate) "COALESCE(lic.time_created, 0)" else "0"
+            "app.id, app.name_sort_key, app.size_bytes, app.review_score, app.review_percentage, $downloaded AS is_downloaded, $purchaseDate AS time_created_epoch "
         }
     }
     sb.append("SELECT ").append(selectCols).append("FROM steam_app AS app ")
@@ -144,6 +148,10 @@ fun buildLibraryPageQuery(
         sb.append("INNER JOIN app_info ON app_info.id = app.id AND app_info.is_downloaded = 1 ")
     } else if (usesInstalledTier) {
         sb.append("LEFT JOIN app_info ON app_info.id = app.id ")
+    }
+    // Join steam_license only for PURCHASE_DATE sort to avoid overhead on other sorts.
+    if (usesPurchaseDate) {
+        sb.append("LEFT JOIN steam_license AS lic ON lic.packageId = app.package_id ")
     }
 
     // OWNED_APPS_WHERE, inlined with positional args (the EXISTS subqueries bind nothing).
@@ -185,6 +193,7 @@ fun buildLibraryPageQuery(
         // Unrated rows (both columns 0) sink to the bottom under DESC. Must stay in lockstep with
         // LibraryViewModel.refComparator's RATING branch (ratingRank = score * 1000 + percentage).
         SortOption.RATING -> sb.append("app.review_score DESC, app.review_percentage DESC, app.name_sort_key, app.id ")
+        SortOption.PURCHASE_DATE -> sb.append("time_created_epoch DESC, app.name_sort_key, app.id ")
         else -> sb.append("app.name_sort_key, app.id ") // NAME_ASC and any future default
     }
 
