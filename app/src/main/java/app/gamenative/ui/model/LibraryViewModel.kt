@@ -986,6 +986,7 @@ class LibraryViewModel @Inject constructor(
                         isShared = (PrefManager.steamUserAccountId != 0 && !item.ownerAccountId.contains(PrefManager.steamUserAccountId)),
                         sizeBytes = item.sizeBytes,
                         runtime = resolveRuntimeFor(context, "${GameSource.STEAM.name}_${item.id}"),
+                        isAdult = item.isAdult,
                     ).also { newItem -> steamItemCache[item.id] = item to newItem }
                 }
 
@@ -1497,6 +1498,7 @@ class LibraryViewModel @Inject constructor(
                                 sizeBytes = item.sizeBytes,
                                 isInstalled = isInDownloadDirectory(item),
                                 isFavorite = ref.isFavorite,
+                                isAdult = item.isAdult,
                             ),
                         )
                     }

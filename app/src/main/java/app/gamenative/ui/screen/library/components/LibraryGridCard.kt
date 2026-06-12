@@ -170,6 +170,7 @@ internal fun GridViewCard(
             ),
             border = when {
                 isFocused -> BorderStroke(2.dp, focusBorderBrush)
+                appInfo.isAdult -> BorderStroke(1.dp, Color(0xFFCC0000))
                 appInfo.isRecommended -> BorderStroke(
                     1.dp,
                     MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),

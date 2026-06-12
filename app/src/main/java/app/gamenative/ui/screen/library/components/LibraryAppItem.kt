@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import app.gamenative.R
@@ -233,7 +234,18 @@ private fun IconViewCard(
                 .padding(vertical = 6.dp, horizontal = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(modifier = Modifier.size(60.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .then(
+                        // Red ring for adult-content games
+                        if (appInfo.isAdult) {
+                            Modifier.border(1.5.dp, Color(0xFFCC0000), RoundedCornerShape(8.dp))
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
                 CoilImage(
                     modifier = Modifier
                         .size(60.dp)
