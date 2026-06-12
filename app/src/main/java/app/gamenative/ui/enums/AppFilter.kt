@@ -52,7 +52,7 @@ enum class AppFilter(
     ),
     PLAYTEST(
         code = 0x80,
-        displayText = "Playtest",
+        displayTextRes = R.string.app_filter_playtest,
         icon = Icons.Default.Science,
     ),
     SHARED(
