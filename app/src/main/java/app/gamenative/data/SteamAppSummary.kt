@@ -32,6 +32,9 @@ data class SteamAppSummary(
     @ColumnInfo("review_percentage")
     val reviewPercentage: Int = 0,
 ) {
+    val isAdult: Boolean
+        get() = contentDescriptors.any { it in ADULT_CONTENT_DESCRIPTOR_IDS }
+
     val headerUrl: String
         get() = "https://shared.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg"
 

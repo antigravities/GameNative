@@ -953,6 +953,7 @@ class LibraryViewModel @Inject constructor(
                         heroImageUrl = item.getHeroUrl(),
                         isShared = (PrefManager.steamUserAccountId != 0 && !item.ownerAccountId.contains(PrefManager.steamUserAccountId)),
                         sizeBytes = item.sizeBytes,
+                        isAdult = item.isAdult,
                     ).also { newItem -> steamItemCache[item.id] = item to newItem }
                 }
 
@@ -1450,6 +1451,7 @@ class LibraryViewModel @Inject constructor(
                                 sizeBytes = item.sizeBytes,
                                 isInstalled = isInDownloadDirectory(item),
                                 isFavorite = ref.isFavorite,
+                                isAdult = item.isAdult,
                             ),
                         )
                     }
