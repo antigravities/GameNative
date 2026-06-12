@@ -163,6 +163,9 @@ class LibraryViewModel @Inject constructor(
         // (review_score DESC, review_percentage DESC). Non-Steam sources have no rating data → 0,
         // which sinks them to the bottom alongside unrated Steam apps.
         abstract val ratingRank: Int
+        // Unix timestamp (ms) from steam_license.time_created for the PURCHASE_DATE sort.
+        // Non-Steam sources have no license data → 0, sinking them to the bottom.
+        abstract val purchaseDateEpoch: Long
 
         data class Steam(
             val appId: Int,
@@ -171,6 +174,7 @@ class LibraryViewModel @Inject constructor(
             override val installedTier: Boolean,
             override val isFavorite: Boolean,
             override val ratingRank: Int,
+            override val purchaseDateEpoch: Long,
         ) : LibraryRef()
 
         // displayInstalled is the badge value (kept verbatim from the prebuilt entry); installedTier is
@@ -183,6 +187,7 @@ class LibraryViewModel @Inject constructor(
             override val installedTier: Boolean,
             override val isFavorite: Boolean,
             override val ratingRank: Int = 0,
+            override val purchaseDateEpoch: Long = 0,
         ) : LibraryRef()
     }
 
@@ -1231,6 +1236,12 @@ class LibraryViewModel @Inject constructor(
 
                 SortOption.RATING -> compareByDescending<LibraryEntry> { ratingOf[it.item.appId] ?: 0 }
                     .thenBy { sortKeyOf.getValue(it.item.appId) }
+
+                // The in-memory path is only reached for the COMPATIBLE filter, which yields a
+                // small Steam-only result set. License timestamps aren't available on LibraryEntry,
+                // so fall back to name order (same behaviour as hitting this path for any other
+                // non-stats sort that lacks an in-memory equivalent).
+                SortOption.PURCHASE_DATE -> compareBy { sortKeyOf.getValue(it.item.appId) }
             }
 
             // Prepend favorites-first tier only when there are favorites; avoids an extra
@@ -1603,6 +1614,7 @@ class LibraryViewModel @Inject constructor(
                     installedTier = stub.isDownloaded,
                     isFavorite = stub.id in favSet,
                     ratingRank = stub.reviewScore * 1000 + stub.reviewPercentage,
+                    purchaseDateEpoch = stub.timeCreatedEpoch,
                 )
             }
         } else {
@@ -1671,6 +1683,7 @@ class LibraryViewModel @Inject constructor(
             // Must mirror buildLibraryPageQuery's RATING ORDER BY (score DESC, percentage DESC, name)
             // so mergeSorted interleaves SQL-ordered Steam refs and non-Steam refs correctly.
             SortOption.RATING -> compareByDescending<LibraryRef> { it.ratingRank }.thenBy { it.sortKey }
+            SortOption.PURCHASE_DATE -> compareByDescending<LibraryRef> { it.purchaseDateEpoch }.thenBy { it.sortKey }
             // Stats sorts (FPS_HIGH, RUNS_HIGH, REVIEWS_HIGH, REVIEWS_GPU_HIGH) are routed to
             // filterAppsInMemory before refComparator is called, so this branch is unreachable.
             else -> compareBy { it.sortKey }

@@ -24,4 +24,8 @@ data class OrderedSteamStub(
     val reviewPercentage: Int = 0,
     @ColumnInfo("is_downloaded")
     val isDownloaded: Boolean = false,
+    // Unix timestamp (ms) from steam_license.time_created for the PURCHASE_DATE sort.
+    // Zero when the sort is not PURCHASE_DATE (the query projects a literal 0 instead of joining).
+    @ColumnInfo("time_created_epoch")
+    val timeCreatedEpoch: Long = 0,
 )
