@@ -11,6 +11,7 @@ import app.gamenative.ui.theme.settingsTileColorsAlt
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsSwitch
 import com.winlator.core.StringUtils
+import com.winlator.core.envvars.EnvVars
 
 @Composable
 fun WineTabContent(state: ContainerConfigState) {
@@ -82,6 +83,24 @@ fun WineTabContent(state: ContainerConfigState) {
             onItemSelected = {
                 state.mouseWarpIndex.value = it
                 state.config.value = config.copy(mouseWarpOverride = state.mouseWarps[it].lowercase())
+            },
+        )
+        // Wine debug logging preset. Backed by the container's envVars string rather than a
+        // dedicated ContainerData field: the launch path (XServerScreen) applies
+        // container.envVars after its own default WINEDEBUG, so a value stored here wins.
+        val wineDebugVerboseValue = "-all,err+all,warn+all"
+        val wineDebugOn = EnvVars(config.envVars).get("WINEDEBUG") == wineDebugVerboseValue
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.enable_wine_debug_logging)) },
+            subtitle = { Text(text = stringResource(R.string.enable_wine_debug_logging_subtitle)) },
+            state = wineDebugOn,
+            onCheckedChange = { checked ->
+                // EnvVars wraps a LinkedHashMap; rebuild from the current string, add/remove
+                // our key, then serialize back into the config's envVars string.
+                val envVars = EnvVars(config.envVars)
+                if (checked) envVars.put("WINEDEBUG", wineDebugVerboseValue) else envVars.remove("WINEDEBUG")
+                state.config.value = config.copy(envVars = envVars.toString())
             },
         )
     }
