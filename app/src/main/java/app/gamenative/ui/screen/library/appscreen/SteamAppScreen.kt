@@ -79,8 +79,10 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import app.gamenative.ui.component.dialog.CrashLogDialog
 import app.gamenative.ui.component.dialog.GameManagerDialog
 import app.gamenative.ui.component.dialog.WorkshopManagerDialog
+import com.winlator.core.envvars.EnvVars
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.screen.library.GameMigrationDialog
 import app.gamenative.ui.component.dialog.state.GameManagerDialogState
@@ -216,6 +218,18 @@ class SteamAppScreen : BaseAppScreen() {
         fun isWorkshopDialogVisible(gameId: Int): Boolean {
             return workshopDialogVisible[gameId] == true
         }
+
+        private val wineLogDialogVisibleIds = mutableStateListOf<String>()
+
+        fun showWineLogDialog(appId: String) {
+            if (appId !in wineLogDialogVisibleIds) wineLogDialogVisibleIds.add(appId)
+        }
+
+        fun hideWineLogDialog(appId: String) {
+            wineLogDialogVisibleIds.remove(appId)
+        }
+
+        fun isWineLogDialogVisible(appId: String): Boolean = appId in wineLogDialogVisibleIds
 
         private val branchDialogVisibleIds = mutableStateListOf<Int>()
 
@@ -970,6 +984,25 @@ class SteamAppScreen : BaseAppScreen() {
             ),
         )
 
+        // Show "View Wine Debug Logs" when wine debug logging is active (globally or per-container)
+        // and a log file from the previous session exists.
+        val wineLogFile = remember(appId) {
+            File(context.getExternalFilesDir(null), "wine_logs/wine_debug.log")
+        }
+        val wineDebugEnabled = remember(appId) {
+            val container = ContainerUtils.getOrCreateContainer(context, appId)
+            PrefManager.enableWineDebug ||
+                EnvVars(container.envVars).get("WINEDEBUG") == "-all,err+all,warn+all"
+        }
+        if (isInstalled && wineDebugEnabled && wineLogFile.exists()) {
+            options.add(
+                AppMenuOption(
+                    optionType = AppOptionMenuType.ViewWineDebugLogs,
+                    onClick = { showWineLogDialog(appId) },
+                ),
+            )
+        }
+
         return options
     }
 
@@ -1640,6 +1673,54 @@ class SteamAppScreen : BaseAppScreen() {
                     }
                 },
                 onDismissRequest = { hideBranchDialog(gameId) },
+            )
+        }
+
+        // Wine debug log viewer — shows the log captured during the last session when debug is enabled
+        var wineLogDialogShown by remember(libraryItem.appId) {
+            mutableStateOf(isWineLogDialogVisible(libraryItem.appId))
+        }
+        LaunchedEffect(libraryItem.appId) {
+            snapshotFlow { isWineLogDialogVisible(libraryItem.appId) }
+                .collect { wineLogDialogShown = it }
+        }
+        if (wineLogDialogShown) {
+            val wineLogFile = remember(libraryItem.appId) {
+                File(context.getExternalFilesDir(null), "wine_logs/wine_debug.log")
+            }
+            val saveWineLogLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.CreateDocument("text/plain"),
+            ) { uri ->
+                uri?.let {
+                    runCatching {
+                        context.contentResolver.openOutputStream(it)?.use { out ->
+                            wineLogFile.inputStream().use { inp -> inp.copyTo(out) }
+                        }
+                    }
+                }
+            }
+            // Read only the last 256 KB so we don't OOM on very large logs
+            val logText by produceState("Loading...", wineLogFile) {
+                value = withContext(Dispatchers.IO) {
+                    if (!wineLogFile.exists()) return@withContext "No Wine debug log found."
+                    val maxBytes = 256 * 1024L
+                    val size = wineLogFile.length()
+                    if (size <= maxBytes) {
+                        wineLogFile.readText()
+                    } else {
+                        wineLogFile.inputStream().use { stream ->
+                            stream.skip(size - maxBytes)
+                            stream.readBytes().toString(Charsets.UTF_8)
+                        }
+                    }
+                }
+            }
+            CrashLogDialog(
+                visible = true,
+                fileName = wineLogFile.name,
+                fileText = logText,
+                onSave = { saveWineLogLauncher.launch(wineLogFile.name) },
+                onDismissRequest = { hideWineLogDialog(libraryItem.appId) },
             )
         }
     }

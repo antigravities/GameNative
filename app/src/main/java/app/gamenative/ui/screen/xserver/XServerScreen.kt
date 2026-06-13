@@ -3406,9 +3406,13 @@ private fun setupXEnvironment(
         else
             "-all",
     )
-    // capture debug output to file if either Wine or Box86/64 logging is enabled
+    // capture debug output to file if either Wine or Box86/64 logging is enabled.
+    // Also check the per-container WINEDEBUG toggle (stored in container.envVars) since it is
+    // merged into the launch env vars later and is not reflected in PrefManager.enableWineDebug.
+    val containerWineDebug = EnvVars(container.envVars).get("WINEDEBUG")
     var logFile: File? = null
-    val captureLogs = enableWineDebug || enableBox86Logs
+    val captureLogs = enableWineDebug || enableBox86Logs ||
+        (containerWineDebug.isNotEmpty() && containerWineDebug != "-all")
     if (captureLogs) {
         val wineLogDir = File(context.getExternalFilesDir(null), "wine_logs")
         wineLogDir.mkdirs()
