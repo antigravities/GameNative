@@ -328,6 +328,9 @@ dependencies {
     implementation(libs.spongycastle)
     implementation(libs.okhttp.dnsoverhttps)
 
+    // ML Kit on-device GenAI summarization (requires AICore / Gemini Nano)
+    implementation(libs.mlkit.genai.summarization)
+
     // Split Modules
     implementation(libs.bundles.google)
 
