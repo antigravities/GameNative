@@ -13,17 +13,57 @@ object PatchApi {
     /**
      * Downloads a single file from [url] to [dest], overwriting any existing content.
      * Throws IOException on network failure or non-2xx response.
+     *
+     * @param onProgress Optional progress callback invoked as bytes arrive with the running
+     *   `bytesRead` and the total `contentLength` (-1 when the server omits Content-Length).
+     *   Throttled to fire only when the integer percent changes (plus once at completion), so
+     *   callers can safely push it straight into UI state without flooding updates.
      */
-    fun downloadFile(url: String, dest: java.io.File) {
+    fun downloadFile(
+        url: String,
+        dest: java.io.File,
+        onProgress: ((bytesRead: Long, contentLength: Long) -> Unit)? = null,
+    ) {
         val request = GameNativeApi.buildGetRequest(url)
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 throw java.io.IOException("HTTP ${response.code} downloading $url")
             }
+            val body = response.body ?: throw java.io.IOException("Empty response body for $url")
             dest.parentFile?.mkdirs()
-            response.body?.byteStream()?.use { input ->
-                dest.outputStream().use { output -> input.copyTo(output) }
-            } ?: throw java.io.IOException("Empty response body for $url")
+
+            if (onProgress == null) {
+                // Fast path — no progress tracking needed.
+                body.byteStream().use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
+                }
+                return
+            }
+
+            val contentLength = body.contentLength() // -1 when unknown
+            body.byteStream().use { input ->
+                dest.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var bytesRead = 0L
+                    var lastPercent = -1
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        bytesRead += read
+                        // Throttle: only report when the whole-number percent advances.
+                        if (contentLength > 0) {
+                            val percent = (bytesRead * 100 / contentLength).toInt()
+                            if (percent != lastPercent) {
+                                lastPercent = percent
+                                onProgress(bytesRead, contentLength)
+                            }
+                        }
+                    }
+                    // Always emit a final progress event (covers unknown-length files too).
+                    onProgress(bytesRead, contentLength)
+                }
+            }
         }
     }
 

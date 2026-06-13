@@ -1050,8 +1050,10 @@
     <string name="settings_patch_database_url_title">Patch Database URL</string>
     <string name="settings_patch_database_url_subtitle">Base URL for automatic game patches. Leave blank to disable.</string>
     <string name="patch_downloading">Downloading patch files…</string>
+    <string name="patch_downloading_file">Downloading %1$s (%2$d/%3$d)…</string>
     <string name="patch_installing">Installing patches…</string>
     <string name="feature_downloading">Downloading feature files…</string>
+    <string name="feature_downloading_file">Downloading %1$s (%2$d/%3$d)…</string>
     <string name="features_none_available">No features available — check your Patch Database URL or connection.</string>
     <string name="settings_interface_restart_required_title">Restart Required</string>
 
