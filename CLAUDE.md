@@ -14,7 +14,20 @@ Try to keep diffs small where possible in the event that upstream provides fixes
 
 At the end of every plan, please provide a sample commit message that in a sentence or two summarizes a the changes made and/or problem(s) solved at a high level. Also, if you "learned" anything from exploring the codebase that may be useful to future agents, feel free to suggest changes to this CLAUDE.md file.
 
-## Codebase Guide
+## Building
+
+**JAVA_HOME must point at the Android Studio JBR (JDK 21), not a system JDK.** The global machine `JAVA_HOME` here is Temurin JDK 25, which AGP 8.8 rejects — CLI builds fail almost instantly with a cryptic `* What went wrong:` / `25.0.3` message. Always prefix CLI builds with the JBR:
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+```
+
+**Always build a single variant from the CLI** — never bare `build`/`assemble`. There are 8 variants (4 build types × `legacy`/`modern` flavors), and `build` also runs lint + unit tests:
+
+- Full debug APK: `.\gradlew.bat :app:assembleModernDebug`
+- **Compile-only verification** (does the Kotlin compile?): `.\gradlew.bat :app:compileModernDebugKotlin` — skips dexing/packaging (~25s faster); use this for "did my change build" checks.
+
+**Build-time profile** (incremental, one Kotlin file changed, warm daemon): ~50s total, dominated by `DexingNoClasspathTransform` (~21s, re-dexes the whole single-module app jar), `kspModernDebugKotlin` (~11s, Hilt+Room codegen), and `compileModernDebugKotlin` (~5s). The dexing + KSP cost is structural to the single giant `:app` module — every change re-processes the whole module. Add `--profile` to any build to regenerate `build/reports/profile/*.html`. Defender exclusions for the project, `~/.gradle`, the SDK, and the JBR materially help the I/O-heavy dexing transform on Windows.
 
 ### Two Core Namespaces
 
