@@ -974,6 +974,8 @@
     <string name="video_memory_size">Video Memory Size</string>
     <string name="enable_csmt">Enable CSMT (Command Stream Multi-Thread)</string>
     <string name="enable_strict_shader_math">Enable Strict Shader Math</string>
+    <string name="enable_wine_debug_logging">Enable Wine debug logging</string>
+    <string name="enable_wine_debug_logging_subtitle">Sets WINEDEBUG=-all,err+all,warn+all for this container (errors and warnings only)</string>
     <string name="mouse_warp_override">Mouse Warp Override</string>
 
     <!-- Container Configuration: Management -->
