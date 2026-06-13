@@ -177,7 +177,6 @@ import kotlinx.coroutines.yield
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.future.await
@@ -5136,6 +5135,12 @@ class SteamService : Service(), IChallengeUrlChanged {
                     }
                 }
 
+                // A reconnect re-enters onLoggedOn without passing through performLogOffDuties,
+                // so cancel the previous session's pipeline jobs first or duplicates accumulate
+                // (double-queued changelists, double consumers on the same channel). Unprocessed
+                // batches stay in the channels and are drained by the relaunched consumer.
+                picsChangesCheckerJob?.cancel()
+                picsGetProductInfoJob?.cancel()
                 picsChangesCheckerJob = continuousPICSChangesChecker()
                 picsGetProductInfoJob = continuousPICSGetProductInfo()
 
@@ -5761,6 +5766,11 @@ class SteamService : Service(), IChallengeUrlChanged {
                 Timber.w("No lastPICSChangeNumber, skipping")
             } catch (e: AsyncJobFailedException) {
                 Timber.w("AsyncJobFailedException, skipping")
+            } catch (e: Exception) {
+                // JavaSteam job timeouts surface as a bare CancellationException; without this
+                // catch they silently cancel this tick's coroutine. The next 60s tick retries.
+                ensureActive()
+                Timber.w(e, "PICSChangesCheck failed, skipping this tick")
             }
         }
     }
@@ -5773,7 +5783,10 @@ class SteamService : Service(), IChallengeUrlChanged {
         launch {
             appPicsChannel.receiveAsFlow()
                 .filter { it.isNotEmpty() }
-                .buffer(capacity = MAX_PICS_BUFFER, onBufferOverflow = BufferOverflow.SUSPEND)
+                // No buffer() here: it would eagerly prefetch batches OUT of the channel into an
+                // internal queue that is discarded on cancellation — leaking their _picsSyncPending
+                // counts. Batches now stay in the (capacity-1000) channel until actually collected,
+                // so a relaunched consumer can drain them and the counter stays accurate.
                 .collect { appRequests ->
                     Timber.d("Processing ${appRequests.size} app PICS requests")
                     // try/finally ensures _picsSyncPending is decremented even when we
@@ -5862,8 +5875,15 @@ class SteamService : Service(), IChallengeUrlChanged {
                                 }
                             }
                         }
-                    } catch (e: AsyncJobFailedException) {
-                        Timber.w("Could not get PICS product info $e")
+                    } catch (e: Exception) {
+                        // ensureActive() rethrows if OUR coroutine was genuinely cancelled, honoring
+                        // structured concurrency. If we're still active, the failure came from the
+                        // work itself — including the bare java.util.concurrent.CancellationException
+                        // JavaSteam's AsyncJobManager throws when a job times out (see getOwnedGames).
+                        // Without this, a single job timeout silently cancelled this consumer and the
+                        // "Syncing library" counter stuck until the next relogon relaunched it.
+                        ensureActive()
+                        Timber.w(e, "App PICS batch failed (${appRequests.size} apps); consumer continues")
                     } finally {
                         // Always decrement by the original batch size, regardless of how many
                         // apps were actually changed/inserted. coerceAtLeast guards against any
@@ -5876,7 +5896,7 @@ class SteamService : Service(), IChallengeUrlChanged {
         launch {
             packagePicsChannel.receiveAsFlow()
                 .filter { it.isNotEmpty() }
-                .buffer(capacity = MAX_PICS_BUFFER, onBufferOverflow = BufferOverflow.SUSPEND)
+                // No buffer() — same reasoning as the app consumer above.
                 .collect { packageRequests ->
                     Timber.d("Processing ${packageRequests.size} package PICS requests")
 
@@ -5884,10 +5904,19 @@ class SteamService : Service(), IChallengeUrlChanged {
                     if (!isLoggedIn) return@collect
                     val steamApps = instance?._steamApps ?: return@collect
 
-                    val callback = steamApps.picsGetProductInfo(
-                        apps = emptyList(),
-                        packages = packageRequests,
-                    ).await()
+                    // Guarded like the app consumer: a JavaSteam job timeout surfaces as a bare
+                    // CancellationException from await() and would otherwise silently cancel this
+                    // collector for the rest of the session.
+                    val callback = try {
+                        steamApps.picsGetProductInfo(
+                            apps = emptyList(),
+                            packages = packageRequests,
+                        ).await()
+                    } catch (e: Exception) {
+                        ensureActive() // rethrow genuine cancellation of our own coroutine
+                        Timber.w(e, "Package PICS batch failed (${packageRequests.size} packages); consumer continues")
+                        return@collect
+                    }
 
                     callback.results.forEach { picsCallback ->
                         // Don't race the queue.
@@ -6027,8 +6056,12 @@ class SteamService : Service(), IChallengeUrlChanged {
                                         appPicsChannel.send(chunk)
                                     }
                             }
-                        } catch (e: AsyncJobFailedException) {
-                            Timber.w("Could not get PICS product info $e")
+                        } catch (e: Exception) {
+                            // Rethrow genuine cancellation; survive JavaSteam job timeouts (bare
+                            // CancellationException) and other per-batch failures so one bad batch
+                            // doesn't kill the package consumer.
+                            ensureActive()
+                            Timber.w(e, "Package PICS access-token/queue step failed; consumer continues")
                         }
                     }
                 }
