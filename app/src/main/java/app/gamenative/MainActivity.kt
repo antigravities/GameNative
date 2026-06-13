@@ -405,8 +405,8 @@ class MainActivity : ComponentActivity() {
             applyImmersiveMode()
         }
 
-        // disable auto-stop when returning to foreground
-        SteamService.autoStopWhenIdle = false
+        // Returned to foreground within the grace period - cancel any pending Steam stop.
+        SteamService.cancelIdleStop()
 
         // Resume game according to the active suspend policy.
         if (hasReadyGameLifecycleState("resume")) {
@@ -490,8 +490,6 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         orientationSensorListener?.disable()
         orientationSensorListener = null
-        // enable auto-stop behavior if backgrounded
-        SteamService.autoStopWhenIdle = true
 
         Timber.d(
             "onStop - Index: %d, Connected: %b, Logged-In: %b, Changing-Config: %b, Keep Alive: %b, Is Importing: %b",
@@ -502,16 +500,14 @@ class MainActivity : ComponentActivity() {
             SteamService.keepAlive,
             SteamService.isImporting,
         )
-        // stop SteamService only if no downloads or sync are in progress
-        if (!isChangingConfigurations &&
-            SteamService.isConnected &&
-            !SteamService.hasActiveOperations() &&
-            !SteamService.isLoginInProgress &&
-            !SteamService.keepAlive &&
-            !SteamService.isImporting
-        ) {
-            Timber.i("Stopping SteamService - no active operations")
-            SteamService.stop()
+        // Don't disconnect immediately on backgrounding; give a grace period so quick
+        // app switches don't tear down the Steam connection. Skip on config changes
+        // (e.g. rotation) — those aren't real backgrounding. Idle conditions are
+        // re-checked when the timer fires, so an operation started in the meantime
+        // keeps the service alive.
+        if (!isChangingConfigurations) {
+            Timber.i("App backgrounded - scheduling Steam idle stop after grace period")
+            SteamService.scheduleIdleStop()
         }
 
         // Stop GOGService if running and no downloads in progress
