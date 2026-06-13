@@ -166,6 +166,17 @@ public class Container {
 
     private String containerVariant = DEFAULT_VARIANT;
 
+    /** JSON-encoded list of selected feature names; "[]" when none are selected. */
+    private String selectedFeatures = "[]";
+
+    public String getSelectedFeatures() {
+        return selectedFeatures;
+    }
+
+    public void setSelectedFeatures(String selectedFeatures) {
+        this.selectedFeatures = selectedFeatures != null ? selectedFeatures : "[]";
+    }
+
     public String getGraphicsDriverVersion() {
         return graphicsDriverVersion;
     }
@@ -685,6 +696,7 @@ public class Container {
             data.put("audioDriver", audioDriver);
             data.put("pulseaudioLowLatency", pulseaudioLowLatency);
             data.put("wincomponents", wincomponents);
+            data.put("selectedFeatures", selectedFeatures);
             data.put("drives", drives);
             data.put("showFPS", showFPS);
             data.put("launchRealSteam", launchRealSteam);
@@ -802,6 +814,9 @@ public class Container {
                     break;
                 case "wincomponents" :
                     setWinComponents(data.getString(key));
+                    break;
+                case "selectedFeatures" :
+                    setSelectedFeatures(data.getString(key));
                     break;
                 case "dxwrapper" :
                     setDXWrapper(data.getString(key));
@@ -1004,6 +1019,10 @@ public class Container {
 
             if (!data.has("wincomponents")) {
                 data.put("wincomponents", DEFAULT_WINCOMPONENTS);
+            }
+
+            if (!data.has("selectedFeatures")) {
+                data.put("selectedFeatures", "[]");
             }
 
             KeyValueSet wincomponents1 = new KeyValueSet(DEFAULT_WINCOMPONENTS);

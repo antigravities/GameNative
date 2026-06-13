@@ -41,6 +41,37 @@ object PatchApi {
      * @param gameSource Which store this game belongs to.
      * @param storeId The store's native string ID for this game.
      */
+    /**
+     * Fetches the flat global list of installable features from {baseUrl}/features.
+     *
+     * Features use the same [PatchEntry] schema as per-game patches but live at a single
+     * well-known endpoint rather than a per-store path.  404 / blank URL / parse failure /
+     * network error all degrade gracefully to an empty list so the UI shows no items.
+     *
+     * @param baseUrl The user-configured base URL (trailing slash is handled automatically).
+     */
+    fun fetchFeatures(baseUrl: String): ApiResult<List<PatchEntry>> {
+        if (baseUrl.isBlank()) return ApiResult.Success(emptyList())
+        val url = "${baseUrl.trimEnd('/')}/features"
+        Timber.tag("PatchApi").d("Fetching features from: $url")
+        return try {
+            val request = GameNativeApi.buildGetRequest(url)
+            val response = httpClient.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            if (response.code == 404) return ApiResult.Success(emptyList())
+            if (!response.isSuccessful) {
+                Timber.tag("PatchApi").w("HTTP ${response.code} fetching features")
+                return ApiResult.HttpError(response.code, body)
+            }
+            val features = Json { ignoreUnknownKeys = true }.decodeFromString<List<PatchEntry>>(body)
+            Timber.tag("PatchApi").d("Received ${features.size} feature(s)")
+            ApiResult.Success(features)
+        } catch (e: Exception) {
+            Timber.tag("PatchApi").e(e, "Failed to fetch features")
+            ApiResult.NetworkError(e)
+        }
+    }
+
     fun fetchPatches(
         baseUrl: String,
         gameSource: GameSource,
