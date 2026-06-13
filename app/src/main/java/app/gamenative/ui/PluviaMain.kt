@@ -660,15 +660,11 @@ fun PluviaMain(
                                 if (currentRoute == PluviaScreen.LoginUser.route) {
                                     navController.navigateFromLoginIfNeeded(targetRoute, "LogonEnded")
                                 } else if (currentRoute == PluviaScreen.Home.route + "?offline={offline}") {
-                                    val isCurrentlyOffline = navController.currentBackStackEntry
-                                        ?.arguments?.getBoolean("offline") ?: false
-                                    if (isCurrentlyOffline) {
-                                        navController.navigate(PluviaScreen.Home.route + "?offline=false") {
-                                            popUpTo(PluviaScreen.Home.route + "?offline={offline}") {
-                                                inclusive = true
-                                            }
-                                        }
-                                    }
+                                    // Already on Home — flip offline → online in place. Re-navigating
+                                    // here (popUpTo inclusive) tore down and rebuilt the Home entry and
+                                    // its LibraryViewModel, causing the ~1s blank-then-reappear on every
+                                    // cold open. setOffline is idempotent, so no need to read the arg.
+                                    viewModel.setOffline(false)
                                 }
                             }
                         }
@@ -1452,7 +1448,13 @@ fun PluviaMain(
                         },
                     ),
                 ) { backStackEntry ->
-                    val isOffline = backStackEntry.arguments?.getBoolean("offline") ?: false
+                    // Seed the shared offline flag from the launch arg once, then observe it so a
+                    // later logon can flip offline→online WITHOUT re-navigating (which would destroy
+                    // and recreate this Home entry + its LibraryViewModel, blanking the library on
+                    // open). The nav arg can only change by re-navigating; the StateFlow can't.
+                    val argOffline = backStackEntry.arguments?.getBoolean("offline") ?: false
+                    LaunchedEffect(backStackEntry) { viewModel.setOffline(argOffline) }
+                    val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
 
                     // Navigate to GamePage when an OPEN_GAME_PAGE intent arrives.
                     // Placed here (inside the Home composable) so it only fires after login.
@@ -1570,10 +1572,14 @@ fun PluviaMain(
                             SteamService.logOut()
                         },
                         onGoOnline = {
-                            navController.navigate(
-                                if (!SteamService.isLoggedIn) PluviaScreen.LoginUser.route
-                                else PluviaScreen.Home.route
-                            )
+                            // When not yet logged in we must visit the login screen. When already
+                            // logged in, flip offline → online in place rather than navigating to a
+                            // fresh Home (which would recreate the LibraryViewModel and blank the list).
+                            if (!SteamService.isLoggedIn) {
+                                navController.navigate(PluviaScreen.LoginUser.route)
+                            } else {
+                                viewModel.setOffline(false)
+                            }
                         },
                         isOffline = isOffline,
                     )
