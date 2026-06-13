@@ -3699,9 +3699,9 @@ private fun setupXEnvironment(
                 val stagingDir = File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging")
                 if (stagingDir.exists() && stagingDir.list()?.isEmpty() == true) stagingDir.delete()
             } else {
-                // At least one task failed — delete the marker so runPatchFlowIfNeeded
-                // re-downloads missing staged files and chainPatchTasks can retry next launch.
-                File(container.rootDir, ".patches_offered").delete()
+                // At least one task failed — keep pending_patches.json so chainPatchTasks retries it
+                // on the next launch. The run-once markers (.installed_features/.installed_patches) are
+                // only written on a clean run, so failed items remain eligible to re-stage.
                 Timber.tag("Patches").w("Patch application had failures; will retry on next launch")
             }
             guestProgramLauncherComponent.setGuestExecutable(gameExecutable)
@@ -3955,6 +3955,26 @@ private fun setupXEnvironment(
                     Timber.tag("Features").i("Marked ${selectedNames.size} feature(s) as installed")
                 }
                 // Flip the splash label at the feature→patch boundary before recursing.
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText(splashFor(nextRemaining)))
+                chainPatchTasks(nextRemaining, work)
+                // Synchronous like unzip — caller fires start() to advance the chain.
+            }
+
+            // Synthetic sentinel appended by runPatchFlowIfNeeded; never present in the catalog.
+            // Writes .installed_patches so this batch of patches is skipped on the next launch.
+            "markPatchesDone" -> {
+                if (!patchFailed) {
+                    // Mirror markFeaturesDone: only patches that ran clean are marked installed.
+                    val selectedNames: List<String> = try {
+                        Json.decodeFromString(container.selectedPatches)
+                    } catch (_: Exception) { emptyList() }
+                    File(container.rootDir, ".installed_patches").writeText(
+                        Json.encodeToString(selectedNames),
+                    )
+                    Timber.tag("Patches").i("Marked ${selectedNames.size} patch(es) as installed")
+                }
+                // Patches are the last phase before the game — refresh the splash (→ "Launching game…"
+                // when nothing remains) before recursing.
                 PluviaApp.events.emit(AndroidEvent.SetBootingSplashText(splashFor(nextRemaining)))
                 chainPatchTasks(nextRemaining, work)
                 // Synchronous like unzip — caller fires start() to advance the chain.

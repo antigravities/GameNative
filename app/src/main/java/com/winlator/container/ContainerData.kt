@@ -116,6 +116,8 @@ data class ContainerData(
     val lsfgEnabled: Boolean = false,
     /** JSON-encoded list of selected feature names (e.g. ["Visual C++ 2015-2022 Redistributable (x64)"]). */
     val selectedFeatures: String = "[]",
+    /** JSON-encoded list of selected per-game patch names. */
+    val selectedPatches: String = "[]",
 ) {
     companion object {
         val Saver = mapSaver(
@@ -189,6 +191,7 @@ data class ContainerData(
                     "renderScale" to state.renderScale,
                     "lsfgEnabled" to state.lsfgEnabled,
                     "selectedFeatures" to state.selectedFeatures,
+                    "selectedPatches" to state.selectedPatches,
                 )
             },
             restore = { savedMap ->
@@ -261,6 +264,7 @@ data class ContainerData(
                     renderScale = (savedMap["renderScale"] as? Float) ?: -1f,
                     lsfgEnabled = (savedMap["lsfgEnabled"] as? Boolean) ?: false,
                     selectedFeatures = (savedMap["selectedFeatures"] as? String) ?: "[]",
+                    selectedPatches = (savedMap["selectedPatches"] as? String) ?: "[]",
                 )
             },
         )

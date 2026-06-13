@@ -269,6 +269,8 @@ fun ContainerConfigDialog(
     // optional appId enables HTML5-variant ControllerTab swap.
     // when null (e.g. default-config dialog), HTML5 swap is unreachable -- dialog operates
     // on ContainerData only and shows the Wine ControllerTab.
+    // non-null for a real game also enables the per-game Patches tab; null for the
+    // default-container dialog in Settings (no game to patch).
     appId: String? = null,
     onDismissRequest: () -> Unit,
     // non-suspend to dodge a Compose-compiler bytecode-verify regression (#2.1 hotfix).
@@ -1261,6 +1263,13 @@ fun ContainerConfigDialog(
                     // features are fetched from {patchDatabaseUrl}/features, so without a URL
                     // the tab would always show the empty-state message and is useless.
                     val showFeaturesTab = remember { PrefManager.patchDatabaseUrl.isNotBlank() }
+                    // Patches are per-game, so the tab only makes sense for a real game (appId != null,
+                    // not the default container) and when a patch database URL is configured.
+                    val showPatchesTab = remember { appId != null && !default && PrefManager.patchDatabaseUrl.isNotBlank() }
+                    // Features and Patches are appended conditionally, so capture their indices as the
+                    // list is built rather than hardcoding them.
+                    var featuresTabIndex = -1
+                    var patchesTabIndex = -1
                     val tabs = buildList {
                         add(stringResource(R.string.container_config_tab_general))
                         add(stringResource(R.string.container_config_tab_graphics))
@@ -1271,7 +1280,8 @@ fun ContainerConfigDialog(
                         add(stringResource(R.string.container_config_tab_environment))
                         add(stringResource(R.string.container_config_tab_drives))
                         add(stringResource(R.string.container_config_tab_advanced))
-                        if (showFeaturesTab) add(stringResource(R.string.container_config_tab_features))
+                        if (showFeaturesTab) { featuresTabIndex = size; add(stringResource(R.string.container_config_tab_features)) }
+                        if (showPatchesTab) { patchesTabIndex = size; add(stringResource(R.string.container_config_tab_patches)) }
                     }
                     // wine-runtime tabs greyed out for html5 containers -- controls inside are
                     // wine-only and don't affect the webview launch path. user can still SEE the
@@ -1292,10 +1302,14 @@ fun ContainerConfigDialog(
                         add(!isHtml5Variant) // 8 Advanced
                         // 9 Features -- wine-component installers (VC/.NET), wine-only like the tabs above
                         if (showFeaturesTab) add(!isHtml5Variant)
+                        // Patches mirror Features (per-game wine-prefix patches), wine-only too.
+                        // kept index-parallel with the conditional Patches entry in `tabs` above.
+                        if (showPatchesTab) add(!isHtml5Variant)
                     }
                     // bounce off disabled tab if user flips variant while sitting on one
                     LaunchedEffect(isHtml5Variant) {
                         if (!tabEnabled[selectedTab]) selectedTab = 0
+                    }
                     Column(
                         modifier = Modifier
                             .padding(
@@ -1358,7 +1372,8 @@ fun ContainerConfigDialog(
                             if (selectedTab == 6) EnvironmentTabContent(state)
                             if (selectedTab == 7) DrivesTabContent(state)
                             if (selectedTab == 8) AdvancedTabContent(state)
-                            if (showFeaturesTab && selectedTab == 9) FeaturesTabContent(state)
+                            if (showFeaturesTab && selectedTab == featuresTabIndex) FeaturesTabContent(state)
+                            if (showPatchesTab && selectedTab == patchesTabIndex) PatchesTabContent(state, appId!!)
                         }
                     }
                 }
