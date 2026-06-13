@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Feedback
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Key
@@ -327,6 +328,7 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
         AppOptionMenuType.EditContainer -> Icons.Default.Settings
         AppOptionMenuType.ResetToDefaults -> Icons.Default.RestartAlt
         AppOptionMenuType.GetSupport -> Icons.AutoMirrored.Filled.Help
+        AppOptionMenuType.ViewWineDebugLogs -> Icons.Default.Description
         AppOptionMenuType.SubmitFeedback -> Icons.Default.Feedback
         AppOptionMenuType.ResetDrm -> Icons.Default.Key
         AppOptionMenuType.UseKnownConfig -> Icons.Default.Build
@@ -404,6 +406,7 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             // Help & Info
             AppOptionMenuType.StorePage,
             AppOptionMenuType.GetSupport,
+            AppOptionMenuType.ViewWineDebugLogs,
             AppOptionMenuType.SubmitFeedback,
             AppOptionMenuType.FetchSteamGridDBImages,
             AppOptionMenuType.TestGraphics,
