@@ -82,6 +82,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.tooling.preview.Preview
 import app.gamenative.BuildConfig
+import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.component.dialog.state.MessageDialogState
@@ -1242,17 +1243,22 @@ fun ContainerConfigDialog(
                     },
                 ) { paddingValues ->
                     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-                    val tabs = listOf(
-                        stringResource(R.string.container_config_tab_general),
-                        stringResource(R.string.container_config_tab_graphics),
-                        stringResource(R.string.container_config_tab_emulation),
-                        stringResource(R.string.container_config_tab_controller),
-                        stringResource(R.string.container_config_tab_wine),
-                        stringResource(R.string.container_config_tab_win_components),
-                        stringResource(R.string.container_config_tab_environment),
-                        stringResource(R.string.container_config_tab_drives),
-                        stringResource(R.string.container_config_tab_advanced)
-                    )
+                    // Only show the Features tab when a patch database URL is configured —
+                    // features are fetched from {patchDatabaseUrl}/features, so without a URL
+                    // the tab would always show the empty-state message and is useless.
+                    val showFeaturesTab = remember { PrefManager.patchDatabaseUrl.isNotBlank() }
+                    val tabs = buildList {
+                        add(stringResource(R.string.container_config_tab_general))
+                        add(stringResource(R.string.container_config_tab_graphics))
+                        add(stringResource(R.string.container_config_tab_emulation))
+                        add(stringResource(R.string.container_config_tab_controller))
+                        add(stringResource(R.string.container_config_tab_wine))
+                        add(stringResource(R.string.container_config_tab_win_components))
+                        add(stringResource(R.string.container_config_tab_environment))
+                        add(stringResource(R.string.container_config_tab_drives))
+                        add(stringResource(R.string.container_config_tab_advanced))
+                        if (showFeaturesTab) add(stringResource(R.string.container_config_tab_features))
+                    }
 
                     // Let controller shoulder buttons cycle through the tabs: R1/R2
                     // forward, L1/L2 back (both wrap). The handler lives on the content
@@ -1263,7 +1269,6 @@ fun ContainerConfigDialog(
                     // Seed focus onto the first tab when the dialog opens so the gamepad
                     // can navigate immediately instead of needing a button press first.
                     LaunchedEffect(Unit) { runCatching { firstTabFocusRequester.requestFocus() } }
-
                     Column(
                         modifier = Modifier
                             .onPreviewKeyEvent { event ->
@@ -1316,6 +1321,7 @@ fun ContainerConfigDialog(
                             if (selectedTab == 6) EnvironmentTabContent(state)
                             if (selectedTab == 7) DrivesTabContent(state)
                             if (selectedTab == 8) AdvancedTabContent(state)
+                            if (showFeaturesTab && selectedTab == 9) FeaturesTabContent(state)
                         }
                     }
                 }

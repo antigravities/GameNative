@@ -3659,6 +3659,18 @@ private fun setupXEnvironment(
     // so the next launch can retry (see chainPatchTasks base case below).
     var patchFailed = false
 
+    /**
+     * Returns the appropriate boot splash label for a given remaining task list.
+     *
+     * While a "markFeaturesDone" sentinel is still in the queue we are in the feature phase;
+     * once it has been processed we switch to the patch phase.  An empty queue means "Launching game…".
+     */
+    fun splashFor(remaining: List<PatchInstallTask>): String = when {
+        remaining.isEmpty() -> "Launching game..."
+        remaining.any { it.type == "markFeaturesDone" } -> "Installing features..."
+        else -> "Installing patches..."
+    }
+
     // Processes patch install tasks in order, then sets up the game launch.
     // Mirrors chainPreInstallSteps: sets up the first task and returns; the caller is responsible
     // for calling guestProgramLauncherComponent.start() to fire it.  Subsequent tasks are chained
@@ -3689,10 +3701,13 @@ private fun setupXEnvironment(
         when (task.type) {
             "execute" -> {
                 val workDir = task.startIn ?: work.gameDataDir
-                // Stage path is C:\Windows\Temp\patchstaging\{file} inside Wine
+                // Stage path is C:\Windows\Temp\patchstaging\{file} inside Wine.
+                // Optional args (e.g. "/quiet /norestart") are appended after the path so that
+                // feature authors supply args without needing to know the staging directory.
                 val patchWinPath = "C:\\Windows\\Temp\\patchstaging\\${task.file}"
+                val argsStr = task.args?.let { " $it" } ?: ""
                 val executable = "wine explorer /desktop=shell,${xServer.screenInfo} " +
-                    "winhandler.exe cmd /c \"cd /d \\\"$workDir\\\" & \\\"$patchWinPath\\\"\""
+                    "winhandler.exe cmd /c \"cd /d \\\"$workDir\\\" & \\\"$patchWinPath\\\"$argsStr\""
                 Timber.tag("Patches").i("chainPatchTasks: starting execute task: $executable")
                 guestProgramLauncherComponent.setGuestExecutable(executable)
                 guestProgramLauncherComponent.setTerminationCallback { _ ->
@@ -3710,7 +3725,7 @@ private fun setupXEnvironment(
                     }
                     // Free staging space after the task that used this file completes
                     File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging/${task.file}").delete()
-                    PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+                    PluviaApp.events.emit(AndroidEvent.SetBootingSplashText(splashFor(nextRemaining)))
                     chainPatchTasks(nextRemaining, work)
                     guestProgramLauncherComponent.start()
                 }
@@ -3810,7 +3825,7 @@ private fun setupXEnvironment(
                     } catch (e: Exception) {
                         Timber.w(e, "wineserver -k after executeCmd patch task (non-fatal)")
                     }
-                    PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+                    PluviaApp.events.emit(AndroidEvent.SetBootingSplashText(splashFor(nextRemaining)))
                     chainPatchTasks(nextRemaining, work)
                     guestProgramLauncherComponent.start()
                 }
@@ -3885,7 +3900,8 @@ private fun setupXEnvironment(
                 val targetDir = windowsToAndroidPath(task.startIn ?: work.gameDataDir)
                 val stagedFile = File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging/${task.file}")
                 Timber.tag("Patches").i("chainPatchTasks: unzipping $stagedFile to $targetDir")
-                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+                // Use splashFor so unzip during the feature phase shows "Installing features..."
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText(splashFor(remaining)))
                 try {
                     targetDir.mkdirs()
                     ZipInputStream(stagedFile.inputStream().buffered()).use { zis ->
@@ -3910,6 +3926,26 @@ private fun setupXEnvironment(
                 // Returns here; caller must call guestProgramLauncherComponent.start()
             }
 
+            // Synthetic sentinel appended by runFeatureFlowIfNeeded; never present in the catalog.
+            // Writes .installed_features so this batch of features is skipped on the next launch.
+            "markFeaturesDone" -> {
+                if (!patchFailed) {
+                    // Decode the currently-selected names and write them as installed so that
+                    // run-once tracking works correctly (only features that ran clean are marked).
+                    val selectedNames: List<String> = try {
+                        Json.decodeFromString(container.selectedFeatures)
+                    } catch (_: Exception) { emptyList() }
+                    File(container.rootDir, ".installed_features").writeText(
+                        Json.encodeToString(selectedNames),
+                    )
+                    Timber.tag("Features").i("Marked ${selectedNames.size} feature(s) as installed")
+                }
+                // Flip the splash label at the feature→patch boundary before recursing.
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText(splashFor(nextRemaining)))
+                chainPatchTasks(nextRemaining, work)
+                // Synchronous like unzip — caller fires start() to advance the chain.
+            }
+
             else -> {
                 Timber.tag("Patches").w("Unknown patch task type '${task.type}' for '${task.file}', skipping")
                 chainPatchTasks(nextRemaining, work)
@@ -3919,9 +3955,9 @@ private fun setupXEnvironment(
 
     fun chainPreInstallSteps(remaining: List<PreInstallSteps.PreInstallCommand>) {
         if (remaining.isEmpty()) {
-            // All prerequisites done. Run patches next (if any), then the game.
+            // All prerequisites done. Run patches/features next (if any), then the game.
             if (pendingPatchWork != null && pendingPatchWork.tasks.isNotEmpty()) {
-                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText(splashFor(pendingPatchWork.tasks)))
                 chainPatchTasks(pendingPatchWork.tasks, pendingPatchWork)
                 // chainPatchTasks sets up the first executable; caller's start() fires it
             } else {
@@ -3944,8 +3980,8 @@ private fun setupXEnvironment(
             if (nextRemaining.isEmpty() && pendingPatchWork == null) {
                 PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Launching game..."))
             } else if (nextRemaining.isEmpty()) {
-                // Patches follow the last prerequisite — skip the "Launching game..." flash
-                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+                // Features or patches follow the last prerequisite — show the right label.
+                PluviaApp.events.emit(AndroidEvent.SetBootingSplashText(splashFor(pendingPatchWork!!.tasks)))
             } else {
                 PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing prerequisites..."))
             }
@@ -3957,8 +3993,8 @@ private fun setupXEnvironment(
     if (preInstallCommands.isNotEmpty()) {
         chainPreInstallSteps(preInstallCommands)
     } else if (pendingPatchWork != null && pendingPatchWork.tasks.isNotEmpty()) {
-        // No prerequisites — jump straight to patches, then game
-        PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing patches..."))
+        // No prerequisites — jump straight to features/patches, then game
+        PluviaApp.events.emit(AndroidEvent.SetBootingSplashText(splashFor(pendingPatchWork.tasks)))
         chainPatchTasks(pendingPatchWork.tasks, pendingPatchWork)
     } else {
         guestProgramLauncherComponent.setTerminationCallback(gameTerminationCallback)
