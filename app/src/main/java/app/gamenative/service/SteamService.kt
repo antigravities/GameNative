@@ -3742,8 +3742,45 @@ class SteamService : Service(), IChallengeUrlChanged {
             return anySyncInProgress || downloadJobs.values.any { it.getProgress() < 1f }
         }
 
-        // Should service auto-stop when idle (backgrounded)?
-        var autoStopWhenIdle: Boolean = false
+        // 5-minute grace period before stopping Steam after the app is backgrounded.
+        private const val IDLE_STOP_DELAY_MS = 5 * 60 * 1000L
+        private var idleStopJob: Job? = null
+
+        /**
+         * Schedule a delayed stop of the Steam service after the app is backgrounded.
+         * Cancels any previously scheduled stop (so re-backgrounding resets the timer).
+         * Idle conditions are re-checked each iteration, not just when scheduled, so a
+         * download/sync/game in progress keeps the service alive; once it finishes the
+         * next check (within one grace window) stops the service. The loop only runs
+         * while backgrounded because onResume() calls cancelIdleStop().
+         */
+        fun scheduleIdleStop(delayMs: Long = IDLE_STOP_DELAY_MS) {
+            val service = instance ?: return
+            idleStopJob?.cancel()
+            idleStopJob = service.scope.launch {
+                while (isActive) {
+                    delay(delayMs)
+                    if (isConnected &&
+                        !hasActiveOperations() &&
+                        !isLoginInProgress &&
+                        !keepAlive &&
+                        !isImporting
+                    ) {
+                        Timber.i("Idle grace period elapsed - stopping SteamService")
+                        service.stop()
+                        break
+                    } else {
+                        Timber.d("Idle grace period elapsed but service still busy - re-checking after grace period")
+                    }
+                }
+            }
+        }
+
+        /** Cancel a pending idle stop (app returned to foreground). */
+        fun cancelIdleStop() {
+            idleStopJob?.cancel()
+            idleStopJob = null
+        }
 
         suspend fun isUpdatePending(
             appId: Int,
