@@ -12,6 +12,7 @@ enum class AppOptionMenuType(@StringRes val title: Int) {
     EditContainer(R.string.option_edit_container),
     ResetToDefaults(R.string.option_reset_to_defaults),
     GetSupport(R.string.option_get_support),
+    ViewWineDebugLogs(R.string.option_view_wine_debug_logs),
     SubmitFeedback(R.string.option_submit_feedback),
     ResetDrm(R.string.option_reset_drm),
     UseKnownConfig(R.string.option_use_known_config),
