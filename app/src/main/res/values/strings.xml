@@ -1049,16 +1049,10 @@
     <string name="settings_interface_download_server_title">Steam Download Server</string>
     <string name="settings_patch_database_url_title">Patch Database URL</string>
     <string name="settings_patch_database_url_subtitle">Base URL for automatic game patches. Leave blank to disable.</string>
-    <string name="patch_selection_title">Available Patches</string>
-    <string name="patch_selection_install">Install Selected</string>
-    <string name="patch_selection_skip">Skip</string>
     <string name="patch_downloading">Downloading patch files…</string>
     <string name="patch_installing">Installing patches…</string>
-    <string name="patch_none_available">No patches are available for this game.</string>
-    <string name="patch_queued_for_launch">Patches downloaded. They will be applied the next time you launch the game.</string>
     <string name="feature_downloading">Downloading feature files…</string>
     <string name="features_none_available">No features available — check your Patch Database URL or connection.</string>
-    <string name="option_install_patches">Install Patches</string>
     <string name="settings_interface_restart_required_title">Restart Required</string>
 
     <!-- Settings: Downloads Group -->
@@ -1270,6 +1264,8 @@
     <string name="container_config_tab_drives">Drives</string>
     <string name="container_config_tab_advanced">Advanced</string>
     <string name="container_config_tab_features">Features</string>
+    <string name="container_config_tab_patches">Patches</string>
+    <string name="patches_none_available">No patches available for this game — check your patch database URL or connection.</string>
     <string name="container_config_vkd3d_version">VKD3D Version</string>
     <string name="container_config_executable_path">Executable Path</string>
     <string name="container_config_executable_path_placeholder">e.g., path\\to\\exe</string>

@@ -348,6 +348,7 @@ object ContainerUtils {
             // LSFG Vulkan frame generation
             lsfgEnabled = container.getExtra(LsfgVkManager.EXTRA_ARMED, "false").toBoolean(),
             selectedFeatures = container.getSelectedFeatures(),
+            selectedPatches = container.getSelectedPatches(),
         )
     }
 
@@ -525,6 +526,7 @@ object ContainerUtils {
         // LSFG Vulkan frame generation
         container.putExtra(LsfgVkManager.EXTRA_ARMED, containerData.lsfgEnabled.toString())
         container.setSelectedFeatures(containerData.selectedFeatures)
+        container.setSelectedPatches(containerData.selectedPatches)
         try {
             container.language = containerData.language
         } catch (e: Exception) {
@@ -1166,6 +1168,22 @@ object ContainerUtils {
             // Add other platforms here..
             else -> GameSource.STEAM // default fallback
         }
+    }
+
+    /**
+     * Resolves the store's native string ID used in the patch-database URL path
+     * (`{patchDatabaseUrl}/{store}/{storeId}`) for a given game.
+     *
+     * Mirrors the per-store resolution the patch flow uses: Steam/GOG use the numeric game id
+     * directly, while Epic/Amazon look up their catalog/product id (falling back to the numeric
+     * id if the lookup misses). Returns null for Custom Games, which have no patch catalog.
+     */
+    fun resolvePatchStoreId(gameSource: GameSource, gameId: Int): String? = when (gameSource) {
+        GameSource.STEAM -> gameId.toString()
+        GameSource.GOG -> gameId.toString()
+        GameSource.EPIC -> EpicService.getEpicGameOf(gameId)?.catalogId ?: gameId.toString()
+        GameSource.AMAZON -> AmazonService.getAmazonGameByAppId(gameId)?.productId ?: gameId.toString()
+        GameSource.CUSTOM_GAME -> null
     }
 
     fun isLocalSavesOnly(context: Context, appId: String): Boolean {

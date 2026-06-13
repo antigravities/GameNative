@@ -262,6 +262,9 @@ fun ContainerConfigDialog(
     default: Boolean = false,
     title: String,
     initialConfig: ContainerData = ContainerData(),
+    // Container/game identifier for this dialog. Non-null for a real game (enables the per-game
+    // Patches tab); null for the default-container dialog in Settings (no game to patch).
+    appId: String? = null,
     onDismissRequest: () -> Unit,
     onSave: (ContainerData) -> Unit,
 ) {
@@ -1222,6 +1225,13 @@ fun ContainerConfigDialog(
                     // features are fetched from {patchDatabaseUrl}/features, so without a URL
                     // the tab would always show the empty-state message and is useless.
                     val showFeaturesTab = remember { PrefManager.patchDatabaseUrl.isNotBlank() }
+                    // Patches are per-game, so the tab only makes sense for a real game (appId != null,
+                    // not the default container) and when a patch database URL is configured.
+                    val showPatchesTab = remember { appId != null && !default && PrefManager.patchDatabaseUrl.isNotBlank() }
+                    // Features and Patches are appended conditionally, so capture their indices as the
+                    // list is built rather than hardcoding them.
+                    var featuresTabIndex = -1
+                    var patchesTabIndex = -1
                     val tabs = buildList {
                         add(stringResource(R.string.container_config_tab_general))
                         add(stringResource(R.string.container_config_tab_graphics))
@@ -1232,7 +1242,8 @@ fun ContainerConfigDialog(
                         add(stringResource(R.string.container_config_tab_environment))
                         add(stringResource(R.string.container_config_tab_drives))
                         add(stringResource(R.string.container_config_tab_advanced))
-                        if (showFeaturesTab) add(stringResource(R.string.container_config_tab_features))
+                        if (showFeaturesTab) { featuresTabIndex = size; add(stringResource(R.string.container_config_tab_features)) }
+                        if (showPatchesTab) { patchesTabIndex = size; add(stringResource(R.string.container_config_tab_patches)) }
                     }
                     Column(
                         modifier = Modifier
@@ -1267,7 +1278,8 @@ fun ContainerConfigDialog(
                             if (selectedTab == 6) EnvironmentTabContent(state)
                             if (selectedTab == 7) DrivesTabContent(state)
                             if (selectedTab == 8) AdvancedTabContent(state)
-                            if (showFeaturesTab && selectedTab == 9) FeaturesTabContent(state)
+                            if (showFeaturesTab && selectedTab == featuresTabIndex) FeaturesTabContent(state)
+                            if (showPatchesTab && selectedTab == patchesTabIndex) PatchesTabContent(state, appId!!)
                         }
                     }
                 }

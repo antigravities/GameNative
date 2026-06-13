@@ -35,7 +35,6 @@ enum class AppOptionMenuType(@StringRes val title: Int) {
     ManageWorkshop(R.string.option_manage_workshop),
     ChangeBranch(R.string.change_branch),
     AddToCategory(R.string.option_add_to_category),
-    InstallPatches(R.string.option_install_patches),
     ViewOnSteam(R.string.option_view_on_steam),
     ViewOnSteamDB(R.string.option_view_on_steamdb),
 }

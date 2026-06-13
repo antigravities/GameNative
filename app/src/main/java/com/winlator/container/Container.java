@@ -177,6 +177,17 @@ public class Container {
         this.selectedFeatures = selectedFeatures != null ? selectedFeatures : "[]";
     }
 
+    /** JSON-encoded list of selected per-game patch names; "[]" when none are selected. */
+    private String selectedPatches = "[]";
+
+    public String getSelectedPatches() {
+        return selectedPatches;
+    }
+
+    public void setSelectedPatches(String selectedPatches) {
+        this.selectedPatches = selectedPatches != null ? selectedPatches : "[]";
+    }
+
     public String getGraphicsDriverVersion() {
         return graphicsDriverVersion;
     }
@@ -697,6 +708,7 @@ public class Container {
             data.put("pulseaudioLowLatency", pulseaudioLowLatency);
             data.put("wincomponents", wincomponents);
             data.put("selectedFeatures", selectedFeatures);
+            data.put("selectedPatches", selectedPatches);
             data.put("drives", drives);
             data.put("showFPS", showFPS);
             data.put("launchRealSteam", launchRealSteam);
@@ -817,6 +829,9 @@ public class Container {
                     break;
                 case "selectedFeatures" :
                     setSelectedFeatures(data.getString(key));
+                    break;
+                case "selectedPatches" :
+                    setSelectedPatches(data.getString(key));
                     break;
                 case "dxwrapper" :
                     setDXWrapper(data.getString(key));
@@ -1023,6 +1038,10 @@ public class Container {
 
             if (!data.has("selectedFeatures")) {
                 data.put("selectedFeatures", "[]");
+            }
+
+            if (!data.has("selectedPatches")) {
+                data.put("selectedPatches", "[]");
             }
 
             KeyValueSet wincomponents1 = new KeyValueSet(DEFAULT_WINCOMPONENTS);
