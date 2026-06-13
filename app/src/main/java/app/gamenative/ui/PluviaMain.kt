@@ -2283,8 +2283,12 @@ fun preLaunchApp(
 
             val stagingDir = File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging")
             stagingDir.mkdirs()
+            // Total number of files we'll download across all selected patches — used to turn
+            // per-file byte progress into an overall fraction for the determinate loading bar.
+            val totalFiles = catalog.filter { it.name in toInstall }.sumOf { it.download.size }
+            var completedFiles = 0
             setLoadingMessage(context.getString(R.string.patch_downloading))
-            setLoadingProgress(-1f)
+            setLoadingProgress(0f)
             withContext(Dispatchers.Main.immediate) { setLoadingDialogVisible(true) }
 
             val patchTasks = mutableListOf<PatchInstallTask>()
@@ -2296,10 +2300,21 @@ fun preLaunchApp(
                 Timber.tag("Patches").i("Staging patch '${entry.name}'")
                 for (dl in entry.download) {
                     val filename = dl.saveTo ?: dl.url.substringAfterLast('/')
+                    // Live description: which patch + how far through the batch we are.
+                    setLoadingMessage(context.getString(R.string.patch_downloading_file, entry.name, completedFiles + 1, totalFiles))
+                    val doneSoFar = completedFiles
                     try {
-                        PatchApi.downloadFile(dl.url, File(stagingDir, filename))
+                        PatchApi.downloadFile(dl.url, File(stagingDir, filename)) { bytesRead, contentLength ->
+                            // Overall fraction = fully-downloaded files + the current file's fraction,
+                            // divided by the total. setLoadingProgress writes a thread-safe StateFlow,
+                            // so it's safe to call straight from the OkHttp/IO thread.
+                            val fileFraction = if (contentLength > 0) bytesRead.toFloat() / contentLength else 0f
+                            setLoadingProgress((doneSoFar + fileFraction) / totalFiles)
+                        }
                         stagedFiles.add(filename)
                         stagedUrls.add(dl.url)
+                        completedFiles++
+                        setLoadingProgress(completedFiles.toFloat() / totalFiles)
                         Timber.tag("Patches").d("Downloaded ${dl.url} → $filename")
                     } catch (e: Exception) {
                         Timber.tag("Patches").e(e, "Failed to download ${dl.url} for '${entry.name}'")
@@ -2419,8 +2434,13 @@ fun preLaunchApp(
             val stagingDir = File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging")
             stagingDir.mkdirs()
 
+            // Total number of files we'll download — used to turn per-file byte progress into an
+            // overall fraction for the determinate loading bar.
+            val totalFiles = catalog.filter { it.name in toInstall }.sumOf { it.download.size }
+            var completedFiles = 0
             // Show the loading overlay while downloading feature files.
             setLoadingMessage(context.getString(R.string.feature_downloading))
+            setLoadingProgress(0f)
             withContext(Dispatchers.Main.immediate) { setLoadingDialogVisible(true) }
 
             val featureTasks = mutableListOf<PatchInstallTask>()
@@ -2433,10 +2453,18 @@ fun preLaunchApp(
                 Timber.tag("Features").i("Staging feature '${entry.name}'")
                 for (dl in entry.download) {
                     val filename = dl.saveTo ?: dl.url.substringAfterLast('/')
+                    // Live description: which feature + how far through the batch we are.
+                    setLoadingMessage(context.getString(R.string.feature_downloading_file, entry.name, completedFiles + 1, totalFiles))
+                    val doneSoFar = completedFiles
                     try {
-                        PatchApi.downloadFile(dl.url, File(stagingDir, filename))
+                        PatchApi.downloadFile(dl.url, File(stagingDir, filename)) { bytesRead, contentLength ->
+                            val fileFraction = if (contentLength > 0) bytesRead.toFloat() / contentLength else 0f
+                            setLoadingProgress((doneSoFar + fileFraction) / totalFiles)
+                        }
                         featureStagingFiles.add(filename)
                         featureStagingUrls.add(dl.url)
+                        completedFiles++
+                        setLoadingProgress(completedFiles.toFloat() / totalFiles)
                         Timber.tag("Features").d("Downloaded ${dl.url} → $filename")
                     } catch (e: Exception) {
                         Timber.tag("Features").e(e, "Failed to download ${dl.url} for '${entry.name}'")
