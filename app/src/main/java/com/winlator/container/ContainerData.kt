@@ -114,6 +114,8 @@ data class ContainerData(
     // LSFG Vulkan frame generation
     /** Whether LSFG frame generation is enabled for this container */
     val lsfgEnabled: Boolean = false,
+    /** JSON-encoded list of selected feature names (e.g. ["Visual C++ 2015-2022 Redistributable (x64)"]). */
+    val selectedFeatures: String = "[]",
 ) {
     companion object {
         val Saver = mapSaver(
@@ -186,6 +188,7 @@ data class ContainerData(
                     "inputMap" to state.inputMap,
                     "renderScale" to state.renderScale,
                     "lsfgEnabled" to state.lsfgEnabled,
+                    "selectedFeatures" to state.selectedFeatures,
                 )
             },
             restore = { savedMap ->
@@ -257,6 +260,7 @@ data class ContainerData(
                     inputMap = (savedMap["inputMap"] as? String) ?: "",
                     renderScale = (savedMap["renderScale"] as? Float) ?: -1f,
                     lsfgEnabled = (savedMap["lsfgEnabled"] as? Boolean) ?: false,
+                    selectedFeatures = (savedMap["selectedFeatures"] as? String) ?: "[]",
                 )
             },
         )

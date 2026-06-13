@@ -2442,11 +2442,144 @@ fun preLaunchApp(
             SnackbarManager.show(context.getString(R.string.patch_queued_for_launch))
         }
 
+        /**
+         * Downloads and stages any newly-selected per-container "features" (e.g. VC++ redists)
+         * and prepends their tasks to pending_patches.json so they run BEFORE any game patches.
+         *
+         * A feature is installed at most once — after a clean run XServerScreen writes
+         * .installed_features so this function skips already-installed features on the next call.
+         * Unchecking + rechecking a feature removes it from .installed_features, making it eligible
+         * again on the next container open.
+         *
+         * No-ops if:
+         *  - patchDatabaseUrl is blank
+         *  - no features are selected on this container
+         *  - all selected features are already installed (.installed_features is up to date)
+         *  - the catalog fetch fails (offline → silent no-op, not an error)
+         */
+        suspend fun runFeatureFlowIfNeeded() {
+            val baseUrl = PrefManager.patchDatabaseUrl
+            if (baseUrl.isBlank()) return
+
+            // Decode the JSON list of names the user has selected in the Features tab.
+            val selectedNames: List<String> = try {
+                Json { ignoreUnknownKeys = true }.decodeFromString(container.selectedFeatures)
+            } catch (_: Exception) { emptyList() }
+            if (selectedNames.isEmpty()) return
+
+            // Read the run-once marker (.installed_features) to skip already-installed features.
+            val installedFile = File(container.rootDir, ".installed_features")
+            val installedNames: List<String> = if (installedFile.exists()) {
+                try {
+                    Json { ignoreUnknownKeys = true }.decodeFromString(installedFile.readText())
+                } catch (_: Exception) { emptyList() }
+            } else {
+                emptyList()
+            }
+
+            val toInstall = selectedNames.filter { it !in installedNames }
+            if (toInstall.isEmpty()) return
+
+            // Fetch the global feature catalog from {baseUrl}/features.
+            val result = withContext(Dispatchers.IO) {
+                PatchApi.fetchFeatures(baseUrl)
+            }
+            if (result !is ApiResult.Success || result.data.isEmpty()) {
+                Timber.tag("Features").w("Feature catalog unavailable: $result")
+                return
+            }
+            val catalog = result.data
+
+            val stagingDir = File(container.rootDir, ".wine/drive_c/windows/temp/patchstaging")
+            stagingDir.mkdirs()
+
+            // Show the loading overlay while downloading feature files.
+            setLoadingMessage(context.getString(R.string.feature_downloading))
+            withContext(Dispatchers.Main.immediate) { setLoadingDialogVisible(true) }
+
+            val featureTasks = mutableListOf<PatchInstallTask>()
+            val featureStagingFiles = mutableListOf<String>()
+            val featureStagingUrls = mutableListOf<String>()
+
+            // Download files for each feature whose name is in toInstall, in catalog order.
+            for (entry in catalog) {
+                if (entry.name !in toInstall) continue
+                Timber.tag("Features").i("Staging feature '${entry.name}'")
+                for (dl in entry.download) {
+                    val filename = dl.saveTo ?: dl.url.substringAfterLast('/')
+                    try {
+                        PatchApi.downloadFile(dl.url, File(stagingDir, filename))
+                        featureStagingFiles.add(filename)
+                        featureStagingUrls.add(dl.url)
+                        Timber.tag("Features").d("Downloaded ${dl.url} → $filename")
+                    } catch (e: Exception) {
+                        Timber.tag("Features").e(e, "Failed to download ${dl.url} for '${entry.name}'")
+                        withContext(Dispatchers.Main.immediate) { setLoadingDialogVisible(false) }
+                        return
+                    }
+                }
+                featureTasks.addAll(entry.install)
+            }
+
+            withContext(Dispatchers.Main.immediate) { setLoadingDialogVisible(false) }
+
+            if (featureTasks.isEmpty()) return
+
+            // Sentinel task — XServerScreen writes .installed_features when this is reached,
+            // marking feature installs as done so they are skipped on subsequent launches.
+            featureTasks.add(PatchInstallTask(type = "markFeaturesDone"))
+
+            // Derive the game data directory the same way runPatchFlowIfNeeded does,
+            // so that feature tasks which need a working directory resolve correctly.
+            val launchExeNormalized = savedLaunchExe.replace('/', '\\')
+            val gameDataDir = if (launchExeNormalized.contains('\\')) {
+                launchExeNormalized.substringBeforeLast('\\').ifBlank { "C:\\" }
+            } else if (gameSource == GameSource.STEAM) {
+                val appDirPath = SteamService.getAppDirPath(gameId)
+                if (container.isUseLegacyDRM) {
+                    val drives = container.drives
+                    val driveIndex = drives.indexOf(appDirPath)
+                    val driveLetter = if (driveIndex > 1) drives[driveIndex - 2] else 'D'
+                    "$driveLetter:\\"
+                } else {
+                    val gameFolderName = appDirPath.trimEnd('/').substringAfterLast('/')
+                    "C:\\Program Files (x86)\\Steam\\steamapps\\common\\$gameFolderName"
+                }
+            } else {
+                "C:\\"
+            }
+
+            // Merge feature tasks into pending_patches.json.  Features are PREPENDED so they
+            // run before any per-game patch tasks (order: features → patches → game).
+            val pendingFile = File(container.rootDir, "pending_patches.json")
+            val merged = if (pendingFile.exists()) {
+                val existing = try {
+                    Json { ignoreUnknownKeys = true }.decodeFromString<PendingPatchWork>(pendingFile.readText())
+                } catch (_: Exception) { null }
+                if (existing != null) {
+                    existing.copy(
+                        tasks = featureTasks + existing.tasks,
+                        stagingFiles = featureStagingFiles + existing.stagingFiles,
+                        stagingDownloads = featureStagingUrls + existing.stagingDownloads,
+                    )
+                } else {
+                    PendingPatchWork(gameDataDir = gameDataDir, tasks = featureTasks,
+                        stagingFiles = featureStagingFiles, stagingDownloads = featureStagingUrls)
+                }
+            } else {
+                PendingPatchWork(gameDataDir = gameDataDir, tasks = featureTasks,
+                    stagingFiles = featureStagingFiles, stagingDownloads = featureStagingUrls)
+            }
+            pendingFile.writeText(Json.encodeToString(merged))
+            Timber.tag("Features").i("Queued ${featureTasks.size - 1} feature task(s) for install")
+        }
+
         // For Custom Games, bypass Steam Cloud operations entirely and proceed to launch
         if (isCustomGame) {
             Timber.tag("preLaunchApp").i("Custom Game detected for $appId — skipping Steam Cloud sync and launching container")
             setLoadingDialogVisible(false)
             runPatchFlowIfNeeded()
+            runFeatureFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -2493,6 +2626,7 @@ fun preLaunchApp(
 
             setLoadingDialogVisible(false)
             runPatchFlowIfNeeded()
+            runFeatureFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -2503,6 +2637,7 @@ fun preLaunchApp(
             Timber.tag("preLaunchApp").i("Amazon Game detected for $appId — skipping cloud sync and launching container")
             setLoadingDialogVisible(false)
             runPatchFlowIfNeeded()
+            runFeatureFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -2536,6 +2671,7 @@ fun preLaunchApp(
 
             setLoadingDialogVisible(false)
             runPatchFlowIfNeeded()
+            runFeatureFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -2548,6 +2684,7 @@ fun preLaunchApp(
             }
             setLoadingDialogVisible(false)
             runPatchFlowIfNeeded()
+            runFeatureFlowIfNeeded()
             onSuccess(context, appId)
             return@launch
         }
@@ -2993,6 +3130,7 @@ private suspend fun runSteamCloudSyncAndHandleResult(
             SyncResult.Success,
             -> {
                 runPatchFlowIfNeeded()
+                runFeatureFlowIfNeeded()
                 onSuccess(context, appId)
             }
         }

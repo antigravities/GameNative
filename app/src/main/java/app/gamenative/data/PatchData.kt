@@ -28,6 +28,7 @@ data class PatchInstallTask(
     val file: String = "",        // used by "execute" and "unzip"; omitted for "executeCmd"
     val startIn: String? = null,
     val cmd: String? = null,      // used by "executeCmd": raw command passed to cmd /c
+    val args: String? = null,     // optional extra args appended to the staged exe path for "execute" tasks (e.g. "/quiet /norestart")
 )
 
 /** A named, selectable patch offered by the patch database for a given game. */

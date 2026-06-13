@@ -75,6 +75,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.tooling.preview.Preview
 import app.gamenative.BuildConfig
+import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.component.dialog.state.MessageDialogState
@@ -1256,17 +1257,22 @@ fun ContainerConfigDialog(
                     },
                 ) { paddingValues ->
                     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-                    val tabs = listOf(
-                        stringResource(R.string.container_config_tab_general),
-                        stringResource(R.string.container_config_tab_graphics),
-                        stringResource(R.string.container_config_tab_emulation),
-                        stringResource(R.string.container_config_tab_controller),
-                        stringResource(R.string.container_config_tab_wine),
-                        stringResource(R.string.container_config_tab_win_components),
-                        stringResource(R.string.container_config_tab_environment),
-                        stringResource(R.string.container_config_tab_drives),
-                        stringResource(R.string.container_config_tab_advanced)
-                    )
+                    // Only show the Features tab when a patch database URL is configured —
+                    // features are fetched from {patchDatabaseUrl}/features, so without a URL
+                    // the tab would always show the empty-state message and is useless.
+                    val showFeaturesTab = remember { PrefManager.patchDatabaseUrl.isNotBlank() }
+                    val tabs = buildList {
+                        add(stringResource(R.string.container_config_tab_general))
+                        add(stringResource(R.string.container_config_tab_graphics))
+                        add(stringResource(R.string.container_config_tab_emulation))
+                        add(stringResource(R.string.container_config_tab_controller))
+                        add(stringResource(R.string.container_config_tab_wine))
+                        add(stringResource(R.string.container_config_tab_win_components))
+                        add(stringResource(R.string.container_config_tab_environment))
+                        add(stringResource(R.string.container_config_tab_drives))
+                        add(stringResource(R.string.container_config_tab_advanced))
+                        if (showFeaturesTab) add(stringResource(R.string.container_config_tab_features))
+                    }
                     // wine-runtime tabs greyed out for html5 containers -- controls inside are
                     // wine-only and don't affect the webview launch path. user can still SEE the
                     // tab labels (intentional -- "disabled, not disappeared" per UX feedback).
@@ -1274,21 +1280,22 @@ fun ContainerConfigDialog(
                         Container.CONTAINER_VARIANT_HTML5,
                         ignoreCase = true,
                     )
-                    val tabEnabled = listOf(
-                        true,            // 0 General -- partial, controlled per-item inside
-                        true,            // 1 Graphics -- partial, controlled per-item inside
-                        !isHtml5Variant, // 2 Emulation
-                        true,            // 3 Controller -- variant-conditional content
-                        !isHtml5Variant, // 4 Wine
-                        !isHtml5Variant, // 5 Win Components
-                        !isHtml5Variant, // 6 Environment
-                        !isHtml5Variant, // 7 Drives
-                        !isHtml5Variant, // 8 Advanced
-                    )
+                    val tabEnabled = buildList {
+                        add(true)            // 0 General -- partial, controlled per-item inside
+                        add(true)            // 1 Graphics -- partial, controlled per-item inside
+                        add(!isHtml5Variant) // 2 Emulation
+                        add(true)            // 3 Controller -- variant-conditional content
+                        add(!isHtml5Variant) // 4 Wine
+                        add(!isHtml5Variant) // 5 Win Components
+                        add(!isHtml5Variant) // 6 Environment
+                        add(!isHtml5Variant) // 7 Drives
+                        add(!isHtml5Variant) // 8 Advanced
+                        // 9 Features -- wine-component installers (VC/.NET), wine-only like the tabs above
+                        if (showFeaturesTab) add(!isHtml5Variant)
+                    }
                     // bounce off disabled tab if user flips variant while sitting on one
                     LaunchedEffect(isHtml5Variant) {
                         if (!tabEnabled[selectedTab]) selectedTab = 0
-                    }
                     Column(
                         modifier = Modifier
                             .padding(
@@ -1351,6 +1358,7 @@ fun ContainerConfigDialog(
                             if (selectedTab == 6) EnvironmentTabContent(state)
                             if (selectedTab == 7) DrivesTabContent(state)
                             if (selectedTab == 8) AdvancedTabContent(state)
+                            if (showFeaturesTab && selectedTab == 9) FeaturesTabContent(state)
                         }
                     }
                 }

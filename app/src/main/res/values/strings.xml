@@ -1120,6 +1120,8 @@
     <string name="patch_installing">Installing patches…</string>
     <string name="patch_none_available">No patches are available for this game.</string>
     <string name="patch_queued_for_launch">Patches downloaded. They will be applied the next time you launch the game.</string>
+    <string name="feature_downloading">Downloading feature files…</string>
+    <string name="features_none_available">No features available — check your Patch Database URL or connection.</string>
     <string name="option_install_patches">Install Patches</string>
     <string name="settings_interface_restart_required_title">Restart Required</string>
 
@@ -1337,6 +1339,7 @@
     <string name="container_config_tab_environment">Environment</string>
     <string name="container_config_tab_drives">Drives</string>
     <string name="container_config_tab_advanced">Advanced</string>
+    <string name="container_config_tab_features">Features</string>
     <string name="container_config_vkd3d_version">VKD3D Version</string>
     <string name="container_config_executable_path">Executable Path</string>
     <string name="container_config_executable_path_placeholder">e.g., path\\to\\exe</string>
