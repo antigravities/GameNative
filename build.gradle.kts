@@ -13,7 +13,9 @@ plugins {
 }
 
 configurations.configureEach {
-    // 1-hour TTL for SNAPSHOTs (e.g. JavaSteam). Use --refresh-dependencies to force an immediate re-check.
-    resolutionStrategy.cacheChangingModulesFor(1, TimeUnit.HOURS)
-    resolutionStrategy.cacheDynamicVersionsFor(1, TimeUnit.HOURS)
+    // 24-hour TTL for SNAPSHOTs (e.g. JavaSteam). Use --refresh-dependencies to force an immediate re-check
+    // when a new JavaSteam snapshot is actually wanted; otherwise this avoids a network round-trip on every
+    // build that lands more than an hour after the previous one.
+    resolutionStrategy.cacheChangingModulesFor(24, TimeUnit.HOURS)
+    resolutionStrategy.cacheDynamicVersionsFor(24, TimeUnit.HOURS)
 }
