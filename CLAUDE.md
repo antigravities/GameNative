@@ -127,6 +127,14 @@ Two-phase page load: `GamePageViewModel._libraryItem` is set twice for Steam gam
 
 `onLicenseList` write-lock contention: On large libraries (~59k licenses), `onLicenseList` previously held the Room write lock for minutes inside a single `db.withTransaction` because it serialized all licenses to JSON, ran 60 batched `NOT IN` queries via `findStaleLicences`, and called `packagePicsChannel.send()` — all while the lock was held. The package PICS processor's own `db.withTransaction` calls blocked on this lock, halting the entire PICS pipeline. Fix: do CPU work (groupBy/map) outside the transaction, replace `findStaleLicences`+`deleteStaleLicenses` with `deleteAll`+`insertAll`, commit T1 before queuing to the channel, and defer the `cachedLicenseDao` write (T2) until after queuing.
 
+### PICS Pipeline Resilience
+
+JavaSteam's `AsyncJobManager` surfaces job **timeouts** from `.await()` as a bare `java.util.concurrent.CancellationException`. Inside a coroutine this is indistinguishable from cancellation by exception type (kotlinx's `CancellationException` aliases/subclasses it on JVM), so any long-lived collector awaiting Steam jobs must catch `Exception` and call `ensureActive()` to decide between "rethrow — our coroutine was genuinely cancelled" and "log and continue — the Steam job timed out". Otherwise the collector dies **silently** under the service's `SupervisorJob` scope; this was the cause of the "Syncing library… N apps remaining" banner sticking forever during automatic changelist updates. See `getOwnedGames` and the app/package PICS consumers in `SteamService.kt` for the pattern.
+
+Two related lifecycle rules learned from the same bug:
+- `onLoggedOn` re-runs on **every reconnect** (transient Steam disconnects auto-reconnect); long-lived jobs assigned there (`picsChangesCheckerJob`, `picsGetProductInfoJob`) must cancel their predecessors first or duplicates accumulate.
+- Do not put a Flow `.buffer()` between `receiveAsFlow()` and `collect` on the PICS channels: `buffer()` eagerly prefetches elements *out of the channel* into an internal queue that is discarded on cancellation, leaking their `_picsSyncPending` counts. Batches must stay in the (capacity-1000) channel until collected so a relaunched consumer can drain them and the counter stays accurate.
+
 ### Preferences (PrefManager)
 
 **File**: `app/src/main/java/app/gamenative/PrefManager.kt`
