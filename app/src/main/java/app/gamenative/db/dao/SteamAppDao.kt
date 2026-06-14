@@ -578,6 +578,27 @@ interface SteamAppDao {
     @Query("SELECT * FROM steam_app WHERE id = :appId")
     suspend fun findApp(appId: Int): SteamApp?
 
+    // Owned apps that share a developer or publisher with the tapped one. matchDeveloper = 1 matches
+    // the developer column, 0 matches publisher; exact string match (the same value shown on the
+    // game page). developer/publisher are columns on steam_app but are not in SUMMARY_COLS, so they
+    // can be used in the WHERE without bloating the lightweight projection. OWNED_APPS_WHERE keeps
+    // the result limited to owned, non-expired, non-Spacewar apps. app.type IN (1, 2) restricts to
+    // games (AppType.game) and software (AppType.application), excluding dlc/music/series/video/tool
+    // and the other non-game/non-app types that carry the same developer/publisher.
+    @Query(
+        "SELECT " + SUMMARY_COLS + "FROM steam_app AS app " + OWNED_APPS_WHERE +
+            "AND app.type IN (1, 2) " +
+            "AND ((:matchDeveloper = 1 AND app.developer = :company) " +
+            "  OR (:matchDeveloper = 0 AND app.publisher = :company)) " +
+            "ORDER BY LOWER(app.name)",
+    )
+    suspend fun getOwnedAppSummariesByCompany(
+        company: String,
+        matchDeveloper: Int,
+        invalidPkgId: Int = INVALID_PKG_ID,
+        includeExpired: Int = 0,
+    ): List<SteamAppSummary>
+
     /** Returns all Steam apps sorted by name. */
     @Query("SELECT * FROM steam_app ORDER BY name ASC")
     suspend fun getAllAsList(): List<SteamApp>

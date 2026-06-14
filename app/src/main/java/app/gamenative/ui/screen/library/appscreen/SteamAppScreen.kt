@@ -1701,6 +1701,21 @@ class SteamAppScreen : BaseAppScreen() {
         }
     }
 
+    // Enable the developer/publisher popup on Steam game pages.
+    override val supportsCompanyPopup = true
+
+    override suspend fun getCompanyGames(company: String, matchDeveloper: Boolean): List<LibraryItem> =
+        SteamService.getOwnedAppSummariesByCompany(company, matchDeveloper).map { s ->
+            LibraryItem(
+                appId = "${GameSource.STEAM.name}_${s.id}",
+                name = s.name,
+                // clientIconUrl (used by the popup row) is derived from iconHash; capsule is a fallback.
+                iconHash = s.clientIconHash,
+                capsuleImageUrl = s.getCapsuleUrl(),
+                gameSource = GameSource.STEAM,
+            )
+        }
+
     @Composable
     override fun AdditionalBottomContent(
         libraryItem: LibraryItem,
