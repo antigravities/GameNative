@@ -19,13 +19,19 @@ import app.gamenative.data.GOGGame
 import app.gamenative.data.EpicGame
 import app.gamenative.data.AmazonGame
 import app.gamenative.data.SteamTag
+import app.gamenative.data.SteamCurator
 import app.gamenative.db.dao.SteamAppDao
 import app.gamenative.db.dao.SteamTagDao
+import app.gamenative.db.dao.SteamCuratorDao
+import app.gamenative.db.dao.SteamCuratorRecommendationDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.EpicGameDao
 import app.gamenative.db.dao.AmazonGameDao
 import app.gamenative.db.dao.LibraryProjection
 import app.gamenative.db.dao.buildLibraryPageQuery
+import app.gamenative.utils.Net
+import app.gamenative.utils.fetchMyCurators
+import app.gamenative.utils.fetchCuratorRecommendations
 import app.gamenative.utils.fetchSteamTagsFromWeb
 import app.gamenative.manager.CategoryManager
 import app.gamenative.utils.NameSortKey
@@ -83,6 +89,8 @@ private const val PROVEN_RUNS_THRESHOLD = 5
 class LibraryViewModel @Inject constructor(
     private val steamAppDao: SteamAppDao,
     private val steamTagDao: SteamTagDao,
+    private val steamCuratorDao: SteamCuratorDao,
+    private val steamCuratorRecommendationDao: SteamCuratorRecommendationDao,
     private val gogGameDao: GOGGameDao,
     private val epicGameDao: EpicGameDao,
     private val amazonGameDao: AmazonGameDao,
@@ -405,6 +413,11 @@ class LibraryViewModel @Inject constructor(
         // the 30-day TTL has elapsed. Tags populate the "Filter by Tag" dialog.
         viewModelScope.launch(Dispatchers.IO) { loadSteamTags() }
 
+        // Restore the active curator filter from the DB (instant) and revalidate its recommendations
+        // in the background if the 24h TTL has elapsed. The followed-curator *list* loads lazily on
+        // picker open (loadCurators), not here.
+        restoreAndRevalidateCurator()
+
         viewModelScope.launch(Dispatchers.IO) {
             // One-time backfill: copy installDir from the config JSON blob into the flat
             // install_dir column for all rows written before the KeyValueUtils PICS key fix.
@@ -593,6 +606,155 @@ class LibraryViewModel @Inject constructor(
                 steamTagDao.insertAll(fetched)
                 PrefManager.lastTagsFetchMs = System.currentTimeMillis()
                 _state.update { it.copy(availableTags = fetched) }
+            }
+        }
+    }
+
+    // ── Curator filter ────────────────────────────────────────────────────────────
+    // Unlike tags (multi-select on a per-app store_tags column), the curator filter is single-select
+    // and driven by a per-curator set of recommended app IDs fetched from the Steam store web API.
+    // Recommendations are cached forever in steam_curator_recommendation and refreshed via a 24h TTL
+    // (see refreshCuratorRecommendations); the followed-curator *list* has its own 7-day TTL.
+
+    private val curatorRecsTtlMs = 24L * 60 * 60 * 1000      // refresh a curator's recs after 24h
+    private val followedCuratorsTtlMs = 7L * 24 * 60 * 60 * 1000  // refresh the followed list after 7d
+
+    // A throwaway web sessionid cookie value. Steam doesn't strictly validate it for these GET ajax
+    // endpoints; generated once per VM so all curator requests share it.
+    private val curatorSessionId: String = java.util.UUID.randomUUID().toString().replace("-", "")
+
+    // Guards loadCurators() so it only does its network refresh once per VM (dialog may open repeatedly).
+    @Volatile private var curatorsLoadStarted = false
+
+    /** Builds the steamLoginSecure cookie header, refreshing the web access token first when asked. */
+    private suspend fun curatorCookieHeader(refreshToken: Boolean): String {
+        val steamId = PrefManager.steamUserSteamId64
+        val token = if (refreshToken) {
+            SteamService.refreshWebAccessToken() ?: PrefManager.accessToken
+        } else {
+            PrefManager.accessToken
+        }
+        return "steamLoginSecure=${steamId}||${token}; sessionid=$curatorSessionId"
+    }
+
+    /**
+     * Loads the followed-curator list for the picker. Reads the cached rows first (instant), then
+     * refreshes from the web — with a fresh access token — when the cache is empty or older than the
+     * 7-day TTL. A failed/empty fetch leaves the cache untouched. Runs its network refresh at most once
+     * per VM (subsequent picker opens reuse the loaded list).
+     */
+    fun loadCurators() {
+        if (curatorsLoadStarted) return
+        curatorsLoadStarted = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val cached = steamCuratorDao.getAll()
+            if (cached.isNotEmpty()) {
+                _state.update { it.copy(availableCurators = cached) }
+            }
+            val needsRefresh = cached.isEmpty() ||
+                System.currentTimeMillis() - PrefManager.lastCuratorsFetchMs > followedCuratorsTtlMs
+            if (!needsRefresh) return@launch
+
+            _state.update { it.copy(curatorsLoading = true) }
+            try {
+                // Refresh the web access token first (it's ~24h-lived and likely stale), then fetch.
+                // fetchMyCurators builds its own steamLoginSecure cookie from the args below.
+                SteamService.refreshWebAccessToken()
+                val fetched = fetchMyCurators(
+                    Net.http,
+                    PrefManager.steamUserSteamId64,
+                    PrefManager.accessToken,
+                    curatorSessionId,
+                )
+                if (fetched.isNotEmpty()) {
+                    // Replace the followed list wholesale; recommendation rows are keyed separately and
+                    // intentionally NOT deleted here (retention is forever).
+                    steamCuratorDao.deleteAll()
+                    steamCuratorDao.insertAll(fetched)
+                    PrefManager.lastCuratorsFetchMs = System.currentTimeMillis()
+                    // Re-read so rows carry any preserved recommendationsFetchedAt from prior fetches.
+                    _state.update { it.copy(availableCurators = steamCuratorDao.getAll()) }
+                }
+            } finally {
+                _state.update { it.copy(curatorsLoading = false) }
+            }
+        }
+    }
+
+    /**
+     * Selects a curator (single-select). If the curator already has cached recommendations, applies
+     * them immediately at any age (the library-load revalidation keeps them fresh). If it was never
+     * fetched, fetches now with a loading indicator. Persists the selection and re-filters.
+     */
+    fun onCuratorSelected(curatorId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val curator = steamCuratorDao.findById(curatorId)
+            val alreadyFetched = (curator?.recommendationsFetchedAt ?: 0L) != 0L
+            if (!alreadyFetched) {
+                _state.update { it.copy(curatorsLoading = true) }
+                try {
+                    refreshCuratorRecommendations(curatorId)
+                } finally {
+                    _state.update { it.copy(curatorsLoading = false) }
+                }
+            }
+            val appIds = steamCuratorRecommendationDao.getAppIds(curatorId).toSet()
+            PrefManager.selectedCuratorId = curatorId
+            _state.update { it.copy(selectedCuratorId = curatorId, selectedCuratorAppIds = appIds) }
+            onFilterApps()
+        }
+    }
+
+    /** Clears the curator filter. Does NOT delete cached recommendation rows (retention is forever). */
+    fun onCuratorCleared() {
+        PrefManager.selectedCuratorId = 0L
+        _state.update { it.copy(selectedCuratorId = 0L, selectedCuratorAppIds = emptySet()) }
+        onFilterApps()
+    }
+
+    /**
+     * Fetches a curator's recommendations and replaces its cached rows — but ONLY on a successful,
+     * non-empty result, so a network failure never wipes a good cache. Bumps recommendationsFetchedAt
+     * on success. Returns true if the cache was updated.
+     */
+    private suspend fun refreshCuratorRecommendations(curatorId: Long): Boolean {
+        val cookie = curatorCookieHeader(refreshToken = true)
+        val recs = fetchCuratorRecommendations(Net.http, curatorId, cookie)
+        if (recs.isEmpty()) return false
+        steamCuratorRecommendationDao.deleteByCurator(curatorId)
+        steamCuratorRecommendationDao.insertAll(recs)
+        steamCuratorDao.setRecommendationsFetchedAt(curatorId, System.currentTimeMillis())
+        return true
+    }
+
+    /**
+     * On library load, restores the active curator's app-id set from the DB (instant) and — if that
+     * curator's recommendations are missing or older than the 24h TTL — kicks off a background
+     * stale-while-revalidate refresh, re-filtering on success. Called once from init.
+     */
+    private fun restoreAndRevalidateCurator() {
+        viewModelScope.launch(Dispatchers.IO) {
+            // Load the cached followed-curator list (no network) so the options-panel row can show the
+            // selected curator's name immediately on launch. The picker's loadCurators() handles the
+            // web refresh later.
+            val cachedCurators = steamCuratorDao.getAll()
+            if (cachedCurators.isNotEmpty()) {
+                _state.update { it.copy(availableCurators = cachedCurators) }
+            }
+
+            val curatorId = PrefManager.selectedCuratorId
+            if (curatorId == 0L) return@launch
+            val appIds = steamCuratorRecommendationDao.getAppIds(curatorId).toSet()
+            if (appIds.isNotEmpty()) {
+                _state.update { it.copy(selectedCuratorAppIds = appIds) }
+                onFilterApps(paginationCurrentPage)
+            }
+            val fetchedAt = steamCuratorDao.findById(curatorId)?.recommendationsFetchedAt ?: 0L
+            val stale = fetchedAt == 0L || System.currentTimeMillis() - fetchedAt > curatorRecsTtlMs
+            if (stale && refreshCuratorRecommendations(curatorId)) {
+                val refreshed = steamCuratorRecommendationDao.getAppIds(curatorId).toSet()
+                _state.update { it.copy(selectedCuratorAppIds = refreshed) }
+                onFilterApps(paginationCurrentPage)
             }
         }
     }
@@ -947,11 +1109,20 @@ class LibraryViewModel @Inject constructor(
                     steamFilteredBeforeCompatibility
                 }
 
+            // Apply curator filter (single-select): keep only apps the selected curator recommends.
+            // selectedCuratorAppIds is the DB-backed set of recommended app IDs; empty = no filter.
+            val curatorFilteredSteamApps: List<SteamAppSummary> =
+                if (currentState.selectedCuratorAppIds.isNotEmpty()) {
+                    tagFilteredSteamApps.filter { it.id in currentState.selectedCuratorAppIds }
+                } else {
+                    tagFilteredSteamApps
+                }
+
             // Filter Steam apps (no sort here): the combined list is fully re-sorted below by
             // sortComparator, so any ordering applied at this stage was pure wasted work — a full
             // ~45k sort (with a per-comparison String.lowercase() allocation) whose result was
             // immediately discarded. Just apply the compatibility filter and move on.
-            val filteredSteamApps: List<SteamAppSummary> = tagFilteredSteamApps
+            val filteredSteamApps: List<SteamAppSummary> = curatorFilteredSteamApps
                 .asSequence()
                 .filter { item -> passesCompatibleFilter(item.name) }
                 .filter { item -> passesStatsFilters(currentState, GameSource.STEAM, item.name) }
@@ -1464,12 +1635,16 @@ class LibraryViewModel @Inject constructor(
         val selectedTagIds = currentState.selectedTagIds
         val filterByTag = if (selectedTagIds.isNotEmpty()) 1 else 0
         val tagParam = selectedTagIds.toList().ifEmpty { listOf(-1) }
+        // Curator filter (single-select): active only when a curator is selected AND it has recs.
+        val selectedCuratorId = currentState.selectedCuratorId
+        val filterByCurator = if (selectedCuratorId != 0L && currentState.selectedCuratorAppIds.isNotEmpty()) 1 else 0
         val signature = listOf(
             currentState.currentSortOption, search, currentTab,
             includeSteam, includeOpen, includeGOG, includeEpic, includeAmazon,
             installedFilter, hideAdult, includeExpired, typeCodes,
             favoriteComposite.hashCode(), hiddenComposite.hashCode(), categoryHash,
             selectedTagIds.hashCode(),
+            filterByCurator, selectedCuratorId,
         ).joinToString("|")
 
         // INCREMENTAL only on a genuine scroll-driven load-more: same filter, a page past 0, and the
@@ -1634,6 +1809,8 @@ class LibraryViewModel @Inject constructor(
                 projection = LibraryProjection.STUB,
                 filterByTag = filterByTag,
                 tagIds = tagParam,
+                filterByCurator = filterByCurator,
+                curatorId = selectedCuratorId,
             )
             steamAppDao.orderedSteamRows(query).map { stub ->
                 LibraryRef.Steam(

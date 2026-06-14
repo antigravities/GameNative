@@ -164,6 +164,30 @@ internal val ROOM_MIGRATION_V25_to_V26 = object : Migration(25, 26) {
     }
 }
 
+// v27 adds the steam_curator + steam_curator_recommendation tables (the curator library filter).
+// MANUAL migration (not AutoMigration) for the same reason as v24→v25 / v25→v26: the onOpen-created
+// indexes must be dropped so post-migration schema validation sees indices = {}; onOpen recreates
+// them immediately after. The CREATE TABLE statements mirror the @Entity column definitions exactly.
+internal val ROOM_MIGRATION_V26_to_V27 = object : Migration(26, 27) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `steam_curator` " +
+                "(`clan_id` INTEGER NOT NULL, `name` TEXT NOT NULL, " +
+                "`recommendations_fetched_at` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`clan_id`))"
+        )
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `steam_curator_recommendation` " +
+                "(`curator_id` INTEGER NOT NULL, `app_id` INTEGER NOT NULL, " +
+                "`recommendation_type` TEXT NOT NULL, `blurb` TEXT NOT NULL DEFAULT '', " +
+                "`review_date` TEXT NOT NULL DEFAULT '', PRIMARY KEY(`curator_id`, `app_id`))"
+        )
+        connection.addVerticalCoverUrlIfMissing()
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_dlc_for_app_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_package_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_name_sort_key")
+    }
+}
+
 // Devices on upstream's real v21 are missing all three changes — non-defensive, matching
 // docs/migrations.md's "simple approach" (a device on the fork's v21/v22 instead would already
 // have content_descriptors and hit a duplicate-column error here, which is accepted: it falls

@@ -119,6 +119,7 @@
     <string name="library_tab_with_count">%1$s (%2$d)</string>
     <string name="library_syncing_games">Syncing library… %1$d games remaining</string>
     <string name="library_syncing_games_of_total">Syncing library… %1$d of %2$d games</string>
+    <string name="library_loading_curator_recommendations">Loading curator recommendations…</string>
     <string name="library_search_close">Close search</string>
     <string name="default_user_name">User</string>
 
@@ -1424,6 +1425,14 @@
     <string name="library_tag_dialog_clear">Clear</string>
     <string name="library_tag_dialog_loading">Loading tags…</string>
     <string name="library_tag_dialog_no_results">No matching tags</string>
+    <string name="library_curator_filter_title">Filter by Curator</string>
+    <string name="library_curator_filter_all">All Curators</string>
+    <string name="library_curator_dialog_title">Filter by Curator</string>
+    <string name="library_curator_dialog_search">Search curators…</string>
+    <string name="library_curator_dialog_clear">Clear</string>
+    <string name="library_curator_dialog_loading">Loading curators…</string>
+    <string name="library_curator_dialog_no_results">No matching curators</string>
+    <string name="library_curator_dialog_empty">No followed curators found</string>
     <string name="library_app_type">App Type</string>
     <string name="library_app_status">App Status</string>
     <string name="library_layout">Layout</string>
