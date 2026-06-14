@@ -125,6 +125,8 @@ fun buildLibraryPageQuery(
     projection: LibraryProjection = LibraryProjection.SUMMARY,
     filterByTag: Int = 0,
     tagIds: List<Int> = listOf(-1),
+    filterByCurator: Int = 0,
+    curatorId: Long = 0L,
 ): SupportSQLiteQuery {
     fun placeholders(n: Int) = List(n) { "?" }.joinToString(",")
     val args = ArrayList<Any?>()
@@ -179,6 +181,11 @@ fun buildLibraryPageQuery(
     sb.append("AND (? = 0 OR EXISTS (SELECT 1 FROM json_each(app.store_tags) WHERE CAST(value AS INTEGER) IN (")
         .append(placeholders(tagIds.size)).append("))) ")
     args.add(filterByTag); args.addAll(tagIds)
+    // Curator filter: restrict to apps the selected curator recommends. Uses a PK subquery against
+    // steam_curator_recommendation (not a bound id-list) so a curator with thousands of recs doesn't
+    // blow the SQLite bound-variable limit. Bypassed when :filterByCurator = 0.
+    sb.append("AND (? = 0 OR app.id IN (SELECT app_id FROM steam_curator_recommendation WHERE curator_id = ?)) ")
+    args.add(filterByCurator); args.add(curatorId)
 
     // ORDER BY: favorites-first tier, then the per-option ordering, then id as a stable tiebreaker.
     sb.append("ORDER BY (CASE WHEN app.id IN (").append(placeholders(favIds.size)).append(") THEN 0 ELSE 1 END), ")

@@ -56,6 +56,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
@@ -102,6 +103,9 @@ fun LibraryOptionsPanel(
     selectedTagIds: Set<Int> = emptySet(),
     availableTags: List<SteamTag> = emptyList(),
     onTagFilterDialogOpen: () -> Unit = {},
+    showCuratorFilter: Boolean = false,
+    selectedCuratorName: String = "",
+    onCuratorFilterDialogOpen: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val firstItemFocusRequester = remember { FocusRequester() }
@@ -252,6 +256,30 @@ fun LibraryOptionsPanel(
                                     selected = selectedTagIds.isNotEmpty(),
                                     onClick = onTagFilterDialogOpen,
                                     icon = Icons.Default.LocalOffer,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(20.dp))
+                        }
+
+                        // Curator filter section — single tappable row opening the (single-select)
+                        // curator picker. Shown for Steam users; the followed list loads lazily on open.
+                        if (showCuratorFilter) {
+                            OptionSectionHeader(text = stringResource(R.string.library_curator_filter_title))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusGroup()
+                                    .padding(horizontal = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                OptionListItem(
+                                    text = selectedCuratorName.ifEmpty {
+                                        stringResource(R.string.library_curator_filter_all)
+                                    },
+                                    selected = selectedCuratorName.isNotEmpty(),
+                                    onClick = onCuratorFilterDialogOpen,
+                                    icon = Icons.Default.Storefront,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             }

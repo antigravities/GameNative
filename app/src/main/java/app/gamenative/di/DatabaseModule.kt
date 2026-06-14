@@ -11,6 +11,8 @@ import app.gamenative.db.dao.DownloadingAppInfoDao
 import app.gamenative.db.dao.EncryptedAppTicketDao
 import app.gamenative.db.dao.LibraryPlayHistoryDao
 import app.gamenative.db.dao.SteamTagDao
+import app.gamenative.db.dao.SteamCuratorDao
+import app.gamenative.db.dao.SteamCuratorRecommendationDao
 import app.gamenative.db.dao.SteamUnlockedBranchDao
 import app.gamenative.db.migration.ROOM_MIGRATION_V7_to_V8
 import dagger.Module
@@ -106,4 +108,13 @@ class DatabaseModule {
     @Provides
     @Singleton
     fun provideSteamTagDao(db: PluviaDatabase): SteamTagDao = db.steamTagDao()
+
+    @Provides
+    @Singleton
+    fun provideSteamCuratorDao(db: PluviaDatabase): SteamCuratorDao = db.steamCuratorDao()
+
+    @Provides
+    @Singleton
+    fun provideSteamCuratorRecommendationDao(db: PluviaDatabase): SteamCuratorRecommendationDao =
+        db.steamCuratorRecommendationDao()
 }

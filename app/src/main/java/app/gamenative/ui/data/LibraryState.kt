@@ -5,6 +5,7 @@ import app.gamenative.data.GameCompatibilityStatus
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
 import app.gamenative.data.SteamTag
+import app.gamenative.data.SteamCurator
 import app.gamenative.ui.component.dialog.state.CategoryDialogState
 import app.gamenative.ui.enums.AppFilter
 import app.gamenative.utils.DeviceGameStatsService.DeviceGameStats
@@ -89,6 +90,15 @@ data class LibraryState(
     val selectedTagIds: Set<Int> = PrefManager.selectedTagIds,
     // All known Steam tags, populated on first library open from the steam_tag DB table.
     val availableTags: List<SteamTag> = emptyList(),
+
+    // Curator filter (single-select). 0 = no curator filter active.
+    val selectedCuratorId: Long = PrefManager.selectedCuratorId,
+    // App IDs the selected curator recommends/informs on; the in-memory filter set (DB-backed).
+    val selectedCuratorAppIds: Set<Int> = emptySet(),
+    // Followed curators, populated lazily when the curator picker is first opened.
+    val availableCurators: List<SteamCurator> = emptyList(),
+    // True while the followed-curator list or a first-time recommendations fetch is in flight.
+    val curatorsLoading: Boolean = false,
 )
 
 /**

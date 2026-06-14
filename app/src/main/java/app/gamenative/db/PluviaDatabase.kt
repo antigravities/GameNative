@@ -15,6 +15,8 @@ import app.gamenative.data.CachedLicense
 import app.gamenative.data.DownloadingAppInfo
 import app.gamenative.data.EncryptedAppTicket
 import app.gamenative.data.SteamTag
+import app.gamenative.data.SteamCurator
+import app.gamenative.data.SteamCuratorRecommendation
 import app.gamenative.data.SteamUnlockedBranch
 import app.gamenative.data.GOGGame
 import app.gamenative.data.EpicGame
@@ -36,6 +38,8 @@ import app.gamenative.db.dao.CachedLicenseDao
 import app.gamenative.db.dao.DownloadingAppInfoDao
 import app.gamenative.db.dao.EncryptedAppTicketDao
 import app.gamenative.db.dao.SteamTagDao
+import app.gamenative.db.dao.SteamCuratorDao
+import app.gamenative.db.dao.SteamCuratorRecommendationDao
 import app.gamenative.db.dao.SteamUnlockedBranchDao
 import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.db.dao.EpicGameDao
@@ -59,9 +63,11 @@ const val DATABASE_NAME = "pluvia.db"
         AmazonGame::class,
         DownloadingAppInfo::class,
         SteamTag::class,
+        SteamCurator::class,
+        SteamCuratorRecommendation::class,
         SteamUnlockedBranch::class,
     ],
-    version = 27,
+    version = 28,
     // For db migration, visit https://developer.android.com/training/data-storage/room/migrating-db-versions for more information
     exportSchema = true, // It is better to handle db changes carefully, as GN is getting much more users.
     autoMigrations = [
@@ -88,6 +94,7 @@ const val DATABASE_NAME = "pluvia.db"
         AutoMigration(from = 24, to = 25), // Added size_bytes to steam_app (precomputed download size)
         AutoMigration(from = 25, to = 26), // Added name_sort_key + is_adult + steam_app indexes (SQL library pagination)
         AutoMigration(from = 26, to = 27), // Added store_tags to steam_app + steam_tag table (tag filtering)
+        AutoMigration(from = 27, to = 28), // Added steam_curator + steam_curator_recommendation tables (curator filtering)
     ]
 )
 @TypeConverters(
@@ -129,4 +136,8 @@ abstract class PluviaDatabase : RoomDatabase() {
     abstract fun steamUnlockedBranchDao(): SteamUnlockedBranchDao
 
     abstract fun steamTagDao(): SteamTagDao
+
+    abstract fun steamCuratorDao(): SteamCuratorDao
+
+    abstract fun steamCuratorRecommendationDao(): SteamCuratorRecommendationDao
 }

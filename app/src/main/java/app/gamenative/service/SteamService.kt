@@ -3374,6 +3374,36 @@ class SteamService : Service(), IChallengeUrlChanged {
             )
         }
 
+        /**
+         * Exchanges the stored long-lived [PrefManager.refreshToken] for a fresh short-lived web
+         * access token (the value used as the `steamLoginSecure` cookie). The access token is only
+         * ~24h-lived, so any authenticated Steam *web* (store/community) request must refresh first.
+         *
+         * Mirrors the JavaSteam SampleWebCookie flow: `authentication.generateAccessTokenForApp`
+         * returns a new access token and, when Steam rotates it, a new refresh token too. Persists
+         * both back to PrefManager. Returns the new access token, or null if we can't refresh (no
+         * client/steamID/refresh token, or the call fails) — callers fall back to the cached token.
+         */
+        suspend fun refreshWebAccessToken(): String? = withContext(Dispatchers.IO) {
+            val client = instance?.steamClient ?: return@withContext null
+            val steamId = client.steamID ?: return@withContext null
+            val refresh = PrefManager.refreshToken
+            if (refresh.isBlank()) return@withContext null
+            try {
+                // allowRenewal = false: we only want a new access token; Steam may still return a
+                // rotated refresh token, which we persist if present.
+                val result = client.authentication.generateAccessTokenForApp(steamId, refresh, false).await()
+                PrefManager.accessToken = result.accessToken
+                if (!result.refreshToken.isNullOrBlank()) {
+                    PrefManager.refreshToken = result.refreshToken
+                }
+                result.accessToken
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to refresh web access token")
+                null
+            }
+        }
+
         suspend fun startLoginWithCredentials(
             username: String,
             password: String,

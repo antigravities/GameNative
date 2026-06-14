@@ -982,6 +982,18 @@ object PrefManager {
         get() = getPref(LAST_TAGS_FETCH_MS, 0L)
         set(value) { setPref(LAST_TAGS_FETCH_MS, value) }
 
+    // Selected curator (clanID) for the single-select curator filter. 0 = no curator filter active.
+    private val SELECTED_CURATOR_ID = longPreferencesKey("selected_curator_id")
+    var selectedCuratorId: Long
+        get() = getPref(SELECTED_CURATOR_ID, 0L)
+        set(value) { setPref(SELECTED_CURATOR_ID, value) }
+
+    // Timestamp (epoch ms) of the last successful followed-curator list fetch. Enforces a 7-day TTL.
+    private val LAST_CURATORS_FETCH_MS = longPreferencesKey("last_curators_fetch_ms")
+    var lastCuratorsFetchMs: Long
+        get() = getPref(LAST_CURATORS_FETCH_MS, 0L)
+        set(value) { setPref(LAST_CURATORS_FETCH_MS, value) }
+
     private val LIBRARY_FILTER = intPreferencesKey("library_filter")
     var libraryFilter: EnumSet<AppFilter>
         get() {
