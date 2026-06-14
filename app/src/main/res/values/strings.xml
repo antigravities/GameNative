@@ -638,6 +638,7 @@
     <string name="size">Size</string>
     <string name="location">Location</string>
     <string name="developer">Developer</string>
+    <string name="publisher">Publisher</string>
     <string name="release_date">Release Date</string>
     <string name="installed">Installed</string>
     <string name="installing">Installing</string>
@@ -1363,6 +1364,10 @@
     <string name="library_curator_dialog_loading">Loading curators…</string>
     <string name="library_curator_dialog_no_results">No matching curators</string>
     <string name="library_curator_dialog_empty">No followed curators found</string>
+    <string name="curator_review_title">Curator Review</string>
+    <string name="curator_review_open_full">Read full review</string>
+    <string name="curator_review_type_recommended">Recommended</string>
+    <string name="curator_review_type_informational">Informational</string>
     <string name="library_app_type">App Type</string>
     <string name="library_app_status">App Status</string>
     <string name="library_layout">Layout</string>

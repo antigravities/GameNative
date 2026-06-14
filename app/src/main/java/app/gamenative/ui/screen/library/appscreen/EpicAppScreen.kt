@@ -268,6 +268,7 @@ class EpicAppScreen : BaseAppScreen() {
             appId = libraryItem.appId,
             releaseDate = releaseDateTimestamp,
             developer = game?.developer?.takeIf { it.isNotEmpty() } ?: "",
+            publisher = game?.publisher?.takeIf { it.isNotEmpty() } ?: "",
             installLocation = game?.installPath?.takeIf { it.isNotEmpty() },
             sizeOnDisk = sizeOnDisk,
             sizeFromStore = sizeFromStore,

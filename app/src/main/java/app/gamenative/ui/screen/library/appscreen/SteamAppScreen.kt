@@ -395,6 +395,7 @@ class SteamAppScreen : BaseAppScreen() {
         return GameDisplayInfo(
             name = appInfo.name,
             developer = appInfo.developer,
+            publisher = appInfo.publisher,
             releaseDate = appInfo.releaseDate,
             heroImageUrl = heroImageUrl,
             iconUrl = iconUrl,

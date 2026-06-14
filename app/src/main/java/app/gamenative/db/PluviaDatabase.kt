@@ -64,7 +64,7 @@ const val DATABASE_NAME = "pluvia.db"
         SteamCuratorRecommendation::class,
         SteamUnlockedBranch::class,
     ],
-    version = 26,
+    version = 27,
     // For db migration, visit https://developer.android.com/training/data-storage/room/migrating-db-versions for more information
     exportSchema = true, // It is better to handle db changes carefully, as GN is getting much more users.
     autoMigrations = [
@@ -94,6 +94,8 @@ const val DATABASE_NAME = "pluvia.db"
         // auto-migration, because it must drop the onOpen-created indexes to pass schema validation.
         // v25→v26 (steam_curator + steam_curator_recommendation) is a MANUAL migration
         // (ROOM_MIGRATION_V25_to_V26), same reason: it drops the onOpen-created indexes.
+        // v26→v27 (review_url on steam_curator_recommendation) is a MANUAL migration
+        // (ROOM_MIGRATION_V26_to_V27), same reason: it drops the onOpen-created indexes.
     ]
 )
 @TypeConverters(

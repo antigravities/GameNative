@@ -4059,6 +4059,27 @@ class SteamService : Service(), IChallengeUrlChanged {
         }
 
         // Fetches achievements for a Steam app for display in the game details page.
+        /**
+         * Returns the **currently selected** curator's review of [appId] for the game detail page, or
+         * null when no curator filter is active or that curator hasn't reviewed this app. Pure local DB
+         * read (no network / no `isConnected` check) so it works offline — mirrors how the detail page
+         * already reads cached data. Recommendations are populated by the curator filter flow.
+         */
+        suspend fun getCuratorReviewForApp(appId: Int): app.gamenative.ui.data.CuratorReviewDisplay? {
+            val curatorId = PrefManager.selectedCuratorId
+            if (curatorId == 0L) return null
+            val db = instance?.db ?: return null
+            val rec = db.steamCuratorRecommendationDao().getRecommendation(curatorId, appId) ?: return null
+            val curator = db.steamCuratorDao().findById(curatorId)
+            return app.gamenative.ui.data.CuratorReviewDisplay(
+                curatorName = curator?.name ?: "",
+                recommendationType = rec.recommendationType,
+                blurb = rec.blurb,
+                reviewDate = rec.reviewDate,
+                reviewUrl = rec.reviewUrl,
+            )
+        }
+
         suspend fun fetchAchievementsForDisplay(appId: Int): List<Achievement>? {
             if (!isConnected) return null
             return try {

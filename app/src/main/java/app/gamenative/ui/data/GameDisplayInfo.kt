@@ -7,6 +7,7 @@ package app.gamenative.ui.data
 data class GameDisplayInfo(
     val name: String,
     val developer: String,
+    val publisher: String = "",
     val releaseDate: Long, // Unix timestamp in seconds
     val heroImageUrl: String?,
     val iconUrl: String?,

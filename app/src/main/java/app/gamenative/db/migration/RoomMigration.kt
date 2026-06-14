@@ -120,6 +120,20 @@ internal val ROOM_MIGRATION_V25_to_V26 = object : Migration(25, 26) {
     }
 }
 
+// v27 adds review_url to steam_curator_recommendation (the curator review link shown on the game
+// detail page). MANUAL migration (not AutoMigration), same reason as the prior migrations: the
+// onOpen-created indexes must be dropped so post-migration schema validation sees indices = {}.
+internal val ROOM_MIGRATION_V26_to_V27 = object : Migration(26, 27) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "ALTER TABLE steam_curator_recommendation ADD COLUMN review_url TEXT NOT NULL DEFAULT ''"
+        )
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_dlc_for_app_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_package_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_name_sort_key")
+    }
+}
+
 // Devices on either v21 are missing exactly one of the two changes — both operations are defensive.
 internal val ROOM_MIGRATION_V21_to_V22 = object : Migration(21, 22) {
     override fun migrate(connection: SQLiteConnection) {

@@ -14,4 +14,7 @@ data class SteamCuratorRecommendation(
     @ColumnInfo("recommendation_type") val recommendationType: String,
     @ColumnInfo("blurb") val blurb: String = "",
     @ColumnInfo("review_date") val reviewDate: String = "",
+    // The curator recommendation's link (the recommendation_link href, a store page in the curator's
+    // context). Empty when not captured yet (e.g. rows cached before the v27 column existed).
+    @ColumnInfo("review_url") val reviewUrl: String = "",
 )
