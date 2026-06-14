@@ -3145,13 +3145,16 @@ class SteamService : Service(), IChallengeUrlChanged {
                         break
                     } catch (e: CancellationException) {
                         // java.util.concurrent.CancellationException (see import). JavaSteam's
-                        // AsyncJobManager throws it when a UFS job exceeds its timeout. kotlinx's
-                        // CancellationException is a *subclass*, so a real cancellation is
-                        // indistinguishable from a timed-out Steam job here. Rethrow genuine
-                        // (kotlinx) cancellations to honor structured concurrency; treat the bare
-                        // JavaSteam timeout as a retryable sync failure so it doesn't tear down the
-                        // preLaunchApp launch coroutine and hang the spinner. Mirrors getOwnedGames().
-                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        // AsyncJobManager throws it when a UFS job exceeds its timeout. On the JVM
+                        // kotlinx.coroutines.CancellationException is a *typealias* for that same
+                        // class (not a subclass), so an `is` check cannot tell a timed-out Steam job
+                        // apart from a genuine coroutine cancellation. Instead ask whether *our* own
+                        // coroutine is still active: ensureActive() rethrows only if this async was
+                        // actually cancelled (e.g. the BackHandler cancelled activePreLaunchJob),
+                        // honoring structured concurrency. Otherwise it returns and we treat the bare
+                        // CancellationException as a retryable Steam-job timeout, so it doesn't
+                        // silently tear down preLaunchApp and abort the launch. Mirrors getOwnedGames().
+                        ensureActive()
                         if (attempt == maxAttempts) {
                             Timber.e(e, "Cloud sync timed out (JavaSteam job cancelled) after $maxAttempts attempts")
                             syncResult = PostSyncInfo(SyncResult.UnknownFail)
