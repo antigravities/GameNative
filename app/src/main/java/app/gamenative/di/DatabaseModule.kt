@@ -12,12 +12,15 @@ import app.gamenative.db.dao.CachedLicenseDao
 import app.gamenative.db.dao.DownloadingAppInfoDao
 import app.gamenative.db.dao.EncryptedAppTicketDao
 import app.gamenative.db.dao.SteamTagDao
+import app.gamenative.db.dao.SteamCuratorDao
+import app.gamenative.db.dao.SteamCuratorRecommendationDao
 import app.gamenative.db.dao.SteamUnlockedBranchDao
 import app.gamenative.db.migration.ROOM_MIGRATION_V7_to_V8
 import app.gamenative.db.migration.ROOM_MIGRATION_V20_to_V22
 import app.gamenative.db.migration.ROOM_MIGRATION_V21_to_V22
 import app.gamenative.db.migration.ROOM_MIGRATION_V23_to_V24
 import app.gamenative.db.migration.ROOM_MIGRATION_V24_to_V25
+import app.gamenative.db.migration.ROOM_MIGRATION_V25_to_V26
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -36,7 +39,7 @@ class DatabaseModule {
         // The db will be considered unstable during development.
         // Once stable we should add a (room) db migration
         return Room.databaseBuilder(context, PluviaDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ROOM_MIGRATION_V7_to_V8, ROOM_MIGRATION_V20_to_V22, ROOM_MIGRATION_V21_to_V22, ROOM_MIGRATION_V23_to_V24, ROOM_MIGRATION_V24_to_V25)
+            .addMigrations(ROOM_MIGRATION_V7_to_V8, ROOM_MIGRATION_V20_to_V22, ROOM_MIGRATION_V21_to_V22, ROOM_MIGRATION_V23_to_V24, ROOM_MIGRATION_V24_to_V25, ROOM_MIGRATION_V25_to_V26)
             .fallbackToDestructiveMigration(true)
             // Use SEPARATE executors for queries and transactions. By default Room shares one
             // small fixed pool for both, which deadlocks under load: every open suspend
@@ -139,4 +142,13 @@ class DatabaseModule {
     @Provides
     @Singleton
     fun provideSteamTagDao(db: PluviaDatabase): SteamTagDao = db.steamTagDao()
+
+    @Provides
+    @Singleton
+    fun provideSteamCuratorDao(db: PluviaDatabase): SteamCuratorDao = db.steamCuratorDao()
+
+    @Provides
+    @Singleton
+    fun provideSteamCuratorRecommendationDao(db: PluviaDatabase): SteamCuratorRecommendationDao =
+        db.steamCuratorRecommendationDao()
 }

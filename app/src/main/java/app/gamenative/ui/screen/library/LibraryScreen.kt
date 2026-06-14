@@ -97,6 +97,7 @@ import app.gamenative.ui.screen.library.components.LibraryDetailPane
 import app.gamenative.ui.screen.library.components.LibraryListPane
 import app.gamenative.ui.component.dialog.AddToCategoryDialog
 import app.gamenative.ui.component.dialog.TagFilterDialog
+import app.gamenative.ui.component.dialog.CuratorFilterDialog
 import app.gamenative.ui.screen.library.components.LibraryOptionsPanel
 import app.gamenative.ui.screen.library.components.LibrarySearchBar
 import app.gamenative.ui.screen.library.components.LibrarySourceNotLoggedInSplash
@@ -181,6 +182,9 @@ fun HomeLibraryScreen(
         onShowCategoryDialog = viewModel::onShowCategoryDialog,
         onTagFilterToggled = viewModel::onTagFilterToggled,
         onTagFilterCleared = viewModel::onTagFilterCleared,
+        onCuratorSelected = viewModel::onCuratorSelected,
+        onCuratorCleared = viewModel::onCuratorCleared,
+        onLoadCurators = viewModel::loadCurators,
         onToggleFavorite = viewModel::onToggleFavorite,
         onToggleHidden = viewModel::onToggleHidden,
         isOffline = isOffline,
@@ -216,6 +220,9 @@ private fun LibraryScreenContent(
     onShowCategoryDialog: (String) -> Unit = {},
     onTagFilterToggled: (Int) -> Unit = {},
     onTagFilterCleared: () -> Unit = {},
+    onCuratorSelected: (Long) -> Unit = {},
+    onCuratorCleared: () -> Unit = {},
+    onLoadCurators: () -> Unit = {},
     onToggleFavorite: (String) -> Unit = {},
     onToggleHidden: (String) -> Unit = {},
     isOffline: Boolean = false,
@@ -351,6 +358,7 @@ private fun LibraryScreenContent(
 
     var isSystemMenuOpen by remember { mutableStateOf(false) }
     var tagFilterDialogOpen by remember { mutableStateOf(false) }
+    var curatorFilterDialogOpen by remember { mutableStateOf(false) }
     // Track previous overlay states to detect when they close
     var wasSystemMenuOpen by remember { mutableStateOf(false) }
     var wasOptionsPanelOpen by remember { mutableStateOf(false) }
@@ -1095,6 +1103,29 @@ private fun LibraryScreenContent(
                                 )
                             }
                         }
+                        // Curator recommendations banner — shown while the first-time fetch for a newly
+                        // selected curator is in flight (the dialog has already closed by this point).
+                        AnimatedVisibility(visible = state.curatorsLoading) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.library_loading_curator_recommendations),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1187,6 +1218,20 @@ private fun LibraryScreenContent(
             )
         }
 
+        // Curator filter dialog (single-select) — opened from the options panel. Opening it triggers
+        // the lazy followed-curator fetch (loadCurators is a no-op after the first load).
+        if (curatorFilterDialogOpen) {
+            LaunchedEffect(Unit) { onLoadCurators() }
+            CuratorFilterDialog(
+                availableCurators = state.availableCurators,
+                selectedCuratorId = state.selectedCuratorId,
+                loading = state.curatorsLoading,
+                onCuratorSelected = onCuratorSelected,
+                onClear = onCuratorCleared,
+                onDismiss = { curatorFilterDialogOpen = false },
+            )
+        }
+
         // Options panel (SELECT) - renders on top of everything
         if (selectedAppId == null) {
             LibraryOptionsPanel(
@@ -1206,6 +1251,10 @@ private fun LibraryScreenContent(
                 selectedTagIds = state.selectedTagIds,
                 availableTags = state.availableTags,
                 onTagFilterDialogOpen = { tagFilterDialogOpen = true },
+                showCuratorFilter = state.showSteamInLibrary,
+                selectedCuratorName = state.availableCurators
+                    .firstOrNull { it.clanId == state.selectedCuratorId }?.name.orEmpty(),
+                onCuratorFilterDialogOpen = { curatorFilterDialogOpen = true },
             )
 
             // System menu (START) - renders on top of everything

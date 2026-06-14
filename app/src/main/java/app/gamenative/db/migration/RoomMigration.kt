@@ -97,6 +97,29 @@ internal val ROOM_MIGRATION_V24_to_V25 = object : Migration(24, 25) {
     }
 }
 
+// v26 adds the steam_curator + steam_curator_recommendation tables (the curator library filter).
+// MANUAL migration (not AutoMigration) for the same reason as v23→v24 / v24→v25: the onOpen-created
+// indexes must be dropped so post-migration schema validation sees indices = {}; onOpen recreates
+// them immediately after. The CREATE TABLE statements mirror the @Entity column definitions exactly.
+internal val ROOM_MIGRATION_V25_to_V26 = object : Migration(25, 26) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `steam_curator` " +
+                "(`clan_id` INTEGER NOT NULL, `name` TEXT NOT NULL, " +
+                "`recommendations_fetched_at` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`clan_id`))"
+        )
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS `steam_curator_recommendation` " +
+                "(`curator_id` INTEGER NOT NULL, `app_id` INTEGER NOT NULL, " +
+                "`recommendation_type` TEXT NOT NULL, `blurb` TEXT NOT NULL DEFAULT '', " +
+                "`review_date` TEXT NOT NULL DEFAULT '', PRIMARY KEY(`curator_id`, `app_id`))"
+        )
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_dlc_for_app_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_package_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_name_sort_key")
+    }
+}
+
 // Devices on either v21 are missing exactly one of the two changes — both operations are defensive.
 internal val ROOM_MIGRATION_V21_to_V22 = object : Migration(21, 22) {
     override fun migrate(connection: SQLiteConnection) {
