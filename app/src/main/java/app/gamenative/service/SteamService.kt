@@ -3690,15 +3690,14 @@ class SteamService : Service(), IChallengeUrlChanged {
         suspend fun getOwnedGames(friendID: Long): List<OwnedGames> = withContext(Dispatchers.IO) {
             try {
                 instance?._unifiedFriends?.getOwnedGames(friendID) ?: emptyList()
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                // Our coroutine was genuinely cancelled — must propagate to honor structured
-                // concurrency. (kotlinx CancellationException is a subclass of the JavaSteam one,
-                // so this branch must come first.)
-                throw e
             } catch (e: Exception) {
-                // JavaSteam AsyncJobManager cancels jobs that exceed their timeout, surfacing a
-                // java.util.concurrent.CancellationException here. Degrade to empty so callers
-                // (e.g. the cosmetic playtime read) don't crash on a timed-out job.
+                // ensureActive() rethrows if *our* coroutine was genuinely cancelled (structured
+                // concurrency). Otherwise this is a JavaSteam AsyncJob timeout surfacing as a
+                // java.util.concurrent.CancellationException — on the JVM the same type as kotlinx's
+                // CancellationException (typealias), so it can't be told apart by an `is` check.
+                // Degrade to empty so callers (e.g. the cosmetic playtime read) don't silently drop
+                // on a timed-out job.
+                ensureActive()
                 Timber.w(e, "getOwnedGames($friendID) failed; returning empty")
                 emptyList()
             }
