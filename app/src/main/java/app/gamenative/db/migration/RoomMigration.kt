@@ -188,6 +188,25 @@ internal val ROOM_MIGRATION_V26_to_V27 = object : Migration(26, 27) {
     }
 }
 
+// v28 adds review_url to steam_curator_recommendation (the curator review link shown on the game
+// detail page). MANUAL migration (not AutoMigration), same reason as the prior migrations: the
+// onOpen-created indexes must be dropped so post-migration schema validation sees indices = {}.
+internal val ROOM_MIGRATION_V27_to_V28 = object : Migration(27, 28) {
+    override fun migrate(connection: SQLiteConnection) {
+        // Defensive (see ROOM_MIGRATION_V23_to_V24): a device already on old-v27 (this fork's
+        // pre-renumbering tip) already has this column — this is exactly the crash hit in testing.
+        if (!connection.hasColumn("steam_curator_recommendation", "review_url")) {
+            connection.execSQL(
+                "ALTER TABLE steam_curator_recommendation ADD COLUMN review_url TEXT NOT NULL DEFAULT ''"
+            )
+        }
+        connection.addVerticalCoverUrlIfMissing()
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_dlc_for_app_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_package_id")
+        connection.execSQL("DROP INDEX IF EXISTS idx_steam_app_name_sort_key")
+    }
+}
+
 // Devices on upstream's real v21 are missing all three changes — non-defensive, matching
 // docs/migrations.md's "simple approach" (a device on the fork's v21/v22 instead would already
 // have content_descriptors and hit a duplicate-column error here, which is accepted: it falls

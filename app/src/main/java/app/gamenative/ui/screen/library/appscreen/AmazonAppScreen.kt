@@ -183,6 +183,7 @@ class AmazonAppScreen : BaseAppScreen() {
             appId = libraryItem.appId,
             releaseDate = releaseDateTs,
             developer = developer,
+            publisher = g?.publisher?.takeIf { it.isNotEmpty() } ?: "",
             installLocation = if (g?.isInstalled == true && g.installPath.isNotEmpty()) {
                 g.installPath
             } else {

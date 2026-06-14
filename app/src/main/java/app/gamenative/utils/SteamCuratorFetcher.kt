@@ -92,6 +92,13 @@ private val REC_TYPE_REGEX = Regex("""color_(recommended|informational|not_recom
 private val REC_DESC_REGEX =
     Regex("""<div class="recommendation_desc">(.*?)</div>""", RegexOption.DOT_MATCHES_ALL)
 private val REC_DATE_REGEX = Regex("""<span class="curator_review_date">(.*?)</span>""")
+// The curator's "Read the full review" link — the curator-SUPPLIED review URL (a Steam news /
+// community-announcement page), present only when the curator attached one. NOT the recommendation_link
+// (that's just the game's store page). It's the only anchor whose text is exactly "Read the full
+// review", so matching on the link text targets it unambiguously. [^>]* can't cross '>' so the capture
+// stays within one opening tag whose '>' is immediately followed by the link text.
+private val REC_LINK_REGEX =
+    Regex("""<a\b[^>]*\bhref="([^"]*)"[^>]*>\s*Read (?:the )?full review\s*</a>""", RegexOption.IGNORE_CASE)
 
 /**
  * Fetches the games a curator has reviewed, keeping only "Recommended" and "Informational" entries
@@ -133,7 +140,8 @@ suspend fun fetchCuratorRecommendations(
 
                 val blurb = REC_DESC_REGEX.find(block)?.groupValues?.get(1)?.let { unescapeHtml(it.trim()) } ?: ""
                 val date = REC_DATE_REGEX.find(block)?.groupValues?.get(1)?.trim().orEmpty()
-                result.add(SteamCuratorRecommendation(curatorId, appId, type, blurb, date))
+                val url = REC_LINK_REGEX.find(block)?.groupValues?.get(1)?.let { unescapeHtml(it.trim()) }.orEmpty()
+                result.add(SteamCuratorRecommendation(curatorId, appId, type, blurb, date, url))
             }
 
             // Stop if we've paged past the total, or a page yielded no parseable items (safety net

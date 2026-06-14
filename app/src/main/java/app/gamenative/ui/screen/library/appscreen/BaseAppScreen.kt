@@ -262,8 +262,14 @@ abstract class BaseAppScreen {
                 val cachedResponse = GameCompatibilityCache.getCached(gameName)
                 if (cachedResponse != null) {
                     val message = GameCompatibilityService.getCompatibilityMessageFromResponse(context, cachedResponse)
-                    compatibilityMessage = message.text
-                    compatibilityColor = message.color.value
+                    // Only surface meaningful results; "Unknown" means no data was recorded yet
+                    if (message.text == context.getString(R.string.library_compatibility_unknown)) {
+                        compatibilityMessage = null
+                        compatibilityColor = null
+                    } else {
+                        compatibilityMessage = message.text
+                        compatibilityColor = message.color.value
+                    }
                 } else {
                     compatibilityMessage = null
                     compatibilityColor = null
@@ -1030,6 +1036,21 @@ abstract class BaseAppScreen {
             mutableStateOf<List<Achievement>?>(null)
         }
 
+        // The selected curator's review of this game, shown above achievements (Steam only). Null when
+        // no curator filter is active or the curator didn't review this app. Pure local DB read.
+        var curatorReviewState by remember(libraryItem.gameId) {
+            mutableStateOf<app.gamenative.ui.data.CuratorReviewDisplay?>(null)
+        }
+        LaunchedEffect(libraryItem.gameId) {
+            curatorReviewState = if (libraryItem.gameSource == GameSource.STEAM) {
+                withContext(Dispatchers.IO) {
+                    app.gamenative.service.SteamService.getCuratorReviewForApp(libraryItem.gameId)
+                }
+            } else {
+                null
+            }
+        }
+
         // Fetch achievements for display on the game details page (Steam only for now).
         LaunchedEffect(libraryItem.gameId) {
             when (libraryItem.gameSource) {
@@ -1335,6 +1356,7 @@ abstract class BaseAppScreen {
             isQueued = isQueuedState,
             downloadInfo = downloadInfo,
             achievements = achievementsState,
+            curatorReview = curatorReviewState,
             onDownloadInstallClick = {
                 onDownloadInstallClick(context, libraryItem, onClickPlay)
                 uiScope.launch {
