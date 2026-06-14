@@ -205,6 +205,7 @@ class GOGAppScreen : BaseAppScreen() {
             appId = libraryItem.appId,
             releaseDate = releaseDateTimestamp,
             developer = game?.developer?.takeIf { it.isNotEmpty() } ?: "", // GOG API doesn't provide this
+            publisher = game?.publisher?.takeIf { it.isNotEmpty() } ?: "",
             installLocation = game?.installPath?.takeIf { it.isNotEmpty() },
             sizeOnDisk = sizeOnDisk,
             sizeFromStore = sizeFromStore,

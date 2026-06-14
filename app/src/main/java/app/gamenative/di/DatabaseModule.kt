@@ -15,6 +15,7 @@ import app.gamenative.db.dao.SteamCuratorDao
 import app.gamenative.db.dao.SteamCuratorRecommendationDao
 import app.gamenative.db.dao.SteamUnlockedBranchDao
 import app.gamenative.db.migration.ROOM_MIGRATION_V7_to_V8
+import app.gamenative.db.migration.ROOM_MIGRATION_V28_to_V29
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,7 +34,7 @@ class DatabaseModule {
         // The db will be considered unstable during development.
         // Once stable we should add a (room) db migration
         return Room.databaseBuilder(context, PluviaDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ROOM_MIGRATION_V7_to_V8)
+            .addMigrations(ROOM_MIGRATION_V7_to_V8, ROOM_MIGRATION_V28_to_V29)
             .fallbackToDestructiveMigration(true)
             // Use SEPARATE executors for queries and transactions. By default Room shares one
             // small fixed pool for both, which deadlocks under load: every open suspend

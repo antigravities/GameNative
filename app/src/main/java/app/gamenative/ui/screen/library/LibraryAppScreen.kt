@@ -22,6 +22,7 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -673,6 +674,7 @@ private fun GameInfoSection(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Developer and publisher side by side; if publisher is absent, developer spans full width
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -681,24 +683,36 @@ private fun GameInfoSection(
                 label = stringResource(R.string.developer),
                 value = displayInfo.developer,
                 isCompact = true,
-                modifier = Modifier.weight(1f),
+                modifier = if (displayInfo.publisher.isNotEmpty()) Modifier.weight(1f) else Modifier.fillMaxWidth(),
                 focusableForNavigation = true,
             )
-            InfoCard(
-                label = stringResource(R.string.release_date),
-                value = remember(displayInfo.releaseDate) {
-                    if (displayInfo.releaseDate > 0) {
-                        SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-                            .format(Date(displayInfo.releaseDate * 1000))
-                    } else {
-                        context.getString(R.string.library_compatibility_unknown)
-                    }
-                },
-                isCompact = true,
-                modifier = Modifier.weight(1f),
-                focusableForNavigation = true,
-            )
+            if (displayInfo.publisher.isNotEmpty()) {
+                InfoCard(
+                    label = stringResource(R.string.publisher),
+                    value = displayInfo.publisher,
+                    isCompact = true,
+                    modifier = Modifier.weight(1f),
+                    focusableForNavigation = true,
+                )
+            }
         }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        InfoCard(
+            label = stringResource(R.string.release_date),
+            value = remember(displayInfo.releaseDate) {
+                if (displayInfo.releaseDate > 0) {
+                    SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
+                        .format(Date(displayInfo.releaseDate * 1000))
+                } else {
+                    context.getString(R.string.library_compatibility_unknown)
+                }
+            },
+            isCompact = true,
+            modifier = Modifier.fillMaxWidth(),
+            focusableForNavigation = true,
+        )
 
         // Install location (when installed)
         if (isInstalled && displayInfo.installLocation != null) {
@@ -866,6 +880,7 @@ internal fun AppScreenContent(
     onUpdateClick: () -> Unit,
     onBack: () -> Unit = {},
     achievements: List<Achievement>? = null,
+    curatorReview: app.gamenative.ui.data.CuratorReviewDisplay? = null,
     bottomContent: @Composable () -> Unit = {},
     vararg optionsMenu: AppMenuOption,
 ) {
@@ -1302,6 +1317,12 @@ internal fun AppScreenContent(
                 onUpdateClick = onUpdateClick,
             )
 
+            // Curator review (shown only when a curator filter is active and that curator reviewed
+            // this game). Sits above achievements, below game information.
+            if (curatorReview != null) {
+                CuratorReviewSection(review = curatorReview)
+            }
+
             // Achievements row (Steam only for now, shown when data is available)
             if (!achievements.isNullOrEmpty()) {
                 AchievementsRow(achievements = achievements)
@@ -1427,6 +1448,100 @@ fun GameMigrationDialog(
 }
 
 @SuppressLint("UnusedBoxWithConstraintsScope")
+@Composable
+private fun CuratorReviewSection(review: app.gamenative.ui.data.CuratorReviewDisplay) {
+    val context = LocalContext.current
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    Text(
+        text = stringResource(R.string.curator_review_title),
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onBackground,
+        modifier = Modifier.padding(bottom = 12.dp),
+    )
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 36.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // Curator name + recommendation type (Recommended / Informational).
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = review.curatorName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Text(
+                    text = stringResource(
+                        if (review.recommendationType == "recommended")
+                            R.string.curator_review_type_recommended
+                        else
+                            R.string.curator_review_type_informational,
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (review.blurb.isNotBlank()) {
+                Text(
+                    text = review.blurb,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+
+            // Date and (when the curator supplied one) the "Read full review" link on one line, e.g.
+            // "June 13, 2026 · Read full review". The link is a clickable Text styled as a link.
+            val hasDate = review.reviewDate.isNotBlank()
+            val hasUrl = review.reviewUrl.isNotBlank()
+            if (hasDate || hasUrl) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (hasDate) {
+                        Text(
+                            text = review.reviewDate,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (hasUrl) {
+                        if (hasDate) {
+                            Text(
+                                text = " · ",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.curator_review_open_full),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable {
+                                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(review.reviewUrl))
+                                context.startActivity(intent)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun AchievementsRow(achievements: List<Achievement>) {
     val unlockedCount = achievements.count { it.isUnlocked }
