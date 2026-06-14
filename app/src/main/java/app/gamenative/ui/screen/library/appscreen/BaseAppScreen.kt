@@ -30,6 +30,7 @@ import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
 import app.gamenative.events.AndroidEvent
 import app.gamenative.ui.component.dialog.ContainerConfigDialog
+import app.gamenative.ui.component.dialog.GamesByCompanyDialog
 import app.gamenative.ui.data.AppMenuOption
 import app.gamenative.ui.data.GameDisplayInfo
 import app.gamenative.ui.enums.AppOptionMenuType
@@ -1331,6 +1332,10 @@ abstract class BaseAppScreen {
             isUpdatePending = isUpdatePendingState,
         )
 
+        // Developer/publisher popup state. companyPopup holds (companyName, matchDeveloper) while open;
+        // null = closed. Only sources that opt in via supportsCompanyPopup get tappable cards.
+        var companyPopup by remember(libraryItem.appId) { mutableStateOf<Pair<String, Boolean>?>(null) }
+
         // Render the common UI
         app.gamenative.ui.screen.library.AppScreenContent(
             displayInfo = displayInfo,
@@ -1364,6 +1369,16 @@ abstract class BaseAppScreen {
                 }
             },
             onBack = onBack,
+            onDeveloperClick = if (supportsCompanyPopup && displayInfo.developer.isNotEmpty()) {
+                { companyPopup = displayInfo.developer to true }
+            } else {
+                null
+            },
+            onPublisherClick = if (supportsCompanyPopup && displayInfo.publisher.isNotEmpty()) {
+                { companyPopup = displayInfo.publisher to false }
+            } else {
+                null
+            },
             bottomContent = { AdditionalBottomContent(libraryItem, onNavigate) },
             optionsMenu = optionsMenu.toTypedArray(),
         )
@@ -1379,6 +1394,29 @@ abstract class BaseAppScreen {
                     }
                 }
             }
+        }
+
+        // Developer/publisher popup: lists the user's other owned games sharing the tapped company.
+        companyPopup?.let { (company, matchDeveloper) ->
+            var companyGames by remember(company, matchDeveloper) { mutableStateOf<List<LibraryItem>>(emptyList()) }
+            var companyLoading by remember(company, matchDeveloper) { mutableStateOf(true) }
+            LaunchedEffect(company, matchDeveloper) {
+                companyLoading = true
+                // Exclude the game currently being viewed from its own "more by this company" list.
+                companyGames = getCompanyGames(company, matchDeveloper)
+                    .filter { it.appId != libraryItem.appId }
+                companyLoading = false
+            }
+            GamesByCompanyDialog(
+                companyName = company,
+                games = companyGames,
+                isLoading = companyLoading,
+                onGameClick = { appId ->
+                    companyPopup = null
+                    onNavigate(appId)
+                },
+                onDismiss = { companyPopup = null },
+            )
         }
 
         // Show container config dialog if needed
@@ -1503,4 +1541,17 @@ abstract class BaseAppScreen {
     ) {
         // Default: nothing
     }
+
+    /**
+     * Whether the developer/publisher cards on the game page are tappable to open a popup of the user's
+     * other owned games by that company. Off by default; overridden true in [SteamAppScreen].
+     */
+    open val supportsCompanyPopup: Boolean = false
+
+    /**
+     * Returns the user's other owned games that share the given company name with the current game.
+     * matchDeveloper = true matches the developer role, false matches publisher. Default empty so
+     * sources that don't opt in are a no-op. Override in a source-specific subclass.
+     */
+    open suspend fun getCompanyGames(company: String, matchDeveloper: Boolean): List<LibraryItem> = emptyList()
 }

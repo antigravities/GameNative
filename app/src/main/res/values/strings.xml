@@ -1375,6 +1375,8 @@
     <string name="library_curator_dialog_loading">Loading curators…</string>
     <string name="library_curator_dialog_no_results">No matching curators</string>
     <string name="library_curator_dialog_empty">No followed curators found</string>
+    <string name="library_company_dialog_empty">No other games in your library from this developer/publisher</string>
+    <string name="library_company_dialog_close">Close</string>
     <string name="curator_review_title">Curator Review</string>
     <string name="curator_review_open_full">Read full review</string>
     <string name="curator_review_type_recommended">Recommended</string>
