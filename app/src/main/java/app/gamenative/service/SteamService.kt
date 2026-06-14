@@ -910,6 +910,12 @@ class SteamService : Service(), IChallengeUrlChanged {
             return runBlocking(Dispatchers.IO) { instance?.appDao?.findApp(appId) }
         }
 
+        // Owned-app summaries sharing a developer (matchDeveloper = true) or publisher with the given
+        // company name. Used by the game page's developer/publisher popup. suspend (not runBlocking)
+        // because callers invoke it from a coroutine.
+        suspend fun getOwnedAppSummariesByCompany(company: String, matchDeveloper: Boolean): List<SteamAppSummary> =
+            instance?.appDao?.getOwnedAppSummariesByCompany(company, if (matchDeveloper) 1 else 0) ?: emptyList()
+
         fun getDownloadingAppInfoOf(appId: Int): DownloadingAppInfo? {
             return runBlocking(Dispatchers.IO) { instance?.downloadingAppInfoDao?.getDownloadingApp(appId) }
         }

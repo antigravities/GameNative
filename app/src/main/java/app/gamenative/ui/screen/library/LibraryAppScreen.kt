@@ -399,11 +399,14 @@ private fun InfoCard(
     statusColor: Color? = null,
     isCompact: Boolean = false,
     focusableForNavigation: Boolean = false,
+    onClick: (() -> Unit)? = null,
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
-    val cardModifier = if (focusableForNavigation) {
+    // When onClick is provided the whole card becomes tappable (used by the developer/publisher cards).
+    val clickableModifier = if (onClick != null) Modifier.clickable { onClick() } else Modifier
+    val cardModifier = clickableModifier.then(if (focusableForNavigation) {
         modifier
             .bringIntoViewRequester(bringIntoViewRequester)
             .onFocusChanged { state ->
@@ -431,7 +434,7 @@ private fun InfoCard(
             )
     } else {
         modifier
-    }
+    })
 
     Surface(
         modifier = cardModifier,
@@ -578,6 +581,8 @@ private fun GameInfoSection(
     isDownloading: Boolean,
     isUpdatePending: Boolean,
     onUpdateClick: () -> Unit,
+    onDeveloperClick: (() -> Unit)? = null,
+    onPublisherClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
 
@@ -686,6 +691,7 @@ private fun GameInfoSection(
                 isCompact = true,
                 modifier = if (displayInfo.publisher.isNotEmpty()) Modifier.weight(1f) else Modifier.fillMaxWidth(),
                 focusableForNavigation = true,
+                onClick = onDeveloperClick,
             )
             if (displayInfo.publisher.isNotEmpty()) {
                 InfoCard(
@@ -694,6 +700,7 @@ private fun GameInfoSection(
                     isCompact = true,
                     modifier = Modifier.weight(1f),
                     focusableForNavigation = true,
+                    onClick = onPublisherClick,
                 )
             }
         }
@@ -895,6 +902,8 @@ internal fun AppScreenContent(
     onBack: () -> Unit = {},
     achievements: List<Achievement>? = null,
     curatorReview: app.gamenative.ui.data.CuratorReviewDisplay? = null,
+    onDeveloperClick: (() -> Unit)? = null,
+    onPublisherClick: (() -> Unit)? = null,
     bottomContent: @Composable () -> Unit = {},
     vararg optionsMenu: AppMenuOption,
 ) {
@@ -1329,6 +1338,8 @@ internal fun AppScreenContent(
                 isDownloading = isDownloading,
                 isUpdatePending = isUpdatePending,
                 onUpdateClick = onUpdateClick,
+                onDeveloperClick = onDeveloperClick,
+                onPublisherClick = onPublisherClick,
             )
 
             // Curator review (shown only when a curator filter is active and that curator reviewed
