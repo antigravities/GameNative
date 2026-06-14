@@ -2310,7 +2310,11 @@ fun XServerScreen(
             // so scope.launch is safe. The GL read is queued inside captureFromGL().
             icView.setScreenshotCallback {
                 val renderer = xServerView?.getxServer()?.renderer
-                if (renderer != null && renderer is GLRenderer) {
+                // captureFromGL takes the XServerRenderer interface and dispatches by
+                // concrete type (GLRenderer → GL read, VulkanRenderer → PixelCopy), so we
+                // must NOT pre-filter on `is GLRenderer` — that silently no-oped the
+                // gesture on the now-default Vulkan renderer.
+                if (renderer != null) {
                     ScreenshotUtils.captureFromGL(renderer, PrefManager.screenshotPostEffects) { bitmap ->
                         scope.launch(Dispatchers.IO) {
                             if (bitmap == null) {
