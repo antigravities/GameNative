@@ -67,6 +67,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private Cursor lastCursor = null;
     private boolean xRenderingPausedForScanout = false;
 
+    // Rolling "instant replay" recorder for the Vulkan compositor path. Null when the feature is
+    // off or while in native (scanout) mode, which the recorder can't capture. Guarded by replayLock.
+    private final Object replayLock = new Object();
+    private VulkanContinuousRecorder replayRecorder;
+
     private volatile ArrayList<RenderableWindow> renderableWindows = new ArrayList<>();
     private static final java.util.concurrent.atomic.AtomicLong ID_GEN =
         new java.util.concurrent.atomic.AtomicLong(1);
@@ -111,6 +116,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         short width, short height, short hotX, short hotY);
     private native void nativeSetRenderList(long handle, long[] ids, int[] xs, int[] ys, int count);
     private native void nativeRemoveWindow(long handle, long id);
+
+    private native void nativeStartRecording(long handle, android.view.Surface encoderSurface, int w, int h);
+    private native void nativeStopRecording(long handle);
 
     private native void nativeInitScanout(long handle);
     private native void nativeDetachSurface(long handle);
@@ -164,6 +172,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     } else {
                         initComplete = true;
                         xServerView.queueEvent(this::updateScene);
+                        updateReplayRecorder();
                         return;
                     }
                 }
@@ -223,6 +232,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             }
             initComplete = true;
             xServerView.queueEvent(this::updateScene);
+            updateReplayRecorder();
         });
     }
 
@@ -232,10 +242,12 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         synchronized (lock) {
             if (nativeHandle != 0) { nativeResize(nativeHandle, width, height); updateTransform(); }
         }
+        updateReplayRecorder();
     }
 
     public void onSurfaceDestroyed() {
         initComplete = false;
+        updateReplayRecorder();   // initComplete is now false -> tears the recorder down
         if (initExecutor != null) {
             initExecutor.shutdownNow();
             try { initExecutor.awaitTermination(3, java.util.concurrent.TimeUnit.SECONDS); }
@@ -635,6 +647,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             tearDownScanout();
         }
         xServerView.queueEvent(this::updateScene);
+        // Recording can't capture the zero-copy scanout path, so stop when entering
+        // native mode and resume (if enabled) when leaving it.
+        updateReplayRecorder();
         final String msg = mode ? "Native Rendering+ Enabled" : "Native Rendering+ Disabled";
         xServerView.post(() -> Toast.makeText(xServerView.getContext(), msg, Toast.LENGTH_SHORT).show());
     }
@@ -802,6 +817,52 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     @Override
     public void setOnFrameRenderedListener(Runnable r) { /* no-op: Vulkan compositor does not expose per-frame callbacks */ }
+
+    /**
+     * Reconciles the replay recorder with current state. Started only when the feature is enabled,
+     * the surface is ready, and we're on the compositor path (recording can't capture scanout/native
+     * mode). Idempotent and safe to call from any thread; serialized on replayLock. Called whenever a
+     * relevant input changes (surface size, init complete, native-mode toggle, surface destroy).
+     */
+    private void updateReplayRecorder() {
+        synchronized (replayLock) {
+            long handle;
+            synchronized (lock) { handle = nativeHandle; }
+            boolean want = handle != 0 && initComplete && surfaceWidth > 0 && surfaceHeight > 0
+                && !nativeMode
+                && app.gamenative.PrefManager.INSTANCE.getReplayBufferEnabled();
+            if (want && replayRecorder == null) {
+                VulkanContinuousRecorder rec = new VulkanContinuousRecorder(
+                    app.gamenative.PrefManager.INSTANCE.getReplayBufferSeconds(),
+                    app.gamenative.PrefManager.INSTANCE.getReplayBufferBitrateMbps());
+                // The encoder's input Surface becomes a second Vulkan swapchain in native.
+                android.view.Surface s = rec.start(surfaceWidth, surfaceHeight);
+                if (s != null && handle != 0) {
+                    nativeStartRecording(handle, s, surfaceWidth, surfaceHeight);
+                    replayRecorder = rec;
+                } else {
+                    rec.stop();
+                }
+            } else if (!want && replayRecorder != null) {
+                // Tear the native encoder swapchain down first (synchronous) so it's safe to release
+                // the MediaCodec / input Surface afterwards.
+                if (handle != 0) nativeStopRecording(handle);
+                replayRecorder.stop();
+                replayRecorder = null;
+            }
+        }
+    }
+
+    /**
+     * Returns a keyframe-aligned copy of the last X seconds of encoded frames for muxing, or null
+     * if the buffer is unavailable/empty. Thread-safe — callable from the UI thread. Returns the
+     * same {@link GLContinuousRecorder.ClipSnapshot} type as the GL path so muxing is shared.
+     */
+    public GLContinuousRecorder.ClipSnapshot saveReplay() {
+        synchronized (replayLock) {
+            return replayRecorder != null ? replayRecorder.snapshot() : null;
+        }
+    }
 
     @Override
     public XServerRendererView getRendererView() { return xServerView; }
