@@ -45,6 +45,7 @@ import app.gamenative.ui.enums.Orientation
 import app.gamenative.utils.AnimatedPngDecoder
 import app.gamenative.data.GameSource
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.GameSessionTimer
 import app.gamenative.utils.IconDecoder
 import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.LocaleHelper
@@ -429,6 +430,7 @@ class MainActivity : ComponentActivity() {
                         runCatching { webView.onResume() }.onFailure { Timber.w(it, "webView.onResume failed") }
                         webView.evaluateJavascript(RESUME_MEDIA_JS, null)
                     }
+                    GameSessionTimer.onResumed()
                     Timber.d("Game resumed")
                 }
             }
@@ -470,6 +472,7 @@ class MainActivity : ComponentActivity() {
                         webView.evaluateJavascript(PAUSE_MEDIA_JS, null)
                         runCatching { webView.onPause() }.onFailure { Timber.w(it, "webView.onPause failed") }
                     }
+                    GameSessionTimer.onSuspended()
                     if (PluviaApp.isManualSuspendMode()) {
                         PluviaApp.isOverlayPaused = true
                         Timber.d("Game paused due to app backgrounded (manual resume required)")
