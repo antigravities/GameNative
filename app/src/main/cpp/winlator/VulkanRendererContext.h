@@ -77,6 +77,7 @@ struct VkTable {
     PFN_vkCmdSetScissor CmdSetScissor;
     PFN_vkCmdPipelineBarrier CmdPipelineBarrier;
     PFN_vkCmdCopyImage CmdCopyImage;
+    PFN_vkCmdBlitImage CmdBlitImage;
     PFN_vkCmdCopyBufferToImage CmdCopyBufferToImage;
     PFN_vkCreateSampler CreateSampler;
     PFN_vkDestroySampler DestroySampler;
@@ -178,6 +179,14 @@ public:
     void setEffect(int effectId, float sharpness, int effectMask, float brightness, float contrast, float gamma);
     void setPresentMode(VkPresentModeKHR mode);
     std::vector<int> getSupportedPresentModes() const;
+
+    // Instant-replay recording: each composited frame is blitted into a second
+    // swapchain whose surface is a MediaCodec encoder's input Surface, then
+    // presented (the encode block compresses it asynchronously). Only the
+    // compositor path is captured; scanout (native mode) is skipped. The
+    // encoder Surface's ANativeWindow is owned here until stopRecording().
+    void startRecording(ANativeWindow* encoderWindow, int width, int height);
+    void stopRecording();
 
 private:
     struct WinTex {
@@ -323,6 +332,39 @@ private:
     std::vector<VkFence>     inFlightFences;
     std::vector<VkFence>     imgInFlight;
     uint32_t                 currentFrame = 0;
+    // True when the display swapchain was created with TRANSFER_SRC usage, which
+    // the recorder needs to blit the composited image out. Gates startRecording.
+    bool                     swapchainBlitSrc = false;
+
+    // --- instant-replay recorder (encoder swapchain) -----------------------
+    // Requests flow Java(JNI thread) -> render thread via these atomics; the
+    // pending window is handed over under recReqMutex so ownership is unambiguous
+    // when a start replaces a still-active session.
+    std::mutex        recReqMutex;
+    ANativeWindow*    recPendingWindow = nullptr;
+    int               recPendingW = 0, recPendingH = 0;
+    std::atomic<bool> recorderStartReq{false};
+    std::atomic<bool> recorderStopReq{false};
+    bool              recorderActive = false;        // render-thread only
+    ANativeWindow*    recorderWindow = nullptr;      // owned while active
+    VkSurfaceKHR      recSurface   = VK_NULL_HANDLE;
+    VkSwapchainKHR    recSwapchain = VK_NULL_HANDLE;
+    VkFormat          recFmt = VK_FORMAT_UNDEFINED;
+    VkExtent2D        recExtent{};
+    std::vector<VkImage>         recImages;
+    std::vector<VkCommandBuffer> recCmdBufs;
+    std::vector<VkSemaphore>     recAcquireSems;
+    std::vector<VkSemaphore>     recBlitDoneSems;
+    std::vector<VkSemaphore>     recEncDoneSems;
+    std::vector<VkFence>         recFences;
+    void recorderCreate();
+    void recorderDestroy(bool releaseWindow = true);
+    // Blits display image displayImgIdx into the encoder swapchain and presents
+    // it. On success outDisplayWaitSem becomes the semaphore the display present
+    // must wait on (so it observes the layout-restoring barrier); on failure it
+    // is left untouched and a deferred stop is requested.
+    void recordAndPresent(uint32_t displayImgIdx, VkSemaphore sceneDoneSem,
+                          VkSemaphore& outDisplayWaitSem);
 
     VkSampler        sampler    = VK_NULL_HANDLE;
     VkDescriptorPool winTexPool = VK_NULL_HANDLE;

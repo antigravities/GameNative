@@ -280,6 +280,24 @@ Java_com_winlator_renderer_VulkanRenderer_nativeDetachSurface(JNIEnv*, jobject, 
     if (r) r->detachSurface();
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_renderer_VulkanRenderer_nativeStartRecording(
+    JNIEnv* env, jobject, jlong handle, jobject encoderSurface, jint w, jint h)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || !encoderSurface) return;
+    // fromSurface adds a ref; the context owns it until stopRecording().
+    ANativeWindow* win = ANativeWindow_fromSurface(env, encoderSurface);
+    if (!win) return;
+    r->startRecording(win, (int)w, (int)h);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_renderer_VulkanRenderer_nativeStopRecording(JNIEnv*, jobject, jlong handle) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->stopRecording();
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_winlator_renderer_VulkanRenderer_nativeReattachSurface(JNIEnv* env, jobject, jlong handle, jobject surface) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);

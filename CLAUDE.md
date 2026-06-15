@@ -105,11 +105,25 @@ When making a schema change, increment the schema version in `PluviaDatabase` an
 
 ### Native / C++ — `app/src/main/cpp/`
 
-- **Build**: CMake 3.22.1, NDK 22.1.7171670
+- **Build**: CMake 3.22.1, NDK `27.3.13750724` (installed at `C:\android\sdk\ndk\`)
 - **ABIs**: `arm64-v8a`, `armeabi-v7a`
 - **Compiled library** (`libwinlator`): graphics (`drawable.c`, `gpu_image.c`), audio (`alsa_client.c`), shared memory (`sysvshared_memory.c`), X11 (`xconnector_epoll.c`), ELF patching (`patchelf_wrapper.cpp`)
 - **Supporting**: `virglrenderer`, `patchelf`, `adrenotools`
-- **Prebuilt `.so`**: `app/src/main/jniLibs/` — uses legacy JNI packaging (`useLegacyPackaging = true`)
+- **Prebuilt `.so`**: committed under `app/src/{main,modern,legacy}/jniLibs/<abi>/` — uses legacy JNI packaging (`useLegacyPackaging = true`)
+
+> **⚠ Gradle does NOT compile `src/main/cpp`.** The `externalNativeBuild` in `app/build.gradle` points only at `pulsecapture/CMakeLists.txt`; the main `src/main/cpp/CMakeLists.txt` is commented out. Every other native library (`libvulkan_renderer.so`, `libwinlator.so`, …) is a **manually-built prebuilt committed to `jniLibs`**. Editing a `.cpp` and running `assembleModernDebug` will silently repackage the *stale* `.so` → `UnsatisfiedLinkError` for any new JNI method. After changing native code you must rebuild the target by hand and copy its `.so` over the committed prebuilts. Example (the `vulkan_renderer` target, arm64-v8a only):
+> ```bash
+> export PATH="/c/android/sdk/emulator/lib64/vulkan:$PATH"   # glslangValidator for the shader-header custom commands
+> CM=/c/android/sdk/cmake/3.22.1/bin
+> "$CM/cmake.exe" -S app/src/main/cpp -B app/build/vk_rebuild/arm64-v8a -G Ninja \
+>   -DCMAKE_MAKE_PROGRAM="$CM/ninja.exe" \
+>   -DCMAKE_TOOLCHAIN_FILE="C:/android/sdk/ndk/27.3.13750724/build/cmake/android.toolchain.cmake" \
+>   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DCMAKE_BUILD_TYPE=Release
+> "$CM/cmake.exe" --build app/build/vk_rebuild/arm64-v8a --target vulkan_renderer
+> cp app/build/vk_rebuild/arm64-v8a/libvulkan_renderer.so app/src/modern/jniLibs/arm64-v8a/
+> cp app/build/vk_rebuild/arm64-v8a/libvulkan_renderer.so app/src/legacy/jniLibs/arm64-v8a/
+> ```
+> Verify with `grep -c <newJniSymbol> <built .so>` (expect > 0) **before** copying. Then `assembleModernDebug` and reinstall.
 
 ### Library Screen Hot Path
 
