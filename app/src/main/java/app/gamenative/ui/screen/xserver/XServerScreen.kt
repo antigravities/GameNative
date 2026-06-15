@@ -125,6 +125,7 @@ import app.gamenative.ui.data.XServerState
 import app.gamenative.ui.widget.PerformanceHudView
 import app.gamenative.utils.AssetUtils
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.GameSessionTimer
 import app.gamenative.utils.downloader.CoreDriverDownloader
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ExecutableSelectionUtils
@@ -437,6 +438,9 @@ fun XServerScreen(
 
     LaunchedEffect(appId) {
         isExiting.set(false)
+        // Begin tracking active (non-suspended) play time for this game. The matching
+        // endSession() that persists the lifetime total runs in exit().
+        GameSessionTimer.startSession(appId)
     }
 
     val container = remember(appId) {
@@ -885,6 +889,8 @@ fun XServerScreen(
             return
         }
         PluviaApp.xEnvironment?.onPause()
+        // Freeze the in-game play-time counter while the process is suspended.
+        GameSessionTimer.onSuspended()
         PluviaApp.isOverlayPaused = true
     }
 
@@ -899,12 +905,14 @@ fun XServerScreen(
             return
         }
         PluviaApp.xEnvironment?.onResume()
+        GameSessionTimer.onResumed()
         clearOverlayPauseState()
     }
 
     fun forceResumeIfSuspended() {
         if (PluviaApp.isOverlayPaused && !neverSuspend) {
             PluviaApp.xEnvironment?.onResume()
+            GameSessionTimer.onResumed()
         }
         clearOverlayPauseState()
     }
@@ -913,6 +921,7 @@ fun XServerScreen(
         if (!PluviaApp.isOverlayPaused) return
         if (!neverSuspend) {
             PluviaApp.xEnvironment?.onResume()
+            GameSessionTimer.onResumed()
         }
         keepPausedForEditor = false
         clearOverlayPauseState()
@@ -2365,6 +2374,7 @@ fun XServerScreen(
 
                             if (!PluviaApp.isActivityInForeground && !neverSuspend) {
                                 PluviaApp.xEnvironment?.onPause()
+                                GameSessionTimer.onSuspended()
                                 if (manualResumeMode) {
                                     view.post {
                                         PluviaApp.isOverlayPaused = true
@@ -4712,6 +4722,9 @@ private fun exit(
         container.putSessionMetadata("session_length_sec", rating.sessionLengthSec.toInt())
         container.saveData()
     }
+
+    // Flush the lifetime active play-time total for this game to disk.
+    GameSessionTimer.endSession()
 
     // only needed in exit() — OS reclaims on process death, so onDestroy fallback skips this
     try {
