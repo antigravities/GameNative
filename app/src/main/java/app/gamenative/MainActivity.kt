@@ -54,6 +54,7 @@ import app.gamenative.utils.AnimatedPngDecoder
 import app.gamenative.data.GameSource
 import app.gamenative.powercontrol.PowerManager
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.GameSessionTimer
 import app.gamenative.utils.IconDecoder
 import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.LocaleHelper
@@ -534,6 +535,7 @@ class MainActivity : ComponentActivity() {
                 }
                 else -> {
                     PluviaApp.xEnvironment?.onResume()
+                    GameSessionTimer.onResumed()
                     Timber.d("Game resumed")
                 }
             }
@@ -574,6 +576,7 @@ class MainActivity : ComponentActivity() {
                 }
                 else -> {
                     PluviaApp.xEnvironment?.onPause()
+                    GameSessionTimer.onSuspended()
                     if (PluviaApp.isManualSuspendMode()) {
                         PluviaApp.isOverlayPaused = true
                         Timber.d("Game paused due to app backgrounded (manual resume required)")
