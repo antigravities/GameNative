@@ -1280,6 +1280,13 @@ object PrefManager {
             setPref(RECOMMENDATION_CACHE_JSON, value)
         }
 
+    // Per-game lifetime active play time (ms), keyed by the stable game id (e.g. "STEAM_440").
+    // A parameterized key, so these are functions rather than a single property. Survives
+    // reinstalls into a new container because the key is the game id, not the container instance.
+    private fun gameTotalPlaytimeKey(appId: String) = longPreferencesKey("playtime_total_$appId")
+    fun getGameTotalPlaytimeMs(appId: String): Long = getPref(gameTotalPlaytimeKey(appId), 0L)
+    fun setGameTotalPlaytimeMs(appId: String, value: Long) = setPref(gameTotalPlaytimeKey(appId), value)
+
     private val RECOMMENDATION_CACHE_TIMESTAMP = longPreferencesKey("recommendation_cache_timestamp")
     var recommendationCacheTimestamp: Long
         get() = getPref(RECOMMENDATION_CACHE_TIMESTAMP, 0L)
