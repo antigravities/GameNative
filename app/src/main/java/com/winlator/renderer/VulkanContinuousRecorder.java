@@ -1,7 +1,6 @@
 package com.winlator.renderer;
 
 import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.util.Log;
 import android.view.Surface;
@@ -31,7 +30,6 @@ import java.util.ArrayList;
  */
 public class VulkanContinuousRecorder {
     private static final String TAG = "VkContinuousRecorder";
-    private static final String MIME = MediaFormat.MIMETYPE_VIDEO_AVC; // "video/avc"
 
     private final int bufferSeconds;
     private final int bitrate;
@@ -64,22 +62,16 @@ public class VulkanContinuousRecorder {
      */
     public Surface start(int width, int height) {
         stop(); // release any previous generation (also clears the ring)
-        int encW = width & ~1;   // H.264 requires even dimensions
+        int encW = width & ~1;   // H.264/HEVC require even dimensions
         int encH = height & ~1;
         if (encW <= 0 || encH <= 0) return null;
 
         try {
-            MediaFormat format = MediaFormat.createVideoFormat(MIME, encW, encH);
-            format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-            format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
-            // Nominal frame rate; actual cadence is driven by presentation timestamps (VFR).
-            format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
-            // 1s GOP so the ring buffer can always be trimmed to a keyframe boundary.
-            format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
-
-            encoder = MediaCodec.createEncoderByType(MIME);
-            encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            // Codec (HEVC default, AVC fallback) is chosen by ReplayCodec from PrefManager.
+            ReplayCodec.Encoder enc = ReplayCodec.create(encW, encH, bitrate);
+            if (enc == null) { Log.e(TAG, "No usable video encoder"); stop(); return null; }
+            encoder = enc.codec;
+            Log.i(TAG, "Replay encoder: " + enc.mime + " " + encW + "x" + encH);
             inputSurface = encoder.createInputSurface();
             encoder.start();
 

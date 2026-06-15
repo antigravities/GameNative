@@ -776,6 +776,29 @@ fun SettingsGroupInterface(
                     PrefManager.replayBufferSeconds = secondsValues[idx]
                 },
             )
+            // Codec choice — HEVC (default) halves file size; H.264 maximizes compatibility.
+            // The values list mirrors the labels by index, same as the seconds dropdown.
+            val codecValues = listOf("hevc", "avc")
+            val codecLabels = listOf(
+                stringResource(R.string.settings_replay_codec_hevc),
+                stringResource(R.string.settings_replay_codec_avc),
+            )
+            var codecIndex by rememberSaveable {
+                mutableStateOf(
+                    codecValues.indexOf(PrefManager.replayBufferCodec).takeIf { it >= 0 } ?: 0
+                )
+            }
+            SettingsListDropdown(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.settings_replay_codec_title)) },
+                subtitle = { Text(text = stringResource(R.string.settings_replay_codec_subtitle)) },
+                items = codecLabels,
+                value = codecIndex,
+                onItemSelected = { idx ->
+                    codecIndex = idx
+                    PrefManager.replayBufferCodec = codecValues[idx]
+                },
+            )
             // Optional audio capture (no permission prompt; ALSA tee or PulseAudio monitor).
             var replayAudioEnabled by rememberSaveable { mutableStateOf(PrefManager.replayAudioEnabled) }
             SettingsSwitch(

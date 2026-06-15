@@ -470,6 +470,16 @@ object PrefManager {
             setPref(REPLAY_BUFFER_BITRATE_MBPS, value)
         }
 
+    private val REPLAY_BUFFER_CODEC = stringPreferencesKey("replay_buffer_codec")
+    // Video codec for the replay encoder: "hevc" (H.265, ~half the file size at equal
+    // quality, default) or "avc" (H.264, maximum playback compatibility). Read at
+    // encoder-creation (game launch); HEVC auto-falls-back to AVC if no HEVC encoder exists.
+    var replayBufferCodec: String
+        get() = getPref(REPLAY_BUFFER_CODEC, "hevc")
+        set(value) {
+            setPref(REPLAY_BUFFER_CODEC, value)
+        }
+
     private val REPLAY_AUDIO_ENABLED = booleanPreferencesKey("replay_audio_enabled")
     // When the replay buffer is on, also capture game audio (ALSA tee or PulseAudio monitor).
     // Default true; no permission prompt either way. Read at GL-session start.
