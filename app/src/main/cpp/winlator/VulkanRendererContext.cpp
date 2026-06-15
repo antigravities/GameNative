@@ -28,6 +28,11 @@ VulkanRendererContext::~VulkanRendererContext() {
     if (renderThread.joinable()) renderThread.join();
     std::lock_guard<std::mutex> lk(renderMutex);
     vk_.DeviceWaitIdle(device);
+    recorderDestroy(true);   // tear down the encoder swapchain if still active
+    {
+        std::lock_guard<std::mutex> rlk(recReqMutex);
+        if (recPendingWindow) { ANativeWindow_release(recPendingWindow); recPendingWindow = nullptr; }
+    }
     for (auto& [id, wt] : texMap) destroyWinTex(wt);
     texMap.clear();
     
@@ -139,6 +144,7 @@ void VulkanRendererContext::loadDeviceDispatch() {
     LOAD_D2(CmdSetScissor);
     LOAD_D2(CmdPipelineBarrier);
     LOAD_D2(CmdCopyImage);
+    LOAD_D2(CmdBlitImage);
     LOAD_D2(CmdCopyBufferToImage);
     LOAD_D2(CreateSampler);
     LOAD_D2(DestroySampler);
@@ -277,6 +283,10 @@ void VulkanRendererContext::createSwapchain() {
     ci.surface=surface; ci.minImageCount=imgCount; ci.imageFormat=swapchainFmt;
     ci.imageColorSpace=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; ci.imageExtent=swapchainExt;
     ci.imageArrayLayers=1; ci.imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    // Allow the instant-replay recorder to blit the composited image out of the
+    // swapchain. Harmless when not recording; near-universally supported.
+    swapchainBlitSrc = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+    if (swapchainBlitSrc) ci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     ci.imageSharingMode=VK_SHARING_MODE_EXCLUSIVE; ci.preTransform=pre;
     ci.compositeAlpha=compositeAlpha; ci.presentMode=presentMode; ci.clipped=VK_TRUE;
     ci.oldSwapchain=oldSwapchain;
@@ -839,11 +849,232 @@ void VulkanRendererContext::flushDeleteQueue() {
     deleteQueue.clear();
 }
 
+void VulkanRendererContext::startRecording(ANativeWindow* encoderWindow, int width, int height) {
+    if (!encoderWindow) return;
+    {
+        std::lock_guard<std::mutex> lk(recReqMutex);
+        // Drop any previously-queued-but-unconsumed window (start called twice).
+        if (recPendingWindow && recPendingWindow != encoderWindow)
+            ANativeWindow_release(recPendingWindow);
+        recPendingWindow = encoderWindow;
+        recPendingW = width;
+        recPendingH = height;
+    }
+    recorderStartReq.store(true, std::memory_order_release);
+}
+
+void VulkanRendererContext::stopRecording() {
+    recorderStartReq.store(false, std::memory_order_release);
+    // Tear down synchronously so the caller can safely release the MediaCodec /
+    // input Surface afterwards: take the frame lock (render thread is then not
+    // inside renderFrame) and destroy the encoder swapchain here.
+    std::unique_lock<std::shared_mutex> frameLock(frameMutex);
+    recorderDestroy(true);
+    std::lock_guard<std::mutex> lk(recReqMutex);
+    if (recPendingWindow) { ANativeWindow_release(recPendingWindow); recPendingWindow = nullptr; }
+}
+
+void VulkanRendererContext::recorderCreate() {
+    if (!swapchainBlitSrc) {
+        RLOG_E("recorder: swapchain has no TRANSFER_SRC usage; recording unavailable");
+        std::lock_guard<std::mutex> lk(recReqMutex);
+        if (recPendingWindow) { ANativeWindow_release(recPendingWindow); recPendingWindow = nullptr; }
+        return;
+    }
+    ANativeWindow* win = nullptr; int w = 0, h = 0;
+    {
+        std::lock_guard<std::mutex> lk(recReqMutex);
+        win = recPendingWindow; recPendingWindow = nullptr;
+        w = recPendingW; h = recPendingH;
+    }
+    if (!win) return;
+    if (recorderActive) recorderDestroy(true);   // replace existing session
+    recorderWindow = win;                          // ownership transferred
+
+    w &= ~1; h &= ~1;                              // H.264 requires even dims
+    if (w <= 0 || h <= 0) { recorderDestroy(true); return; }
+
+    VkAndroidSurfaceCreateInfoKHR sci{}; sci.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+    sci.window = recorderWindow;
+    if (vk_.CreateAndroidSurfaceKHR(instance, &sci, nullptr, &recSurface) != VK_SUCCESS) {
+        RLOG_E("recorder: CreateAndroidSurfaceKHR failed"); recorderDestroy(true); return;
+    }
+    VkBool32 present = VK_FALSE;
+    vk_.GetPhysicalDeviceSurfaceSupportKHR(physicalDevice, graphicsQueueFamilyIndex, recSurface, &present);
+    if (!present) { RLOG_E("recorder: graphics queue can't present to encoder surface"); recorderDestroy(true); return; }
+
+    VkSurfaceCapabilitiesKHR caps{};
+    vk_.GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, recSurface, &caps);
+    if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
+        RLOG_E("recorder: encoder surface lacks TRANSFER_DST usage"); recorderDestroy(true); return;
+    }
+    VkExtent2D ext{(uint32_t)w, (uint32_t)h};
+    if (caps.currentExtent.width != 0xFFFFFFFF) ext = caps.currentExtent;
+    ext.width &= ~1u; ext.height &= ~1u;
+    if (ext.width == 0 || ext.height == 0) { recorderDestroy(true); return; }
+    recExtent = ext;
+
+    uint32_t fn = 0; vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, recSurface, &fn, nullptr);
+    std::vector<VkSurfaceFormatKHR> fmts(fn);
+    vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, recSurface, &fn, fmts.data());
+    recFmt = VK_FORMAT_R8G8B8A8_UNORM;
+    VkColorSpaceKHR cs = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    bool fmtOk = false;
+    for (auto& f : fmts) if (f.format == recFmt) { fmtOk = true; cs = f.colorSpace; break; }
+    if (!fmtOk && fn > 0) { recFmt = fmts[0].format; cs = fmts[0].colorSpace; }
+
+    uint32_t imgCount = caps.minImageCount + 1;
+    if (caps.maxImageCount > 0 && imgCount > caps.maxImageCount) imgCount = caps.maxImageCount;
+
+    VkSwapchainCreateInfoKHR ci{}; ci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    ci.surface = recSurface; ci.minImageCount = imgCount; ci.imageFormat = recFmt; ci.imageColorSpace = cs;
+    ci.imageExtent = recExtent; ci.imageArrayLayers = 1; ci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ci.preTransform = (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
+        ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : caps.currentTransform;
+    ci.compositeAlpha = (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+        ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+    ci.presentMode = VK_PRESENT_MODE_FIFO_KHR; ci.clipped = VK_TRUE;
+    if (vk_.CreateSwapchainKHR(device, &ci, nullptr, &recSwapchain) != VK_SUCCESS) {
+        RLOG_E("recorder: CreateSwapchainKHR on encoder surface failed"); recorderDestroy(true); return;
+    }
+    uint32_t ic = 0; vk_.GetSwapchainImagesKHR(device, recSwapchain, &ic, nullptr);
+    recImages.resize(ic); vk_.GetSwapchainImagesKHR(device, recSwapchain, &ic, recImages.data());
+
+    recCmdBufs.resize(MAX_FRAMES_IN_FLIGHT);
+    VkCommandBufferAllocateInfo cbi{}; cbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cbi.commandPool = cmdPool; cbi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; cbi.commandBufferCount = MAX_FRAMES_IN_FLIGHT;
+    if (vk_.AllocateCommandBuffers(device, &cbi, recCmdBufs.data()) != VK_SUCCESS) {
+        recCmdBufs.clear(); recorderDestroy(true); return;
+    }
+    recAcquireSems.resize(MAX_FRAMES_IN_FLIGHT);
+    recBlitDoneSems.resize(MAX_FRAMES_IN_FLIGHT);
+    recEncDoneSems.resize(MAX_FRAMES_IN_FLIGHT);
+    recFences.resize(MAX_FRAMES_IN_FLIGHT);
+    VkSemaphoreCreateInfo si{}; si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    VkFenceCreateInfo fi{}; fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        vk_.CreateSemaphore(device, &si, nullptr, &recAcquireSems[i]);
+        vk_.CreateSemaphore(device, &si, nullptr, &recBlitDoneSems[i]);
+        vk_.CreateSemaphore(device, &si, nullptr, &recEncDoneSems[i]);
+        vk_.CreateFence(device, &fi, nullptr, &recFences[i]);
+    }
+    recorderActive = true;
+    RLOG("recorder: started %ux%u fmt=%d images=%u", recExtent.width, recExtent.height, (int)recFmt, ic);
+}
+
+void VulkanRendererContext::recorderDestroy(bool releaseWindow) {
+    // Nothing to do (idempotent — both the explicit stop and a deferred
+    // error-stop can reach here).
+    if (!recorderActive && recSurface == VK_NULL_HANDLE && recSwapchain == VK_NULL_HANDLE
+        && recCmdBufs.empty() && recAcquireSems.empty() && !recorderWindow) return;
+
+    vk_.DeviceWaitIdle(device);
+    for (auto s : recAcquireSems)  if (s) vk_.DestroySemaphore(device, s, nullptr);
+    for (auto s : recBlitDoneSems) if (s) vk_.DestroySemaphore(device, s, nullptr);
+    for (auto s : recEncDoneSems)  if (s) vk_.DestroySemaphore(device, s, nullptr);
+    for (auto f : recFences)       if (f) vk_.DestroyFence(device, f, nullptr);
+    recAcquireSems.clear(); recBlitDoneSems.clear(); recEncDoneSems.clear(); recFences.clear();
+    if (!recCmdBufs.empty()) {
+        vk_.FreeCommandBuffers(device, cmdPool, (uint32_t)recCmdBufs.size(), recCmdBufs.data());
+        recCmdBufs.clear();
+    }
+    recImages.clear();
+    if (recSwapchain != VK_NULL_HANDLE) { vk_.DestroySwapchainKHR(device, recSwapchain, nullptr); recSwapchain = VK_NULL_HANDLE; }
+    if (recSurface != VK_NULL_HANDLE) { vk_.DestroySurfaceKHR(instance, recSurface, nullptr); recSurface = VK_NULL_HANDLE; }
+    if (releaseWindow && recorderWindow) { ANativeWindow_release(recorderWindow); recorderWindow = nullptr; }
+    recorderActive = false;
+}
+
+void VulkanRendererContext::recordAndPresent(uint32_t displayImgIdx, VkSemaphore sceneDoneSem,
+                                             VkSemaphore& outDisplayWaitSem) {
+    uint32_t cf = currentFrame;
+    uint32_t encIdx = 0;
+    VkResult ar = vk_.AcquireNextImageKHR(device, recSwapchain, UINT64_MAX,
+                                          recAcquireSems[cf], VK_NULL_HANDLE, &encIdx);
+    if (ar != VK_SUCCESS && ar != VK_SUBOPTIMAL_KHR) {
+        // No semaphore was signalled; leave the display present on sceneDoneSem.
+        RLOG_E("recorder: encoder acquire failed (%d), stopping recording", ar);
+        recorderStopReq.store(true, std::memory_order_release);
+        return;
+    }
+    // Reuse of this slot's command buffer must wait for its previous submit.
+    if (!vk_.GetFenceStatus || vk_.GetFenceStatus(device, recFences[cf]) == VK_NOT_READY)
+        vk_.WaitForFences(device, 1, &recFences[cf], VK_TRUE, UINT64_MAX);
+    vk_.ResetFences(device, 1, &recFences[cf]);
+    vk_.ResetCommandBuffer(recCmdBufs[cf], 0);
+
+    VkCommandBuffer cb = recCmdBufs[cf];
+    VkCommandBufferBeginInfo bi{}; bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vk_.BeginCommandBuffer(cb, &bi);
+
+    VkImage srcImg = swapchainImages[displayImgIdx];
+    VkImage dstImg = recImages[encIdx];
+
+    transition(cb, srcImg, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+               0, VK_ACCESS_TRANSFER_READ_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    transition(cb, dstImg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               0, VK_ACCESS_TRANSFER_WRITE_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    VkImageBlit blit{};
+    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.srcOffsets[0] = {0, 0, 0};
+    blit.srcOffsets[1] = {(int32_t)swapchainExt.width, (int32_t)swapchainExt.height, 1};
+    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.dstOffsets[0] = {0, 0, 0};
+    blit.dstOffsets[1] = {(int32_t)recExtent.width, (int32_t)recExtent.height, 1};
+    vk_.CmdBlitImage(cb, srcImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                     dstImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+
+    transition(cb, dstImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+               VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    transition(cb, srcImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+               VK_ACCESS_TRANSFER_READ_BIT, 0,
+               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    vk_.EndCommandBuffer(cb);
+
+    VkSemaphore waitSems[2] = {sceneDoneSem, recAcquireSems[cf]};
+    VkPipelineStageFlags waitStages[2] = {VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT};
+    VkSemaphore signalSems[2] = {recBlitDoneSems[cf], recEncDoneSems[cf]};
+    VkSubmitInfo si{}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.waitSemaphoreCount = 2; si.pWaitSemaphores = waitSems; si.pWaitDstStageMask = waitStages;
+    si.commandBufferCount = 1; si.pCommandBuffers = &cb;
+    si.signalSemaphoreCount = 2; si.pSignalSemaphores = signalSems;
+    if (vk_.QueueSubmit(graphicsQueue, 1, &si, recFences[cf]) != VK_SUCCESS) {
+        // Nothing got signalled by us; leave display present on sceneDoneSem.
+        RLOG_E("recorder: blit submit failed, stopping recording");
+        recorderStopReq.store(true, std::memory_order_release);
+        return;
+    }
+    // The blit submit signalled recBlitDoneSems even if the encoder present then
+    // fails, so the display present must consume it either way.
+    outDisplayWaitSem = recBlitDoneSems[cf];
+
+    VkPresentInfoKHR pi{}; pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.waitSemaphoreCount = 1; pi.pWaitSemaphores = &recEncDoneSems[cf];
+    pi.swapchainCount = 1; pi.pSwapchains = &recSwapchain; pi.pImageIndices = &encIdx;
+    VkResult pr = vk_.QueuePresentKHR(graphicsQueue, &pi);
+    if (pr != VK_SUCCESS && pr != VK_SUBOPTIMAL_KHR) {
+        RLOG_E("recorder: encoder present failed (%d), stopping recording", pr);
+        recorderStopReq.store(true, std::memory_order_release);
+    }
+}
+
 void VulkanRendererContext::renderFrame() {
     std::shared_lock<std::shared_mutex> frameLock(frameMutex);
 
     needsRender.store(false,std::memory_order_relaxed);
     cursorMoved.store(false,std::memory_order_relaxed);
+
+    // Service recorder lifecycle requests on the render thread (the only place
+    // that touches the encoder swapchain after creation). Stop is processed even
+    // while detached so the encoder swapchain doesn't outlive a backgrounded view.
+    if (recorderStopReq.exchange(false, std::memory_order_acquire)) recorderDestroy(true);
+    if (recorderStartReq.exchange(false, std::memory_order_acquire)) recorderCreate();
 
     if (surfaceDetached.load(std::memory_order_acquire)) return;
     if (scanoutActive.load()) {
@@ -976,9 +1207,18 @@ ok=true;}catch(...){}
         vk_.CreateFence(device,&fi,nullptr,&inFlightFences[currentFrame]);
         return;
     }
+    // Instant-replay capture (compositor path only). Blits the just-rendered
+    // swapchain image into the encoder swapchain and presents it; the display
+    // present then waits on the recorder's semaphore so it observes the barrier
+    // that restores the swapchain image to PRESENT_SRC.
+    VkSemaphore displayWaitSem = renderDoneSems[currentFrame];
+    if (recorderActive && !scanoutActive.load()) {
+        recordAndPresent(imgIdx, renderDoneSems[currentFrame], displayWaitSem);
+    }
+
     VkSwapchainKHR scs[]={swapchain};
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
+    pi.waitSemaphoreCount=1; pi.pWaitSemaphores=&displayWaitSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
     res=vk_.QueuePresentKHR(graphicsQueue,&pi);
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;

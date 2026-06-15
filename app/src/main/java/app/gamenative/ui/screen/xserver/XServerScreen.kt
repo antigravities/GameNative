@@ -2339,42 +2339,44 @@ fun XServerScreen(
             // Fires on the UI thread; saveReplay()/snapshot() are thread-safe, muxing runs on IO.
             icView.setSaveClipCallback {
                 val renderer = xServerView?.getxServer()?.renderer
-                when (renderer) {
-                    is GLRenderer -> {
-                        val snapshot = renderer.saveReplay()
-                        if (snapshot == null) {
-                            SnackbarManager.show(context.getString(R.string.replay_unavailable))
-                        } else {
-                            val audioSnapshot = audioReplayRecorder.value?.snapshot()
-                            scope.launch(Dispatchers.IO) {
-                                val uri = RecordingUtils.saveClip(
-                                    context = context,
-                                    snapshot = snapshot,
-                                    label = container?.name ?: "replay",
-                                    audioPcm = audioSnapshot,
-                                )
-                                if (uri != null && shutterSoundId.intValue != 0) {
-                                    shutterPool.play(shutterSoundId.intValue, 1f, 1f, 1, 0, 1f)
-                                }
-                                val message = if (uri != null) {
-                                    context.getString(R.string.replay_saved)
-                                } else {
-                                    context.getString(R.string.replay_failed)
-                                }
-                                withContext(Dispatchers.Main) { SnackbarManager.show(message) }
-                            }
+                // Both renderers return the same ClipSnapshot type; only the capture path differs
+                // (GL blits on the GL thread, Vulkan blits into an encoder swapchain in native).
+                val snapshot = when (renderer) {
+                    is GLRenderer -> renderer.saveReplay()
+                    is VulkanRenderer -> renderer.saveReplay()
+                    else -> null
+                }
+                if (renderer !is GLRenderer && renderer !is VulkanRenderer) {
+                    SnackbarManager.show(context.getString(R.string.replay_not_supported_backend))
+                } else if (snapshot == null) {
+                    SnackbarManager.show(context.getString(R.string.replay_unavailable))
+                } else {
+                    val audioSnapshot = audioReplayRecorder.value?.snapshot()
+                    scope.launch(Dispatchers.IO) {
+                        val uri = RecordingUtils.saveClip(
+                            context = context,
+                            snapshot = snapshot,
+                            label = container?.name ?: "replay",
+                            audioPcm = audioSnapshot,
+                        )
+                        if (uri != null && shutterSoundId.intValue != 0) {
+                            shutterPool.play(shutterSoundId.intValue, 1f, 1f, 1, 0, 1f)
                         }
+                        val message = if (uri != null) {
+                            context.getString(R.string.replay_saved)
+                        } else {
+                            context.getString(R.string.replay_failed)
+                        }
+                        withContext(Dispatchers.Main) { SnackbarManager.show(message) }
                     }
-                    // The Vulkan compositor has no GL-thread capture path yet (future work).
-                    else -> SnackbarManager.show(context.getString(R.string.replay_not_supported_backend))
                 }
             }
 
-            // Start the rolling audio buffer for replay clips (GL renderer only; opt-in). Driver-
+            // Start the rolling audio buffer for replay clips (GL or Vulkan renderer; opt-in). Driver-
             // aware: ALSA feeds via the Java tap, PulseAudio via the native sink-monitor client.
             run {
                 val activeRenderer = xServerView?.getxServer()?.renderer
-                if (activeRenderer is GLRenderer &&
+                if ((activeRenderer is GLRenderer || activeRenderer is VulkanRenderer) &&
                     PrefManager.replayBufferEnabled && PrefManager.replayAudioEnabled &&
                     audioReplayRecorder.value == null
                 ) {
