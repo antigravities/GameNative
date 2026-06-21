@@ -112,6 +112,7 @@ fun WebViewScreen(
     appId: String,
     navigateBack: () -> Unit,
     onExit: (onComplete: (() -> Unit)?) -> Unit,
+    onGameStarted: () -> Unit = {},
     viewModel: WebViewScreenViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -141,6 +142,11 @@ fun WebViewScreen(
     // of the dialog stayed stale on the original immutable copy.
     var container by remember(loaded) { mutableStateOf(loaded.container) }
     val profile = loaded.profile
+
+    // html5 analog of onWindowMapped: now that the container resolved and the game is launching,
+    // report in-game status to Steam (the WebView maps no X11 window, so the wine path never fires).
+    // fires once on the success path -- the early-returns above skip it for error/pop cases.
+    LaunchedEffect(Unit) { onGameStarted() }
 
     // diagnostic: surface what we loaded for state-relevant fields every (re-)load.
     // suspendPolicy is sourced from the wine Container (single per-container preference) so it's

@@ -856,6 +856,33 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /**
+     * HTML5 analog of [onWindowMapped]. WebView games never map an X11 window, so the wine
+     * in-game-status path (onWindowMapped -> ActiveGameRegistry.set + notifyRunningProcesses)
+     * never fires for them and Steam never shows the user "in-game".
+     *
+     * Report a synthetic single-process [GameProcessInfo] -- the GameNative app's own PID
+     * parented to Steam, mirroring the wine fallback AppProcessInfo(pid, steamPid, true) in
+     * onWindowMapped. Steam-source titles only; non-Steam html5 games have no Steam session.
+     *
+     * Only the start-side set is needed here: exit (exitSteamApp -> clearIfMatches +
+     * notifyRunningProcesses()) and foreground/background (notifyApp{Fore,Back}grounded) are
+     * already keyed off ActiveGameRegistry and runtime-agnostic.
+     */
+    fun onHtml5GameStarted(context: Context, appId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (ContainerUtils.extractGameSourceFromContainerId(appId) != GameSource.STEAM) return@launch
+            val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
+            val pid = Process.myPid()
+            val processes = listOf(AppProcessInfo(pid, pid, true))
+            val installedBranch = SteamService.getInstalledApp(gameId)?.branch ?: "public"
+            GameProcessInfo(appId = gameId, branch = installedBranch, processes = processes).let {
+                ActiveGameRegistry.set(it)
+                SteamService.notifyRunningProcesses(it)
+            }
+        }
+    }
+
     fun onGameLaunchError(error: String) {
         viewModelScope.launch {
             // Hide the splash screen if it's still showing

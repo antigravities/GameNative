@@ -1695,6 +1695,7 @@ fun PluviaMain(
                 composable(route = PluviaScreen.WebView.route) {
                     app.gamenative.html5.host.WebViewScreen(
                         appId = state.launchedAppId,
+                        onGameStarted = { viewModel.onHtml5GameStarted(context, state.launchedAppId) },
                         navigateBack = {
                             CoroutineScope(Dispatchers.Main).launch {
                                 app.gamenative.runtime.dispatchNavigateBack(
