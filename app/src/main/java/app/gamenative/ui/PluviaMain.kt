@@ -2846,8 +2846,20 @@ fun preLaunchApp(
             useTemporaryOverride = useTemporaryOverride,
             retryCount = retryCount,
             bootToContainer = bootToContainer,
+            runPatchFlow = { runPatchFlowIfNeeded() },
+            runFeatureFlow = { runFeatureFlowIfNeeded() },
         )
+      } catch (e: CancellationException) {
+          // Back-button cancellation lands here. Hide the dialog defensively (the BackHandler
+          // already does, but the coroutine may be cancelled mid-flight from elsewhere too).
+          // NonCancellable so the hide still runs while the coroutine is being torn down.
+          withContext(NonCancellable) { setLoadingDialogVisible(false) }
+          throw e
+      } finally {
+          activePreLaunchJob = null
+      }
     }
+    activePreLaunchJob = job
 }
 
 // B: shared Steam Cloud sync + result-handling helper. invoked by preLaunchApp for
@@ -2868,12 +2880,17 @@ private suspend fun runSteamCloudSyncAndHandleResult(
     setLoadingProgress: (Float) -> Unit,
     setLoadingMessage: (String) -> Unit,
     setMessageDialogState: (MessageDialogState) -> Unit,
-    onSuccess: KFunction2<Context, String, Unit>,
+    onSuccess: (Context, String) -> Unit,
     useTemporaryOverride: Boolean,
     retryCount: Int,
     bootToContainer: Boolean,
     propagateDeletions: Boolean = false,
     applyRemoteTombstones: Boolean = false,
+    // wine-only patch/feature install flows. defined locally in preLaunchApp, so they're
+    // passed in here; the html5 call site leaves these as the no-op default (webview path
+    // has no wine prefix to patch).
+    runPatchFlow: suspend () -> Unit = {},
+    runFeatureFlow: suspend () -> Unit = {},
 ) {
         setLoadingMessage("Syncing cloud saves")
         setLoadingProgress(-1f)
@@ -3089,20 +3106,9 @@ private suspend fun runSteamCloudSyncAndHandleResult(
             SyncResult.UpToDate,
             SyncResult.Success,
             -> {
-                runPatchFlowIfNeeded()
-                runFeatureFlowIfNeeded()
+                runPatchFlow()
+                runFeatureFlow()
                 onSuccess(context, appId)
             }
         }
-      } catch (e: CancellationException) {
-          // Back-button cancellation lands here. Hide the dialog defensively (the BackHandler
-          // already does, but the coroutine may be cancelled mid-flight from elsewhere too).
-          // NonCancellable so the hide still runs while the coroutine is being torn down.
-          withContext(NonCancellable) { setLoadingDialogVisible(false) }
-          throw e
-      } finally {
-          activePreLaunchJob = null
-      }
-    }
-    activePreLaunchJob = job
 }
