@@ -2883,6 +2883,88 @@ fun XServerScreen(
             )
         }
 
+        // Suspend overlays render BEFORE QuickMenu so the menu's top-right play-time
+        // counter (InGameTimeCounter) draws on top of the veil. Touch-safe: a closed
+        // QuickMenu has no pointer-input modifier, so taps fall through to the buttons.
+        // Manual-resume play button: shown after the Quick Menu closes under the "manual"
+        // suspend policy. Excluded while suspendedWithoutMenu so it never overlaps the
+        // two-button overlay below.
+        if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu &&
+            !keepPausedForEditor && !suspendedWithoutMenu
+        ) {
+            ManualResumeOverlay(
+                onResume = ::resumeFromManualButton,
+                immersive = immersiveHooks != null,
+                logoUrl = suspendLogoUrl,
+                gameName = suspendGameName,
+            )
+        }
+
+        // Silent-suspend overlay: shown when back suspended the game without opening the
+        // Quick Menu (PrefManager.showQuickMenuOnBack off). Offers Resume + Open Quick Menu.
+        if (suspendedWithoutMenu && PluviaApp.isOverlayPaused && !showQuickMenu && !keepPausedForEditor) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    // Resume
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .background(
+                                color = androidx.compose.ui.graphics.Color.White,
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                            )
+                            .clickable(onClick = ::resumeFromSuspendOverlay),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = stringResource(R.string.resume_game),
+                            tint = androidx.compose.ui.graphics.Color.Black,
+                            modifier = Modifier.size(40.dp),
+                        )
+                    }
+                    // Open Quick Menu (keeps the game paused; closing the menu resumes per policy)
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .background(
+                                color = androidx.compose.ui.graphics.Color.White,
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                            )
+                            // Keep suspendedWithoutMenu armed: the overlay hides while the
+                            // menu is open (its !showQuickMenu guard) and reappears on close.
+                            .clickable { showQuickMenu = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = stringResource(R.string.open_quick_menu),
+                            tint = androidx.compose.ui.graphics.Color.Black,
+                            modifier = Modifier.size(40.dp),
+                        )
+                    }
+                }
+                SuspendArtworkCorner(
+                    logoUrl = suspendLogoUrl,
+                    gameName = suspendGameName,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(bottom = 16.dp, end = 16.dp),
+                )
+            }
+        }
+
         QuickMenu(
             isVisible = showQuickMenu,
             onDismiss = dismissOverlayMenu,
@@ -2967,85 +3049,6 @@ fun XServerScreen(
                     .align(Alignment.TopEnd)
                     .padding(16.dp),
             )
-        }
-
-        // Manual-resume play button: shown after the Quick Menu closes under the "manual"
-        // suspend policy. Excluded while suspendedWithoutMenu so it never overlaps the
-        // two-button overlay below.
-        if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu &&
-            !keepPausedForEditor && !suspendedWithoutMenu
-        ) {
-            ManualResumeOverlay(
-                onResume = ::resumeFromManualButton,
-                immersive = immersiveHooks != null,
-                logoUrl = suspendLogoUrl,
-                gameName = suspendGameName,
-            )
-        }
-
-        // Silent-suspend overlay: shown when back suspended the game without opening the
-        // Quick Menu (PrefManager.showQuickMenuOnBack off). Offers Resume + Open Quick Menu.
-        if (suspendedWithoutMenu && PluviaApp.isOverlayPaused && !showQuickMenu && !keepPausedForEditor) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {},
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    // Resume
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .background(
-                                color = androidx.compose.ui.graphics.Color.White,
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                            )
-                            .clickable(onClick = ::resumeFromSuspendOverlay),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = stringResource(R.string.resume_game),
-                            tint = androidx.compose.ui.graphics.Color.Black,
-                            modifier = Modifier.size(40.dp),
-                        )
-                    }
-                    // Open Quick Menu (keeps the game paused; closing the menu resumes per policy)
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .background(
-                                color = androidx.compose.ui.graphics.Color.White,
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                            )
-                            // Keep suspendedWithoutMenu armed: the overlay hides while the
-                            // menu is open (its !showQuickMenu guard) and reappears on close.
-                            .clickable { showQuickMenu = true },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Menu,
-                            contentDescription = stringResource(R.string.open_quick_menu),
-                            tint = androidx.compose.ui.graphics.Color.Black,
-                            modifier = Modifier.size(40.dp),
-                        )
-                    }
-                }
-                SuspendArtworkCorner(
-                    logoUrl = suspendLogoUrl,
-                    gameName = suspendGameName,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .navigationBarsPadding()
-                        .padding(bottom = 16.dp, end = 16.dp),
-                )
-            }
         }
     }
 
