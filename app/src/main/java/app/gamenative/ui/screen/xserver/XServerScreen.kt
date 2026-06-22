@@ -3047,6 +3047,7 @@ fun XServerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -3291,6 +3292,7 @@ private fun ManualResumeOverlay(onResume: () -> Unit, immersive: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
