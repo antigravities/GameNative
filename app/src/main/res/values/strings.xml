@@ -681,6 +681,7 @@
     <string name="downloading">Downloading...</string>
     <string name="calculating_time">Calculating...</string>
     <string name="download_failed_try_again">Download failed. Please try again.</string>
+    <string name="download_retrying">Download failed, retrying…</string>
     <string name="update_available">Update Available</string>
     <string name="game_information">Game Information</string>
     <string name="status">Status</string>
