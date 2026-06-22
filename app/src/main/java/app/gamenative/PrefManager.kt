@@ -407,6 +407,16 @@ object PrefManager {
             setPref(SHOW_FPS, value)
         }
 
+    private val SHOW_QUICK_MENU_ON_BACK = booleanPreferencesKey("show_quick_menu_on_back")
+    // Default true = current behavior: the in-game back gesture opens the Quick Menu (which
+    // also suspends the game). When false, back suspends the game silently and shows
+    // Resume / Open Quick Menu buttons instead. See XServerScreen.gameBack.
+    var showQuickMenuOnBack: Boolean
+        get() = getPref(SHOW_QUICK_MENU_ON_BACK, true)
+        set(value) {
+            setPref(SHOW_QUICK_MENU_ON_BACK, value)
+        }
+
     private val PERFORMANCE_HUD_COMPACT_MODE = booleanPreferencesKey("performance_hud_compact_mode")
     var performanceHudCompactMode: Boolean
         get() = getPref(PERFORMANCE_HUD_COMPACT_MODE, false)

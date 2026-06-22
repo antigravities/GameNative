@@ -603,6 +603,11 @@ fun XServerScreen(
     var hasPhysicalController by remember { mutableStateOf(false) }
     var controllerSlotStatusVersion by remember { mutableIntStateOf(0) }
     var keepPausedForEditor by remember { mutableStateOf(false) }
+    // True when the game was suspended by the back gesture *without* opening the Quick Menu
+    // (only happens when PrefManager.showQuickMenuOnBack is off). Drives the Resume / Open
+    // Quick Menu overlay below.
+    var suspendedWithoutMenu by remember { mutableStateOf(false) }
+    val showQuickMenuOnBack = remember { PrefManager.showQuickMenuOnBack }
     var hasPhysicalKeyboard by remember { mutableStateOf(false) }
     var hasPhysicalMouse by remember { mutableStateOf(false) }
     var usingScreenMirror by remember { mutableStateOf(false) }
@@ -914,6 +919,7 @@ fun XServerScreen(
         }
         PluviaApp.xEnvironment?.onResume()
         GameSessionTimer.onResumed()
+        suspendedWithoutMenu = false
         clearOverlayPauseState()
     }
 
@@ -922,6 +928,19 @@ fun XServerScreen(
             PluviaApp.xEnvironment?.onResume()
             GameSessionTimer.onResumed()
         }
+        suspendedWithoutMenu = false
+        clearOverlayPauseState()
+    }
+
+    // Resume after a silent back-gesture suspend (PrefManager.showQuickMenuOnBack off).
+    // Resumes regardless of suspendPolicy because we may have suspended under any policy.
+    fun resumeFromSuspendOverlay() {
+        if (PluviaApp.isOverlayPaused && !neverSuspend) {
+            PluviaApp.xEnvironment?.onResume()
+            GameSessionTimer.onResumed()
+        }
+        suspendedWithoutMenu = false
+        keepPausedForEditor = false
         clearOverlayPauseState()
     }
 
@@ -1455,6 +1474,24 @@ fun XServerScreen(
 
         if (showQuickMenu) {
             dismissOverlayMenu()
+            return@gameBack
+        }
+
+        // Back while already suspended-without-menu → resume (mirrors back closing the menu).
+        if (suspendedWithoutMenu) {
+            resumeFromSuspendOverlay()
+            return@gameBack
+        }
+
+        // Pref off: suspend the game silently instead of opening the Quick Menu.
+        if (!showQuickMenuOnBack) {
+            if (neverSuspend) {
+                // Can't suspend under this policy — fall back to opening the menu so back isn't a no-op.
+                showQuickMenu = true
+            } else {
+                pauseForOverlayIfAllowed()
+                suspendedWithoutMenu = true
+            }
             return@gameBack
         }
 
@@ -2897,6 +2934,9 @@ fun XServerScreen(
                     if (shouldForceResumeOnMenuClose) {
                         forceResumeIfSuspended()
                         shouldForceResumeOnMenuClose = false
+                    } else if (suspendedWithoutMenu) {
+                        // Menu was opened from the silent-suspend overlay — stay paused so the
+                        // Resume / Open Quick Menu overlay reappears when the menu closes.
                     } else if (!keepPausedForEditor) {
                         resumeIfAllowedAfterOverlay()
                     }
@@ -2915,8 +2955,69 @@ fun XServerScreen(
             )
         }
 
-        if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu && !keepPausedForEditor) {
+        // Manual-resume play button: shown after the Quick Menu closes under the "manual"
+        // suspend policy. Excluded while suspendedWithoutMenu so it never overlaps the
+        // two-button overlay below.
+        if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu &&
+            !keepPausedForEditor && !suspendedWithoutMenu
+        ) {
             ManualResumeOverlay(onResume = ::resumeFromManualButton, immersive = immersiveHooks != null)
+        }
+
+        // Silent-suspend overlay: shown when back suspended the game without opening the
+        // Quick Menu (PrefManager.showQuickMenuOnBack off). Offers Resume + Open Quick Menu.
+        if (suspendedWithoutMenu && PluviaApp.isOverlayPaused && !showQuickMenu && !keepPausedForEditor) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    // Resume
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .background(
+                                color = androidx.compose.ui.graphics.Color.White,
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                            )
+                            .clickable(onClick = ::resumeFromSuspendOverlay),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = stringResource(R.string.resume_game),
+                            tint = androidx.compose.ui.graphics.Color.Black,
+                            modifier = Modifier.size(40.dp),
+                        )
+                    }
+                    // Open Quick Menu (keeps the game paused; closing the menu resumes per policy)
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .background(
+                                color = androidx.compose.ui.graphics.Color.White,
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                            )
+                            // Keep suspendedWithoutMenu armed: the overlay hides while the
+                            // menu is open (its !showQuickMenu guard) and reappears on close.
+                            .clickable { showQuickMenu = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = stringResource(R.string.open_quick_menu),
+                            tint = androidx.compose.ui.graphics.Color.Black,
+                            modifier = Modifier.size(40.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 
