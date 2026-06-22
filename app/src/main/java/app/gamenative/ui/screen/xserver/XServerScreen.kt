@@ -361,6 +361,14 @@ fun XServerScreen(
         // Begin tracking active (non-suspended) play time for this game. The matching
         // endSession() that persists the lifetime total runs in exit().
         GameSessionTimer.startSession(appId)
+        // Checkpoint the lifetime total every minute so a crash / OS-kill (this is still an
+        // experimental emulator) loses at most ~60s instead of the whole session — exit()'s
+        // endSession() may never run. totalMs() is absolute, so this is idempotent. This coroutine
+        // is cancelled automatically when the screen leaves composition or appId changes.
+        while (true) {
+            delay(60_000L)
+            GameSessionTimer.persist()
+        }
     }
 
     val container = remember(appId) {
