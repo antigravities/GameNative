@@ -33,23 +33,35 @@ object SteamGuidesFetcher {
     // returns workshop items, so guide-only games come back empty.
     private const val MATCHING_FILETYPE_ALL_GUIDES = 10
 
+    /** A page of guide results plus the cursor for the next page (null = no more). */
+    data class GuidesPage(
+        val guides: List<SteamGuide>,
+        val nextCursor: String?,
+    )
+
+    /** First-page cursor sentinel per Steam's QueryFiles convention. */
+    const val FIRST_CURSOR = "*"
+
     /**
-     * In-memory cache so re-opening the menu or toggling back to a previously
-     * viewed sort/category doesn't re-hit the network. Keyed by the full query.
+     * In-memory cache so re-opening the menu / paging back doesn't re-hit the
+     * network. Keyed by the full query *including* the page cursor.
      */
     private data class CacheKey(
         val appId: Int,
         val sort: GuideSort,
         val tag: String?,
         val languageTag: String?,
+        val cursor: String,
     )
 
-    private val cache = HashMap<CacheKey, List<SteamGuide>>()
+    private val cache = HashMap<CacheKey, GuidesPage>()
 
     /**
-     * Fetches guides for [appId] with the given [sort] and optional [category].
-     * Returns an empty list when there is no connected client or the request
-     * fails (mirrors the defensive style of [SteamUnifiedFriends.getOwnedGames]).
+     * Fetches one page of guides for [appId]. Pass [cursor] = [FIRST_CURSOR] for
+     * the first page, then the previous page's [GuidesPage.nextCursor] for each
+     * subsequent page. Returns an empty page when there's no connected client or
+     * the request fails (mirrors the defensive style of
+     * [SteamUnifiedFriends.getOwnedGames]).
      *
      * Must be called off the main thread (the `.await()` blocks on the Steam job).
      */
@@ -58,11 +70,12 @@ object SteamGuidesFetcher {
         sort: GuideSort,
         category: GuideCategory,
         languageTag: String? = null,
-    ): List<SteamGuide> {
-        val key = CacheKey(appId, sort, category.tag, languageTag)
+        cursor: String = FIRST_CURSOR,
+    ): GuidesPage {
+        val key = CacheKey(appId, sort, category.tag, languageTag, cursor)
         cache[key]?.let { return it }
 
-        val steamClient = SteamService.instance?.steamClient ?: return emptyList()
+        val steamClient = SteamService.instance?.steamClient ?: return GuidesPage(emptyList(), null)
 
         return try {
             val unifiedMessages = steamClient.getHandler<SteamUnifiedMessages>()
@@ -73,7 +86,8 @@ object SteamGuidesFetcher {
                 this.appid = appId
                 filetype = MATCHING_FILETYPE_ALL_GUIDES
                 numperpage = NUM_PER_PAGE
-                page = 1
+                // Cursor-based paging (don't also set `page`). "*" = first page.
+                this.cursor = cursor
                 // Trend-ranked ("Most Popular") queries return nothing without a trend window.
                 if (sort.queryType == EPublishedFileQueryType.RankedByTrend) days = 7
                 returnDetails = true
@@ -89,7 +103,7 @@ object SteamGuidesFetcher {
 
             val response = publishedFile.queryFiles(request)?.await()
             if (response == null || response.result != EResult.OK) {
-                return emptyList()
+                return GuidesPage(emptyList(), null)
             }
 
             val guides = response.body.publishedfiledetailsList.map { d ->
@@ -106,14 +120,19 @@ object SteamGuidesFetcher {
                 )
             }
 
-            cache[key] = guides
-            guides
+            // Only advance if Steam returned a new, non-empty cursor and rows.
+            val nc = response.body.nextCursor
+            val nextCursor = if (guides.isNotEmpty() && nc.isNotEmpty() && nc != cursor) nc else null
+
+            val page = GuidesPage(guides, nextCursor)
+            cache[key] = page
+            page
         } catch (e: Exception) {
             // JavaSteam job timeouts surface as a bare CancellationException; let a
             // genuine coroutine cancellation propagate, but log+swallow Steam timeouts.
             coroutineContext.ensureActive()
             Timber.w(e, "Error querying guides for app %d", appId)
-            emptyList()
+            GuidesPage(emptyList(), null)
         }
     }
 }

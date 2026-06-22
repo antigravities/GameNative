@@ -26,6 +26,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -81,6 +84,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -121,6 +125,7 @@ import com.winlator.renderer.VulkanRenderer
 import com.winlator.winhandler.ProcessInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
@@ -840,13 +845,17 @@ private fun GuidesQuickMenuTab(
 ) {
     val accentColor = PluviaTheme.colors.accentPurple
     val context = LocalContext.current
-    val scrollState = rememberScrollState()
+    val listState = rememberLazyListState()
 
     var selectedSort by rememberSaveable { mutableStateOf(GuideSort.MOST_POPULAR) }
     var selectedCategory by rememberSaveable { mutableStateOf(GuideCategory.ALL) }
     var languageOnly by rememberSaveable { mutableStateOf(true) }
+    // Accumulated guides across loaded pages, plus the cursor for the next page
+    // (null once Steam reports no more results).
     var guides by remember { mutableStateOf<List<SteamGuide>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var nextCursor by remember { mutableStateOf<String?>(null) }
+    var isLoadingInitial by remember { mutableStateOf(true) }
+    var isLoadingMore by remember { mutableStateOf(false) }
 
     // Resolve the current language's Steam guide tag once. Null = no sensible tag,
     // in which case we don't offer the language toggle at all.
@@ -862,110 +871,155 @@ private fun GuidesQuickMenuTab(
             LocaleHelper.getLanguageDisplayName(code)
         }
     }
-
-    // Re-query whenever the game, sort, category, or language toggle changes. The
-    // fetcher hops to IO internally-safe, but we wrap in Dispatchers.IO to keep
-    // the await() off the main thread.
+    // First page: reset and reload whenever the game, sort, category, or language
+    // toggle changes. The await() runs on IO.
     LaunchedEffect(gameAppId, selectedSort, selectedCategory, languageOnly) {
-        isLoading = true
-        guides = withContext(Dispatchers.IO) {
+        isLoadingInitial = true
+        guides = emptyList()
+        nextCursor = null
+        val page = withContext(Dispatchers.IO) {
             SteamGuidesFetcher.queryGuides(
                 appId = gameAppId,
                 sort = selectedSort,
                 category = selectedCategory,
                 languageTag = if (languageOnly) languageTag else null,
+                cursor = SteamGuidesFetcher.FIRST_CURSOR,
             )
         }
-        isLoading = false
+        guides = page.guides
+        nextCursor = page.nextCursor
+        isLoadingInitial = false
+        listState.scrollToItem(0)
     }
 
-    Column(
-        modifier = modifier
-            .verticalScroll(scrollState)
-            .focusGroup(),
+    // Infinite scroll: when the last visible row nears the end, fetch the next page.
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            (info.visibleItemsInfo.lastOrNull()?.index ?: 0) to info.totalItemsCount
+        }
+            .distinctUntilChanged()
+            .collect { (lastIndex, total) ->
+                val cursor = nextCursor
+                if (cursor != null && !isLoadingInitial && !isLoadingMore &&
+                    total > 0 && lastIndex >= total - 3
+                ) {
+                    isLoadingMore = true
+                    val page = withContext(Dispatchers.IO) {
+                        SteamGuidesFetcher.queryGuides(
+                            appId = gameAppId,
+                            sort = selectedSort,
+                            category = selectedCategory,
+                            languageTag = if (languageOnly) languageTag else null,
+                            cursor = cursor,
+                        )
+                    }
+                    guides = (guides + page.guides).distinctBy { it.id }
+                    nextCursor = page.nextCursor
+                    isLoadingMore = false
+                }
+            }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier.focusGroup(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         // ── Sort selector ────────────────────────────────────────────────
-        QuickMenuSectionHeader(title = stringResource(R.string.guides_sort_header))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            GuideSort.entries.forEach { sort ->
-                QuickMenuChoiceChip(
-                    text = stringResource(sort.displayTextRes),
-                    selected = selectedSort == sort,
-                    accentColor = accentColor,
-                    onClick = { selectedSort = sort },
-                    // No auto-focus anchor here: in touch mode a programmatically
-                    // focused chip stays focused all session and renders heavier
-                    // than a plain selected chip. Controller users still reach the
-                    // chips via D-pad focus search.
-                )
+        item {
+            QuickMenuSectionHeader(title = stringResource(R.string.guides_sort_header))
+        }
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GuideSort.entries.forEach { sort ->
+                    QuickMenuChoiceChip(
+                        text = stringResource(sort.displayTextRes),
+                        selected = selectedSort == sort,
+                        accentColor = accentColor,
+                        onClick = { selectedSort = sort },
+                        // No auto-focus anchor here: in touch mode a programmatically
+                        // focused chip stays focused all session and renders heavier
+                        // than a plain selected chip. Controller users still reach the
+                        // chips via D-pad focus search.
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
         // ── Category filter (single-select, like Steam's guide browser) ───
-        QuickMenuSectionHeader(title = stringResource(R.string.guides_category_header))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            GuideCategory.entries.forEach { category ->
-                QuickMenuChoiceChip(
-                    text = stringResource(category.displayTextRes),
-                    selected = selectedCategory == category,
-                    accentColor = accentColor,
-                    onClick = { selectedCategory = category },
-                )
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+            QuickMenuSectionHeader(title = stringResource(R.string.guides_category_header))
+        }
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GuideCategory.entries.forEach { category ->
+                    QuickMenuChoiceChip(
+                        text = stringResource(category.displayTextRes),
+                        selected = selectedCategory == category,
+                        accentColor = accentColor,
+                        onClick = { selectedCategory = category },
+                    )
+                }
             }
         }
 
         // ── Language filter (only when we have a tag for the current language) ──
         if (languageTag != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            QuickMenuToggleRow(
-                title = stringResource(R.string.guides_language_only_title, languageDisplayName),
-                enabled = languageOnly,
-                onToggle = { languageOnly = !languageOnly },
-                accentColor = accentColor,
-            )
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                QuickMenuToggleRow(
+                    title = stringResource(R.string.guides_language_only_title, languageDisplayName),
+                    enabled = languageOnly,
+                    onToggle = { languageOnly = !languageOnly },
+                    accentColor = accentColor,
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        item { Spacer(modifier = Modifier.height(8.dp)) }
 
         // ── Results ──────────────────────────────────────────────────────
         when {
-            isLoading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(color = accentColor)
+            isLoadingInitial -> {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(color = accentColor)
+                    }
                 }
             }
 
             guides.isEmpty() -> {
-                Text(
-                    text = stringResource(R.string.guides_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+                item {
+                    Text(
+                        text = stringResource(R.string.guides_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
             }
 
             else -> {
-                guides.forEach { guide ->
+                items(guides, key = { it.id }) { guide ->
                     GuideRow(
                         guide = guide,
                         accentColor = accentColor,
@@ -977,6 +1031,19 @@ private fun GuidesQuickMenuTab(
                             }
                         },
                     )
+                }
+                // Footer spinner while the next page loads.
+                if (nextCursor != null) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(color = accentColor)
+                        }
+                    }
                 }
             }
         }
