@@ -1,5 +1,7 @@
 package app.gamenative.ui.component
 
+import android.content.Intent
+import android.net.Uri
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -23,6 +25,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +49,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CameraAlt
@@ -58,7 +62,11 @@ import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.StarHalf
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -83,6 +91,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -92,17 +102,26 @@ import androidx.compose.ui.unit.dp
 import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.R
+import app.gamenative.data.SteamGuide
+import app.gamenative.service.SteamGuidesFetcher
 import app.gamenative.ui.data.PerformanceHudConfig
 import app.gamenative.ui.data.PerformanceHudSize
+import app.gamenative.ui.enums.GuideCategory
+import app.gamenative.ui.enums.GuideSort
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.adaptivePanelWidth
 import app.gamenative.utils.GameSessionTimer
+import app.gamenative.utils.LocaleHelper
 import app.gamenative.utils.MathUtils.normalizedProgress
+import com.skydoves.landscapist.ImageOptions
+import com.skydoves.landscapist.coil.CoilImage
 import com.winlator.container.Container
 import com.winlator.renderer.GLRenderer
 import com.winlator.renderer.VulkanRenderer
 import com.winlator.winhandler.ProcessInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 object QuickMenuAction {
@@ -122,6 +141,7 @@ private object QuickMenuTab {
     const val EFFECTS = 2
     const val CONTROLLER = 3
     const val TOOLS = 4
+    const val GUIDES = 5
 }
 
 data class QuickMenuItem(
@@ -243,6 +263,10 @@ fun QuickMenu(
     isVisible: Boolean,
     gameLogoUrl: String = "",
     gameName: String = "",
+    // Numeric Steam app id of the running game; used to query Steam Community guides.
+    gameAppId: Int = 0,
+    // Guides are Steam-only UGC, so the Guides tab is hidden for other stores.
+    isSteamGame: Boolean = false,
     onDismiss: () -> Unit,
     onItemSelected: (Int) -> Boolean,
     renderer: VulkanRenderer? = null,
@@ -337,9 +361,13 @@ fun QuickMenu(
 
     var selectedTab by rememberSaveable {
         mutableIntStateOf(
-            if (PrefManager.quickMenuLastTab == QuickMenuTab.LSFG && !isLsfgAvailable)
-                QuickMenuTab.HUD
-            else PrefManager.quickMenuLastTab
+            // Fall back to HUD if the last-used tab isn't available for this game
+            // (LSFG hidden when unsupported, Guides hidden for non-Steam games).
+            when {
+                PrefManager.quickMenuLastTab == QuickMenuTab.LSFG && !isLsfgAvailable -> QuickMenuTab.HUD
+                PrefManager.quickMenuLastTab == QuickMenuTab.GUIDES && !isSteamGame -> QuickMenuTab.HUD
+                else -> PrefManager.quickMenuLastTab
+            }
         )
     }
     val selectedTabLabelResId = when (selectedTab) {
@@ -347,6 +375,7 @@ fun QuickMenu(
         QuickMenuTab.LSFG -> R.string.lsfg_tab_title
         QuickMenuTab.EFFECTS -> R.string.screen_effects
         QuickMenuTab.TOOLS -> R.string.task_manager
+        QuickMenuTab.GUIDES -> R.string.guides_tab_title
         else -> R.string.quick_menu_tab_controller
     }
 
@@ -364,6 +393,7 @@ fun QuickMenu(
     val controllerItemFocusRequester = remember { FocusRequester() }
     val toolsItemFocusRequester = remember { FocusRequester() }
     val lsfgItemFocusRequester = remember { FocusRequester() }
+    val guidesTabFocusRequester = remember { FocusRequester() }
 
     val visibleState = remember { MutableTransitionState(false) }
     visibleState.targetState = isVisible
@@ -533,6 +563,21 @@ fun QuickMenu(
                                     modifier = Modifier.width(56.dp),
                                     focusRequester = toolsTabFocusRequester,
                                 )
+                                // Guides are Steam-only UGC, so only show for Steam games.
+                                if (isSteamGame) {
+                                    QuickMenuTabButton(
+                                        icon = Icons.AutoMirrored.Filled.MenuBook,
+                                        contentDescriptionResId = R.string.guides_tab_title,
+                                        selected = selectedTab == QuickMenuTab.GUIDES,
+                                        accentColor = PluviaTheme.colors.accentPurple,
+                                        onSelected = {
+                                            selectedTab = QuickMenuTab.GUIDES
+                                            PrefManager.quickMenuLastTab = selectedTab
+                                        },
+                                        modifier = Modifier.width(56.dp),
+                                        focusRequester = guidesTabFocusRequester,
+                                    )
+                                }
                             }
 
                             Box(
@@ -661,6 +706,13 @@ fun QuickMenu(
                                         )
                                     }
 
+                                    QuickMenuTab.GUIDES -> {
+                                        GuidesQuickMenuTab(
+                                            gameAppId = gameAppId,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
+
                                     else -> {
                                         Column(
                                             modifier = Modifier
@@ -709,6 +761,8 @@ fun QuickMenu(
                         QuickMenuTab.LSFG -> lsfgItemFocusRequester.requestFocus()
                         QuickMenuTab.EFFECTS -> effectsItemFocusRequester.requestFocus()
                         QuickMenuTab.TOOLS -> toolsItemFocusRequester.requestFocus()
+                        // Guides intentionally has no auto-focus (see GuidesQuickMenuTab).
+                        QuickMenuTab.GUIDES -> Unit
                         else -> controllerItemFocusRequester.requestFocus()
                     }
                     return@LaunchedEffect
@@ -768,6 +822,311 @@ private fun ToolsQuickMenuTab(
                 )
             }
         }
+    }
+}
+
+/**
+ * Guides tab: lists Steam Community guides for the running game. Sort + a single
+ * category filter drive a re-query; tapping a guide opens it in the browser.
+ *
+ * State is held locally (no ViewModel) to match the rest of the Quick Menu;
+ * [SteamGuidesFetcher] caches results so flipping back to a prior sort/category
+ * is instant.
+ */
+@Composable
+private fun GuidesQuickMenuTab(
+    gameAppId: Int,
+    modifier: Modifier = Modifier,
+) {
+    val accentColor = PluviaTheme.colors.accentPurple
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+
+    var selectedSort by rememberSaveable { mutableStateOf(GuideSort.MOST_POPULAR) }
+    var selectedCategory by rememberSaveable { mutableStateOf(GuideCategory.ALL) }
+    var languageOnly by rememberSaveable { mutableStateOf(true) }
+    var guides by remember { mutableStateOf<List<SteamGuide>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    // Resolve the current language's Steam guide tag once. Null = no sensible tag,
+    // in which case we don't offer the language toggle at all.
+    val languageTag = remember { LocaleHelper.steamGuideLanguageTag() }
+    val languageDisplayName = remember {
+        // For an explicit app language use its label; for "System Default" (blank)
+        // fall back to the device locale's own display name (e.g. "English").
+        val code = PrefManager.appLanguage
+        if (code.isBlank()) {
+            java.util.Locale.getDefault().getDisplayLanguage(java.util.Locale.getDefault())
+                .replaceFirstChar { it.uppercase() }
+        } else {
+            LocaleHelper.getLanguageDisplayName(code)
+        }
+    }
+
+    // Re-query whenever the game, sort, category, or language toggle changes. The
+    // fetcher hops to IO internally-safe, but we wrap in Dispatchers.IO to keep
+    // the await() off the main thread.
+    LaunchedEffect(gameAppId, selectedSort, selectedCategory, languageOnly) {
+        isLoading = true
+        guides = withContext(Dispatchers.IO) {
+            SteamGuidesFetcher.queryGuides(
+                appId = gameAppId,
+                sort = selectedSort,
+                category = selectedCategory,
+                languageTag = if (languageOnly) languageTag else null,
+            )
+        }
+        isLoading = false
+    }
+
+    Column(
+        modifier = modifier
+            .verticalScroll(scrollState)
+            .focusGroup(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        // ── Sort selector ────────────────────────────────────────────────
+        QuickMenuSectionHeader(title = stringResource(R.string.guides_sort_header))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            GuideSort.entries.forEach { sort ->
+                QuickMenuChoiceChip(
+                    text = stringResource(sort.displayTextRes),
+                    selected = selectedSort == sort,
+                    accentColor = accentColor,
+                    onClick = { selectedSort = sort },
+                    // No auto-focus anchor here: in touch mode a programmatically
+                    // focused chip stays focused all session and renders heavier
+                    // than a plain selected chip. Controller users still reach the
+                    // chips via D-pad focus search.
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ── Category filter (single-select, like Steam's guide browser) ───
+        QuickMenuSectionHeader(title = stringResource(R.string.guides_category_header))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            GuideCategory.entries.forEach { category ->
+                QuickMenuChoiceChip(
+                    text = stringResource(category.displayTextRes),
+                    selected = selectedCategory == category,
+                    accentColor = accentColor,
+                    onClick = { selectedCategory = category },
+                )
+            }
+        }
+
+        // ── Language filter (only when we have a tag for the current language) ──
+        if (languageTag != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            QuickMenuToggleRow(
+                title = stringResource(R.string.guides_language_only_title, languageDisplayName),
+                enabled = languageOnly,
+                onToggle = { languageOnly = !languageOnly },
+                accentColor = accentColor,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ── Results ──────────────────────────────────────────────────────
+        when {
+            isLoading -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(color = accentColor)
+                }
+            }
+
+            guides.isEmpty() -> {
+                Text(
+                    text = stringResource(R.string.guides_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+
+            else -> {
+                guides.forEach { guide ->
+                    GuideRow(
+                        guide = guide,
+                        accentColor = accentColor,
+                        onClick = {
+                            // Opening the browser backgrounds the game; the existing
+                            // suspend/veil handling covers that.
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(guide.url)))
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GuideRow(
+    guide: SteamGuide,
+    accentColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(14.dp)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .clip(shape)
+            .background(
+                if (isFocused) {
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            accentColor.copy(alpha = 0.14f),
+                            accentColor.copy(alpha = 0.06f),
+                        ),
+                    )
+                } else {
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f),
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.10f),
+                        ),
+                    )
+                },
+            )
+            .then(
+                if (isFocused) {
+                    Modifier.border(width = 2.dp, color = accentColor.copy(alpha = 0.8f), shape = shape)
+                } else {
+                    Modifier
+                }
+            )
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN && isFocused) {
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_BUTTON_A,
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER -> {
+                            onClick()
+                            true
+                        }
+
+                        else -> false
+                    }
+                } else {
+                    false
+                }
+            }
+            .selectable(
+                selected = isFocused,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .focusable(interactionSource = interactionSource)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (guide.previewUrl.isNotEmpty()) {
+            CoilImage(
+                modifier = Modifier
+                    .size(width = 88.dp, height = 50.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                imageModel = { guide.previewUrl },
+                imageOptions = ImageOptions(contentScale = ContentScale.Crop),
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = guide.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (isFocused) accentColor else MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            if (guide.ratingsCount > 0) {
+                GuideStarRating(
+                    score = guide.score,
+                    ratingsCount = guide.ratingsCount,
+                    accentColor = if (isFocused) accentColor else accentColor.copy(alpha = 0.85f),
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.guides_no_ratings),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isFocused) accentColor.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Renders a guide's rating as five stars derived from its 0–1 [score]
+ * (Steam's own basis for the star rating), with the total [ratingsCount] beside.
+ */
+@Composable
+private fun GuideStarRating(
+    score: Float,
+    ratingsCount: Int,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val stars = (score * 5f).coerceIn(0f, 5f)
+    val emptyColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        for (i in 1..5) {
+            val icon = when {
+                stars >= i -> Icons.Filled.Star
+                stars >= i - 0.5f -> Icons.Filled.StarHalf
+                else -> Icons.Filled.StarBorder
+            }
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (stars >= i - 0.5f) accentColor else emptyColor,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = stringResource(R.string.guides_ratings_count, ratingsCount),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
     }
 }
 
@@ -1444,7 +1803,10 @@ private fun QuickMenuChoiceChip(
         modifier = modifier
             .height(44.dp)
             .then(
-                if (isFocused) {
+                // Only show the focus ring when NOT selected, so a chip that is both
+                // selected and focused doesn't stack the fill + heavier border and
+                // read as "double-selected" (e.g. the default-focused first sort chip).
+                if (isFocused && !selected) {
                     Modifier.border(
                         width = 2.dp,
                         color = accentColor.copy(alpha = 0.7f),

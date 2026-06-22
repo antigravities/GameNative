@@ -27,6 +27,8 @@ enum class Language {
     turkish,
     thai,
     czech,
+    romanian,
+    ukrainian,
     unknown,
     ;
 
@@ -57,6 +59,8 @@ enum class Language {
                 turkish.name -> turkish
                 thai.name -> thai
                 czech.name -> czech
+                romanian.name -> romanian
+                ukrainian.name -> ukrainian
                 unknown.name -> unknown
                 else -> {
                     if (keyValue != null) {

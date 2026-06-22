@@ -3,6 +3,8 @@ package app.gamenative.utils
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Build
+import app.gamenative.PrefManager
+import app.gamenative.enums.Language
 import java.util.Locale
 
 /**
@@ -86,6 +88,55 @@ object LocaleHelper {
      */
     fun getLanguageDisplayName(languageCode: String): String {
         return SUPPORTED_LANGUAGES[languageCode] ?: languageCode
+    }
+
+    /**
+     * Maps the app's current language to the Steam Community guide language *tag*
+     * (e.g. "english", "schinese"). Steam encodes a guide's language as a
+     * `requiredtags` value, and [Language]'s entry names are exactly those tags.
+     *
+     * Resolves from [PrefManager.appLanguage]; when blank ("System Default") it
+     * derives the code from [Locale.getDefault] (using country to disambiguate
+     * Chinese / Brazilian Portuguese). Returns null when there's no sensible tag,
+     * in which case the Guides tab simply won't offer language filtering.
+     */
+    fun steamGuideLanguageTag(): String? {
+        val code = PrefManager.appLanguage.ifBlank { currentSystemLanguageCode() }
+        val language = when (code) {
+            "da" -> Language.danish
+            "de" -> Language.german
+            "en" -> Language.english
+            "es" -> Language.spanish
+            "fr" -> Language.french
+            "it" -> Language.italian
+            "ja" -> Language.japanese
+            "ko" -> Language.koreana
+            "pl" -> Language.polish
+            "pt-BR" -> Language.brazilian
+            "ro" -> Language.romanian
+            "ru" -> Language.russian
+            "uk" -> Language.ukrainian
+            "zh-CN" -> Language.schinese
+            "zh-TW" -> Language.tchinese
+            else -> Language.unknown
+        }
+        return if (language == Language.unknown) null else language.name
+    }
+
+    /**
+     * Builds a [SUPPORTED_LANGUAGES]-style code (e.g. "en", "zh-CN", "pt-BR")
+     * from the device locale so [steamGuideLanguageTag] can map it.
+     */
+    private fun currentSystemLanguageCode(): String {
+        val locale = Locale.getDefault()
+        val lang = locale.language.lowercase()
+        val country = locale.country.uppercase()
+        return when (lang) {
+            // These app languages carry a region; reattach it when present.
+            "zh" -> if (country == "TW" || country == "HK" || country == "MO") "zh-TW" else "zh-CN"
+            "pt" -> "pt-BR"
+            else -> lang
+        }
     }
 
     /**

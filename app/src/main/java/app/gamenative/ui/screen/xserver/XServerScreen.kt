@@ -2839,6 +2839,8 @@ fun XServerScreen(
             isVisible = showQuickMenu,
             gameLogoUrl = suspendLogoUrl,
             gameName = suspendGameName,
+            gameAppId = gameId,
+            isSteamGame = ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.STEAM,
             onDismiss = dismissOverlayMenu,
             onItemSelected = onQuickMenuItemSelected,
             renderer = xServerView?.renderer as? VulkanRenderer,
