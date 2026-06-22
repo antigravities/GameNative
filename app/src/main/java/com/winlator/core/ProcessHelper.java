@@ -194,6 +194,17 @@ public abstract class ProcessHelper {
     //                         the main thread reads stdout. This keeps stdout clean for callers
     //                         such as SteamTokenLogin
     public static String execWithOutput(String command, String[] envp, File workingDir, boolean includeStderr) {
+        // 0 (or negative) preserves the historical behavior: wait indefinitely.
+        return execWithOutput(command, envp, workingDir, includeStderr, 0);
+    }
+
+    /**
+     * Variant that bounds how long we block on the child process. Pass timeoutMs <= 0 to wait
+     * indefinitely (the original behavior). On timeout the process is force-killed and whatever
+     * was drained so far is returned. This exists so UI-thread callers (e.g. the PulseAudio
+     * pactl calls during game suspend) can never hang forever on a slow/unresponsive child.
+     */
+    public static String execWithOutput(String command, String[] envp, File workingDir, boolean includeStderr, long timeoutMs) {
         StringBuilder output = new StringBuilder();
         final StringBuilder stdoutBuf = new StringBuilder();
         final StringBuilder stderrBuf = new StringBuilder();
@@ -241,7 +252,16 @@ public abstract class ProcessHelper {
             stderrDrainer.setDaemon(true);
             stderrDrainer.start();
 
-            process.waitFor();
+            if (timeoutMs > 0) {
+                if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                    Log.w("ProcessHelper", "Process timed out after " + timeoutMs + "ms, killing: " + command);
+                    process.destroyForcibly();
+                    // Wait briefly for the kill to land so the drainer threads can finish.
+                    process.waitFor(500, TimeUnit.MILLISECONDS);
+                }
+            } else {
+                process.waitFor();
+            }
             try { stdoutStream.close(); } catch (IOException ignored) {}
             try { stderrStream.close(); } catch (IOException ignored) {}
             stdoutDrainer.join(5_000);

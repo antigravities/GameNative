@@ -10,9 +10,13 @@ import com.winlator.xconnector.UnixSocketConfig;
 import com.winlator.xenvironment.EnvironmentComponent;
 import com.winlator.xenvironment.XEnvironment;
 
+import android.os.Looper;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import timber.log.Timber;
@@ -45,6 +49,22 @@ public class PulseAudioComponent extends EnvironmentComponent {
     private byte performanceMode = 1;
     private final AtomicBoolean isPaused = new AtomicBoolean(false);
     private boolean lowLatency = false;
+
+    // pactl invocations fork an external process and block until it connects to the PulseAudio
+    // server, which can take a long time when the server is contended. pause()/resume() are
+    // called from the UI thread on game suspend, so we run the actual pactl work on a dedicated
+    // single-thread executor: ordering is preserved (a rapid pause→resume can't interleave) and
+    // the caller never blocks. See ProcessHelper.execWithOutput timeout for the hard backstop.
+    private final ExecutorService audioExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "pulse-audio-ctl");
+        t.setDaemon(true);
+        return t;
+    });
+    // Leak-guard only: reap a genuinely wedged pactl child. Since pause()/resume() run on
+    // audioExecutor (not the UI thread) this does NOT need to be tight — a cold pactl invocation
+    // (fork + linker64 + dlopen libpulse + socket connect) can legitimately take a couple of
+    // seconds, so keep this generous to avoid killing a slow-but-responsive call mid-command.
+    private static final long PACTL_TIMEOUT_MS = 8000;
 
     public PulseAudioComponent(UnixSocketConfig socketConfig, boolean lowLatency) {
         this.socketConfig = socketConfig;
@@ -105,35 +125,45 @@ public class PulseAudioComponent extends EnvironmentComponent {
     }
 
     public void pause() {
-        synchronized (lock) {
-            if (!isPaused.get() && isServerRunning()) {
-                Timber.tag("PulseAudioComponent").d("Pausing...");
+        // Run off the caller's thread (the UI thread on game suspend) — pactl can block.
+        audioExecutor.execute(() -> {
+            synchronized (lock) {
+                if (!isPaused.get()) {
+                    Timber.tag("PulseAudioComponent").d("Pausing...");
 
-                // Suspend sink and set isPaused together immediately
-                isPaused.set(true);
-                updateSink(true);
+                    // No isServerRunning() probe: the server stays alive across suspend (only
+                    // stop() kills it) and suspend-sink is idempotent, so the extra pactl round
+                    // trip buys nothing and only adds latency / a chance to stall.
+                    isPaused.set(true);
+                    updateSink(true);
 
-                Timber.tag("PulseAudioComponent").d("Audio paused");
+                    Timber.tag("PulseAudioComponent").d("Audio paused");
+                }
             }
-        }
+        });
     }
 
     public void resume() {
-        synchronized (lock) {
-            if (isPaused.get()) {
-                Timber.tag("PulseAudioComponent").d("Resuming...");
+        audioExecutor.execute(() -> {
+            synchronized (lock) {
+                if (isPaused.get()) {
+                    Timber.tag("PulseAudioComponent").d("Resuming...");
 
-                if (isServerRunning()) {
-                    // Set isPaused immediately
                     isPaused.set(false);
-                    updateSink(false);
+                    // Directly un-suspend the sink. updateSink reports back whether pactl actually
+                    // reached the server; only relaunch on a genuine connection failure — NOT on a
+                    // slow/timed-out probe (which previously misrouted us into killing the server
+                    // and left game audio permanently disconnected).
+                    boolean ok = updateSink(false);
+                    if (!ok) {
+                        Timber.tag("PulseAudioComponent").w("Sink resume failed (server gone?), restarting PulseAudio");
+                        start();
+                    }
 
                     Timber.tag("PulseAudioComponent").d("Audio resumed");
-                } else {
-                    start();
                 }
             }
-        }
+        });
     }
 
     public boolean isServerRunning() {
@@ -217,15 +247,28 @@ public class PulseAudioComponent extends EnvironmentComponent {
         envVars.put("TMPDIR", XEnvironment.getTmpDir(context));
         envVars.put("PULSE_SERVER", socketConfig.path);
 
-        return ProcessHelper.execWithOutput(workingDir + "/pactl " + command, envVars.toStringArray(), workingDir, true);
+        // Instrumentation: pactl must never run on the main thread (it forks + blocks). Time it
+        // so a slow/wedged server shows up clearly in logs.
+        boolean onMain = Looper.myLooper() == Looper.getMainLooper();
+        long start = System.currentTimeMillis();
+        String result = ProcessHelper.execWithOutput(
+            workingDir + "/pactl " + command, envVars.toStringArray(), workingDir, true, PACTL_TIMEOUT_MS);
+        long elapsed = System.currentTimeMillis() - start;
+        if (onMain || elapsed > 500) {
+            Timber.tag("PulseAudioComponent").w("pactl '%s' took %dms (mainThread=%b)", command, elapsed, onMain);
+        }
+        return result;
     }
 
-    private void updateSink(boolean suspend) {
-        if (!suspend) {
-            execPactlCommand("suspend-sink " + SINK_NAME + " false");
-        } else {
-            execPactlCommand("suspend-sink " + SINK_NAME + " true");
-        }
+    /**
+     * Suspend/un-suspend the sink. Returns false only on an explicit pactl "connection failure"
+     * (server genuinely gone) so callers can choose to relaunch. A successful command prints
+     * nothing; a timed-out command (reaped by PACTL_TIMEOUT_MS) also returns empty — both are
+     * treated as "not a connection failure" so we never relaunch the server on a mere slow call.
+     */
+    private boolean updateSink(boolean suspend) {
+        String output = execPactlCommand("suspend-sink " + SINK_NAME + " " + (suspend ? "true" : "false"));
+        return !output.toLowerCase(java.util.Locale.ROOT).contains("connection failure");
     }
 
 }
