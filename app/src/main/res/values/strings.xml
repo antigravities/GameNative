@@ -799,6 +799,7 @@
     <string name="download_progress_files">Downloading (%1$d/%2$d files)…</string>
     <string name="download_unpacking">Unpacking...</string>
     <string name="download_preparing_depots">Preparing depots (%1$d/%2$d)</string>
+    <string name="download_retrying">Download failed, retrying…</string>
     <string name="update_available">Update Available</string>
     <string name="game_information">Game Information</string>
     <string name="status">Status</string>
