@@ -376,6 +376,18 @@ fun SettingsGroupInterface(
             },
         )
 
+        var showQuickMenuOnBack by rememberSaveable { mutableStateOf(PrefManager.showQuickMenuOnBack) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_show_quick_menu_on_back_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_show_quick_menu_on_back_subtitle)) },
+            state = showQuickMenuOnBack,
+            onCheckedChange = {
+                showQuickMenuOnBack = it
+                PrefManager.showQuickMenuOnBack = it
+            },
+        )
+
         if (!BuildConfig.MODERN_ANDROID) {
             val anyFrontendSyncConfigured by FrontendSyncManager.anyConfigured.collectAsState()
             SettingsMenuLink(

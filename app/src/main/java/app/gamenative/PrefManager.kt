@@ -405,6 +405,16 @@ object PrefManager {
             setPref(SHOW_FPS, value)
         }
 
+    private val SHOW_QUICK_MENU_ON_BACK = booleanPreferencesKey("show_quick_menu_on_back")
+    // Default true = current behavior: the in-game back gesture opens the Quick Menu (which
+    // also suspends the game). When false, back suspends the game silently and shows
+    // Resume / Open Quick Menu buttons instead. See XServerScreen.gameBack.
+    var showQuickMenuOnBack: Boolean
+        get() = getPref(SHOW_QUICK_MENU_ON_BACK, true)
+        set(value) {
+            setPref(SHOW_QUICK_MENU_ON_BACK, value)
+        }
+
     private val UPLOAD_SCREENSHOTS_TO_STEAM = booleanPreferencesKey("upload_screenshots_to_steam")
     // Default false — upload is opt-in; screenshots never leave the device unless the user enables this.
     var uploadScreenshotsToSteam: Boolean
