@@ -48,6 +48,9 @@ object GameSessionTimer {
             accumulatedMs += SystemClock.elapsedRealtime() - runningSince
             runningSince = 0L
         }
+        // App-backgrounded is exactly when the OS is most likely to kill the process, so flush
+        // the banked total here too — complements the periodic checkpoint in XServerScreen.
+        persist()
     }
 
     /** Game resumed: restart the clock. Idempotent, and a no-op when no session is active. */
@@ -64,9 +67,18 @@ object GameSessionTimer {
     /** Lifetime active milliseconds: persisted total plus the current session. */
     fun totalMs(): Long = totalBaseMs + currentSessionMs()
 
+    /**
+     * Flush the current lifetime total to disk without ending the session. Idempotent and safe to
+     * spam: [totalMs] is an absolute value (base + current session), so repeated writes never
+     * double-count. No-op when no session is active.
+     */
+    fun persist() {
+        activeAppId?.let { PrefManager.setGameTotalPlaytimeMs(it, totalMs()) }
+    }
+
     /** Persist the lifetime total and reset. Safe to call when no session is active. */
     fun endSession() {
-        activeAppId?.let { PrefManager.setGameTotalPlaytimeMs(it, totalMs()) }
+        persist()
         accumulatedMs = 0L
         runningSince = 0L
         totalBaseMs = 0L
