@@ -2822,68 +2822,9 @@ fun XServerScreen(
             )
         }
 
-        QuickMenu(
-            isVisible = showQuickMenu,
-            onDismiss = dismissOverlayMenu,
-            onItemSelected = onQuickMenuItemSelected,
-            renderer = xServerView?.renderer as? VulkanRenderer,
-            glRenderer = xServerView?.renderer as? GLRenderer,
-            container = container,
-            wineProcesses = quickMenuWineProcesses,
-            isWineProcessesLoading = quickMenuWineProcessesLoading,
-            onToolsVisibilityChanged = { quickMenuToolsVisible = it },
-            onEndWineProcess = { process ->
-                val killed = runCatching {
-                    ProcessHelper.killProcess(process.pid)
-                }.onFailure { error ->
-                    Timber.w(error, "Failed to kill Wine process pid=%d", process.pid)
-                }.isSuccess
-
-                if (killed) {
-                    quickMenuWineProcesses = quickMenuWineProcesses.filterNot { it.pid == process.pid }
-                }
-            },
-            isPerformanceHudEnabled = isPerformanceHudEnabled,
-            performanceHudConfig = performanceHudConfig,
-            fpsLimiterEnabled = fpsLimiterEnabled,
-            fpsLimiterTarget = fpsLimiterTarget,
-            fpsLimiterMax = detectedMaxRefreshRateHz,
-            onPerformanceHudConfigChanged = ::applyPerformanceHudConfig,
-            onFpsLimiterEnabledChanged = ::applyFpsLimiterEnabled,
-            onFpsLimiterChanged = ::applyFpsLimiterTarget,
-            hasPhysicalController = hasPhysicalController,
-            isTouchscreenModeActive = isTouchscreenModeActive,
-            onTouchGestureSettingsClick = { showTouchGestureDialog = true },
-            activeToggleIds = buildSet {
-                if (areControlsVisible) add(QuickMenuAction.INPUT_CONTROLS)
-                if (isTouchscreenModeActive) add(QuickMenuAction.TOUCHSCREEN_MODE)
-                if (isDisableMouseInput) add(QuickMenuAction.DISABLE_MOUSE)
-            },
-            // LSFG hot-reload (tab only visible when enabled in container settings)
-            isLsfgAvailable = isLsfgAvailable,
-            lsfgMultiplier = lsfgMultiplier,
-            lsfgFlowScale = lsfgFlowScale,
-            lsfgPerformanceMode = lsfgPerformanceMode,
-            onLsfgMultiplierChanged = ::applyLsfgMultiplier,
-            onLsfgFlowScaleChanged = ::applyLsfgFlowScale,
-            onLsfgPerformanceModeChanged = ::applyLsfgPerformanceMode,
-            onAnimationComplete = { isMenuVisible ->
-                if (isMenuVisible) {
-                    pauseForOverlayIfAllowed()
-                } else {
-                    if (shouldForceResumeOnMenuClose) {
-                        forceResumeIfSuspended()
-                        shouldForceResumeOnMenuClose = false
-                    } else if (suspendedWithoutMenu) {
-                        // Menu was opened from the silent-suspend overlay — stay paused so the
-                        // Resume / Open Quick Menu overlay reappears when the menu closes.
-                    } else if (!keepPausedForEditor) {
-                        resumeIfAllowedAfterOverlay()
-                    }
-                }
-            },
-        )
-
+        // Suspend overlays render BEFORE QuickMenu so the menu's top-right play-time
+        // counter (InGameTimeCounter) draws on top of the veil. Touch-safe: a closed
+        // QuickMenu has no pointer-input modifier, so taps fall through to the buttons.
         // Manual-resume play button: shown after the Quick Menu closes under the "manual"
         // suspend policy. Excluded while suspendedWithoutMenu so it never overlaps the
         // two-button overlay below.
@@ -2993,6 +2934,68 @@ fun XServerScreen(
                 )
             }
         }
+
+        QuickMenu(
+            isVisible = showQuickMenu,
+            onDismiss = dismissOverlayMenu,
+            onItemSelected = onQuickMenuItemSelected,
+            renderer = xServerView?.renderer as? VulkanRenderer,
+            glRenderer = xServerView?.renderer as? GLRenderer,
+            container = container,
+            wineProcesses = quickMenuWineProcesses,
+            isWineProcessesLoading = quickMenuWineProcessesLoading,
+            onToolsVisibilityChanged = { quickMenuToolsVisible = it },
+            onEndWineProcess = { process ->
+                val killed = runCatching {
+                    ProcessHelper.killProcess(process.pid)
+                }.onFailure { error ->
+                    Timber.w(error, "Failed to kill Wine process pid=%d", process.pid)
+                }.isSuccess
+
+                if (killed) {
+                    quickMenuWineProcesses = quickMenuWineProcesses.filterNot { it.pid == process.pid }
+                }
+            },
+            isPerformanceHudEnabled = isPerformanceHudEnabled,
+            performanceHudConfig = performanceHudConfig,
+            fpsLimiterEnabled = fpsLimiterEnabled,
+            fpsLimiterTarget = fpsLimiterTarget,
+            fpsLimiterMax = detectedMaxRefreshRateHz,
+            onPerformanceHudConfigChanged = ::applyPerformanceHudConfig,
+            onFpsLimiterEnabledChanged = ::applyFpsLimiterEnabled,
+            onFpsLimiterChanged = ::applyFpsLimiterTarget,
+            hasPhysicalController = hasPhysicalController,
+            isTouchscreenModeActive = isTouchscreenModeActive,
+            onTouchGestureSettingsClick = { showTouchGestureDialog = true },
+            activeToggleIds = buildSet {
+                if (areControlsVisible) add(QuickMenuAction.INPUT_CONTROLS)
+                if (isTouchscreenModeActive) add(QuickMenuAction.TOUCHSCREEN_MODE)
+                if (isDisableMouseInput) add(QuickMenuAction.DISABLE_MOUSE)
+            },
+            // LSFG hot-reload (tab only visible when enabled in container settings)
+            isLsfgAvailable = isLsfgAvailable,
+            lsfgMultiplier = lsfgMultiplier,
+            lsfgFlowScale = lsfgFlowScale,
+            lsfgPerformanceMode = lsfgPerformanceMode,
+            onLsfgMultiplierChanged = ::applyLsfgMultiplier,
+            onLsfgFlowScaleChanged = ::applyLsfgFlowScale,
+            onLsfgPerformanceModeChanged = ::applyLsfgPerformanceMode,
+            onAnimationComplete = { isMenuVisible ->
+                if (isMenuVisible) {
+                    pauseForOverlayIfAllowed()
+                } else {
+                    if (shouldForceResumeOnMenuClose) {
+                        forceResumeIfSuspended()
+                        shouldForceResumeOnMenuClose = false
+                    } else if (suspendedWithoutMenu) {
+                        // Menu was opened from the silent-suspend overlay — stay paused so the
+                        // Resume / Open Quick Menu overlay reappears when the menu closes.
+                    } else if (!keepPausedForEditor) {
+                        resumeIfAllowedAfterOverlay()
+                    }
+                }
+            },
+        )
     }
 
     // Element Editor Dialog
