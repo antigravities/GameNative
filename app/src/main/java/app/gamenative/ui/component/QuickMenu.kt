@@ -4,6 +4,7 @@ import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -239,6 +241,8 @@ private fun matchesPerformanceHudPreset(
 @Composable
 fun QuickMenu(
     isVisible: Boolean,
+    gameLogoUrl: String = "",
+    gameName: String = "",
     onDismiss: () -> Unit,
     onItemSelected: (Int) -> Boolean,
     renderer: VulkanRenderer? = null,
@@ -374,30 +378,31 @@ fun QuickMenu(
         onDismiss()
     }
 
+    // Darkening veil behind the menu, except on the Screen Effects tab (which previews
+    // CRT/FSR/FXAA on the live game frame, so the game must stay visible). Animated so
+    // switching to/from Effects fades the veil smoothly.
+    val veilAlpha by animateFloatAsState(
+        targetValue = if (selectedTab == QuickMenuTab.EFFECTS) 0f else 0.5f,
+        label = "menuVeil",
+    )
+
     Box(modifier = modifier.fillMaxSize()) {
+        // Shared backdrop: veil + game logo + play-time counter behind the panel, plus
+        // tap-to-dismiss. Suppressed (veil fades to 0, info hidden) on the Screen Effects tab
+        // so the live game frame stays visible while previewing effects.
         AnimatedVisibility(
             visible = isVisible,
             enter = fadeIn(animationSpec = tween(200)),
             exit = fadeOut(animationSpec = tween(150)),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onDismiss,
-                    ),
+            SuspendBackdrop(
+                logoUrl = gameLogoUrl,
+                gameName = gameName,
+                veilAlpha = veilAlpha,
+                showInfo = selectedTab != QuickMenuTab.EFFECTS,
+                onClick = onDismiss,
             )
         }
-
-        // Floating play-time counter, top-right of the screen (the menu panel itself is on the
-        // left). Shares the menu's show/hide animation via the same isVisible flag.
-        InGameTimeCounter(
-            isVisible = isVisible,
-            modifier = Modifier.align(Alignment.TopEnd),
-        )
 
         AnimatedVisibility(
             visibleState = visibleState,
@@ -1218,100 +1223,6 @@ private fun QuickMenuSectionHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-/**
- * Small floating overlay showing how long the user has actively been in-game this session and
- * in total (lifetime). Reads [GameSessionTimer] directly; while visible it re-reads once a
- * second so the displayed value updates.
- *
- * Shown whenever the game is suspended ([PluviaApp.isOverlayPaused]) OR the quick menu is open
- * ([isVisible]). When suspended the timer is frozen, so the displayed value simply holds; while
- * the menu is open under the NEVER suspend policy the game keeps running, so the per-second
- * tick keeps the value live.
- */
-@Composable
-private fun InGameTimeCounter(
-    isVisible: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    // isOverlayPaused is a Compose mutableStateOf, so reading it here recomposes on change.
-    val show = isVisible || PluviaApp.isOverlayPaused
-
-    // A counter bumped once per second to recompose the displayed strings while visible.
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(show) {
-        while (show) {
-            tick++
-            delay(1000L)
-        }
-    }
-
-    AnimatedVisibility(
-        visible = show,
-        enter = fadeIn(animationSpec = tween(200)),
-        exit = fadeOut(animationSpec = tween(150)),
-        modifier = modifier,
-    ) {
-        // Reference `tick` so this block recomposes on each tick.
-        @Suppress("UNUSED_EXPRESSION") tick
-        val sessionText = formatPlayTime(GameSessionTimer.currentSessionMs())
-        val totalText = formatPlayTime(GameSessionTimer.totalMs())
-
-        Surface(
-            modifier = Modifier
-                .statusBarsPadding()
-                .padding(top = 16.dp, end = 16.dp),
-            shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-            tonalElevation = 2.dp,
-            shadowElevation = 8.dp,
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalAlignment = Alignment.End,
-            ) {
-                PlayTimeRow(
-                    label = stringResource(R.string.quick_menu_session_time),
-                    value = sessionText,
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                PlayTimeRow(
-                    label = stringResource(R.string.quick_menu_total_time),
-                    value = totalText,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlayTimeRow(label: String, value: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-    }
-}
-
-/** Rounds to the nearest minute, then formats as `Xm` under an hour, `Hh MMm` otherwise. */
-private fun formatPlayTime(ms: Long): String {
-    val totalMinutes = ((ms + 30_000L) / 60_000L).coerceAtLeast(0L)  // round to nearest minute
-    val hours = totalMinutes / 60L
-    val minutes = totalMinutes % 60L
-    return if (hours > 0L) {
-        "%dh %02dm".format(hours, minutes)   // e.g. 3h 04m
-    } else {
-        "%dm".format(minutes)                // e.g. 12m
     }
 }
 
