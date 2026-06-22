@@ -1260,6 +1260,31 @@ object ContainerUtils {
     }
 
     /**
+     * Resolves the game's logo-art URL and display name for [containerId], mirroring the
+     * booting splash (MainViewModel.launchApp) so the same logo is shown elsewhere (e.g.
+     * the in-game suspend overlay). The logo URL is blank for sources without dedicated
+     * logo art (GOG / Amazon / Custom) — callers should fall back to the returned name.
+     */
+    fun resolveGameLogo(containerId: String): Pair<String, String> {
+        val gameSource = extractGameSourceFromContainerId(containerId)
+        val gameId = extractGameIdFromContainerId(containerId)
+        return when (gameSource) {
+            GameSource.STEAM -> SteamService.getAppInfoOf(gameId).let { app ->
+                (app?.getLogoUrl()?.ifEmpty { app.logoUrl } ?: "") to (app?.name ?: "")
+            }
+            GameSource.EPIC -> EpicService.getEpicGameOf(gameId).let { game ->
+                (game?.artLogo ?: "") to (game?.title ?: "")
+            }
+            GameSource.GOG -> "" to (GOGService.getGOGGameOf(gameId.toString())?.title ?: "")
+            GameSource.AMAZON -> "" to (AmazonService.getAmazonGameByAppId(gameId)?.title ?: "")
+            GameSource.CUSTOM_GAME -> {
+                val customAppId = "${GameSource.CUSTOM_GAME.name}_$gameId"
+                "" to (CustomGameScanner.getFolderPathFromAppId(customAppId)?.let { File(it).name } ?: "")
+            }
+        }
+    }
+
+    /**
      * Gets the file system path for the container's A: drive
      */
     fun getADrivePath(drives: String): String? {

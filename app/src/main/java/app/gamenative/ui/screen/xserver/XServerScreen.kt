@@ -46,6 +46,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.layout.ContentScale
+import com.skydoves.landscapist.ImageOptions
+import com.skydoves.landscapist.coil.CoilImage
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -608,6 +611,17 @@ fun XServerScreen(
     // Quick Menu overlay below.
     var suspendedWithoutMenu by remember { mutableStateOf(false) }
     val showQuickMenuOnBack = remember { PrefManager.showQuickMenuOnBack }
+    // Logo art (or title fallback) shown in the suspend overlay corner — same source as the
+    // booting splash. Resolved off the main thread once per game.
+    var suspendLogoUrl by remember { mutableStateOf("") }
+    var suspendGameName by remember { mutableStateOf("") }
+    LaunchedEffect(appId) {
+        withContext(Dispatchers.IO) {
+            val (logo, name) = ContainerUtils.resolveGameLogo(appId)
+            suspendLogoUrl = logo
+            suspendGameName = name
+        }
+    }
     var hasPhysicalKeyboard by remember { mutableStateOf(false) }
     var hasPhysicalMouse by remember { mutableStateOf(false) }
     var usingScreenMirror by remember { mutableStateOf(false) }
@@ -2961,7 +2975,12 @@ fun XServerScreen(
         if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu &&
             !keepPausedForEditor && !suspendedWithoutMenu
         ) {
-            ManualResumeOverlay(onResume = ::resumeFromManualButton, immersive = immersiveHooks != null)
+            ManualResumeOverlay(
+                onResume = ::resumeFromManualButton,
+                immersive = immersiveHooks != null,
+                logoUrl = suspendLogoUrl,
+                gameName = suspendGameName,
+            )
         }
 
         // Silent-suspend overlay: shown when back suspended the game without opening the
@@ -3018,6 +3037,14 @@ fun XServerScreen(
                         )
                     }
                 }
+                SuspendArtworkCorner(
+                    logoUrl = suspendLogoUrl,
+                    gameName = suspendGameName,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(bottom = 16.dp, end = 16.dp),
+                )
             }
         }
     }
@@ -3206,7 +3233,7 @@ fun XServerScreen(
 /** Lives outside XServerScreen because that composable sits at the dex verifier's 255-register
  * limit — its FocusRequester/effect locals tripped a runtime VerifyError when inlined there. */
 @Composable
-private fun ManualResumeOverlay(onResume: () -> Unit, immersive: Boolean) {
+private fun ManualResumeOverlay(onResume: () -> Unit, immersive: Boolean, logoUrl: String, gameName: String) {
     val resumeButtonFocusRequester = remember { FocusRequester() }
     if (immersive) {
         LaunchedEffect(Unit) {
@@ -3248,6 +3275,53 @@ private fun ManualResumeOverlay(onResume: () -> Unit, immersive: Boolean) {
                 contentDescription = stringResource(R.string.resume_game),
                 tint = androidx.compose.ui.graphics.Color.Black,
                 modifier = Modifier.size(40.dp),
+            )
+        }
+        SuspendArtworkCorner(
+            logoUrl = logoUrl,
+            gameName = gameName,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp, end = 16.dp),
+        )
+    }
+}
+
+/**
+ * Game logo art (or title text fallback) for the in-game suspend overlay corner.
+ * Reuses the same image source + Landscapist pattern as the booting splash
+ * (BootingSplash.kt). [modifier] is expected to position/align it within the overlay.
+ */
+@Composable
+private fun SuspendArtworkCorner(logoUrl: String, gameName: String, modifier: Modifier = Modifier) {
+    if (logoUrl.isEmpty() && gameName.isEmpty()) return
+    val fallbackText: @Composable () -> Unit = {
+        Text(
+            text = gameName,
+            color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f),
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        )
+    }
+    Box(modifier = modifier) {
+        if (logoUrl.isEmpty()) {
+            fallbackText()
+        } else {
+            CoilImage(
+                modifier = Modifier
+                    .heightIn(max = 72.dp)
+                    .widthIn(max = 220.dp),
+                imageModel = { logoUrl },
+                imageOptions = ImageOptions(
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.BottomEnd,
+                    contentDescription = gameName,
+                ),
+                loading = {},
+                failure = { fallbackText() },
             )
         }
     }
