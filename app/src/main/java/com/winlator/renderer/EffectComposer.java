@@ -25,6 +25,10 @@ public class EffectComposer {
         return !effects.isEmpty();
     }
 
+    public synchronized RenderTarget getSceneBuffer() {
+        return sceneBuffer;
+    }
+
     public synchronized <T extends Effect> T getEffect(Class<T> effectClass) {
         for (Effect effect : effects) {
             if (effectClass.isInstance(effect)) {
