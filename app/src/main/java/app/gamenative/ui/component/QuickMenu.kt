@@ -3,6 +3,10 @@ package app.gamenative.ui.component
 import android.content.Intent
 import android.net.Uri
 import android.view.KeyEvent
+import android.view.ViewGroup
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
@@ -103,6 +107,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.R
@@ -114,6 +119,7 @@ import app.gamenative.ui.enums.GuideCategory
 import app.gamenative.ui.enums.GuideSort
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.adaptivePanelWidth
+import app.gamenative.ui.util.rememberScreenWidthDp
 import app.gamenative.utils.GameSessionTimer
 import app.gamenative.utils.LocaleHelper
 import app.gamenative.utils.MathUtils.normalizedProgress
@@ -296,7 +302,7 @@ fun QuickMenu(
     // LSFG hot-reload state (tab only visible when isLsfgAvailable)
     isLsfgAvailable: Boolean = false,
     lsfgMultiplier: Int = 2,
-    lsfgFlowScale: Float = 0.80f,
+    lsfgFlowScale: Float = 80f,
     lsfgPerformanceMode: Boolean = true,
     onLsfgMultiplierChanged: (Int) -> Unit = {},
     onLsfgFlowScaleChanged: (Float) -> Unit = {},
@@ -384,6 +390,22 @@ fun QuickMenu(
         else -> R.string.quick_menu_tab_controller
     }
 
+    // Embedded guide viewer: when the menu panel is no wider than half the screen
+    // there's room to render the selected guide in a WebView beside the panel
+    // (instead of kicking the user out to the browser). On narrower screens
+    // (panel > half screen) selecting a guide keeps opening the system browser.
+    val screenWidthDp = rememberScreenWidthDp()
+    val panelWidth = adaptivePanelWidth(400.dp)
+    val canShowGuideWebView = panelWidth.value <= screenWidthDp * 0.66f
+    // The guide currently shown in the embedded WebView (null = viewer closed).
+    var selectedGuide by remember { mutableStateOf<SteamGuide?>(null) }
+
+    // Drop the open guide when leaving the Guides tab or closing the menu, so
+    // re-opening the menu doesn't pop a stale WebView.
+    LaunchedEffect(selectedTab, isVisible) {
+        if (selectedTab != QuickMenuTab.GUIDES || !isVisible) selectedGuide = null
+    }
+
     val hudScrollState = rememberScrollState()
     val effectsScrollState = rememberScrollState()
     val lsfgScrollState = rememberScrollState()
@@ -453,7 +475,7 @@ fun QuickMenu(
         ) {
             Surface(
                 modifier = Modifier
-                    .width(adaptivePanelWidth(400.dp))
+                    .width(panelWidth)
                     .fillMaxHeight(),
                 shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
                 color = MaterialTheme.colorScheme.surface,
@@ -714,6 +736,15 @@ fun QuickMenu(
                                     QuickMenuTab.GUIDES -> {
                                         GuidesQuickMenuTab(
                                             gameAppId = gameAppId,
+                                            selectedGuideId = selectedGuide?.id,
+                                            // Non-null only when there's room for the side-by-side
+                                            // viewer; the tab falls back to the browser otherwise.
+                                            onShowInWebView = if (canShowGuideWebView) {
+                                                { guide ->
+                                                    // Toggle: tapping the open guide again closes it.
+                                                    selectedGuide = if (selectedGuide?.id == guide.id) null else guide
+                                                }
+                                            } else null,
                                             modifier = Modifier.fillMaxSize(),
                                         )
                                     }
@@ -749,6 +780,31 @@ fun QuickMenu(
                         }
                     }
                 }
+            }
+        }
+
+        // Embedded guide viewer, rendered to the right of the menu panel. Only on
+        // wide screens (canShowGuideWebView) and only while a guide is selected.
+        val guide = selectedGuide
+        AnimatedVisibility(
+            visible = isVisible && canShowGuideWebView && guide != null,
+            enter = fadeIn(animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(150)),
+            modifier = Modifier.align(Alignment.CenterStart),
+        ) {
+            if (guide != null) {
+                // Registered after the menu's BackHandler (:412), so it takes
+                // priority: Back closes the viewer first, then the menu.
+                BackHandler(enabled = true) { selectedGuide = null }
+                GuideWebViewPanel(
+                    url = guide.url,
+                    title = guide.title,
+                    // Sit flush to the right of the menu panel.
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = panelWidth),
+                    onClose = { selectedGuide = null },
+                )
             }
         }
     }
@@ -832,7 +888,12 @@ private fun ToolsQuickMenuTab(
 
 /**
  * Guides tab: lists Steam Community guides for the running game. Sort + a single
- * category filter drive a re-query; tapping a guide opens it in the browser.
+ * category filter drive a re-query.
+ *
+ * When [onShowInWebView] is non-null (wide screens), tapping a guide hands it up
+ * to the embedded WebView beside the menu; [selectedGuideId] is the one currently
+ * open so it can be highlighted. When [onShowInWebView] is null (narrow screens),
+ * tapping a guide opens it in the system browser instead.
  *
  * State is held locally (no ViewModel) to match the rest of the Quick Menu;
  * [SteamGuidesFetcher] caches results so flipping back to a prior sort/category
@@ -841,6 +902,8 @@ private fun ToolsQuickMenuTab(
 @Composable
 private fun GuidesQuickMenuTab(
     gameAppId: Int,
+    selectedGuideId: Long? = null,
+    onShowInWebView: ((SteamGuide) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val accentColor = PluviaTheme.colors.accentPurple
@@ -1023,11 +1086,18 @@ private fun GuidesQuickMenuTab(
                     GuideRow(
                         guide = guide,
                         accentColor = accentColor,
+                        isSelected = guide.id == selectedGuideId,
                         onClick = {
-                            // Opening the browser backgrounds the game; the existing
-                            // suspend/veil handling covers that.
-                            runCatching {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(guide.url)))
+                            val showInWebView = onShowInWebView
+                            if (showInWebView != null) {
+                                // Wide screen: open in the embedded viewer beside the menu.
+                                showInWebView(guide)
+                            } else {
+                                // Narrow screen: opening the browser backgrounds the game;
+                                // the existing suspend/veil handling covers that.
+                                runCatching {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(guide.url)))
+                                }
                             }
                         },
                     )
@@ -1056,9 +1126,13 @@ private fun GuideRow(
     accentColor: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isSelected: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    // Treat the guide currently open in the embedded viewer the same as focused,
+    // so it stays visually highlighted in the list.
+    val highlighted = isFocused || isSelected
     val shape = RoundedCornerShape(14.dp)
 
     Row(
@@ -1067,7 +1141,7 @@ private fun GuideRow(
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(shape)
             .background(
-                if (isFocused) {
+                if (highlighted) {
                     Brush.horizontalGradient(
                         colors = listOf(
                             accentColor.copy(alpha = 0.14f),
@@ -1084,7 +1158,7 @@ private fun GuideRow(
                 },
             )
             .then(
-                if (isFocused) {
+                if (highlighted) {
                     Modifier.border(width = 2.dp, color = accentColor.copy(alpha = 0.8f), shape = shape)
                 } else {
                     Modifier
@@ -1130,8 +1204,8 @@ private fun GuideRow(
             Text(
                 text = guide.title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (isFocused) accentColor else MaterialTheme.colorScheme.onSurface,
-                fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (highlighted) accentColor else MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (highlighted) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1140,17 +1214,134 @@ private fun GuideRow(
                 GuideStarRating(
                     score = guide.score,
                     ratingsCount = guide.ratingsCount,
-                    accentColor = if (isFocused) accentColor else accentColor.copy(alpha = 0.85f),
+                    accentColor = if (highlighted) accentColor else accentColor.copy(alpha = 0.85f),
                 )
             } else {
                 Text(
                     text = stringResource(R.string.guides_no_ratings),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (isFocused) accentColor.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (highlighted) accentColor.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Embedded guide viewer shown beside the Quick Menu on wide screens. A header
+ * (guide title + close button) sits above a WebView that loads [url].
+ *
+ * The page itself is loaded programmatically (which does NOT trigger
+ * [WebViewClient.shouldOverrideUrlLoading]), so any URL that reaches
+ * shouldOverrideUrlLoading is a user-tapped link inside the guide — we hand those
+ * to the system browser and keep them out of the embedded view.
+ */
+@Composable
+private fun GuideWebViewPanel(
+    url: String,
+    title: String,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    var isLoading by remember { mutableStateOf(true) }
+    // Track the last url we asked the WebView to load so switching guides without
+    // closing the viewer triggers a reload (see the update lambda below).
+    var loadedUrl by remember { mutableStateOf("") }
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        shadowElevation = 24.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                QuickMenuCloseButton(onClick = onClose)
+            }
+
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+            )
+
+            if (isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = PluviaTheme.colors.accentPurple,
+                )
+            }
+
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        // Spoof the Steam Deck client UA so Steam Community serves the
+                        // leaner Deck-styled guide page (hides extra header/promo chrome).
+                        settings.userAgentString =
+                            "Mozilla/5.0 (X11; Linux x86_64; Valve Steam Client/Steam Deck [Steam Deck Stable]/default/0) " +
+                            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.183 Safari/537.36"
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView?,
+                                request: WebResourceRequest?,
+                            ): Boolean {
+                                // User tapped a link inside the guide — open it externally.
+                                val target = request?.url ?: return false
+                                runCatching {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, target))
+                                }
+                                return true
+                            }
+
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                isLoading = true
+                            }
+
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                isLoading = false
+                            }
+                        }
+                        loadUrl(url)
+                        loadedUrl = url
+                    }
+                },
+                update = { webView ->
+                    // Selecting a different guide while the viewer is open reloads it.
+                    if (loadedUrl != url) {
+                        webView.loadUrl(url)
+                        loadedUrl = url
+                    }
+                },
+            )
         }
     }
 }
