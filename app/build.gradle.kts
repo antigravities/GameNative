@@ -437,6 +437,10 @@ dependencies {
     implementation(libs.spongycastle)
     implementation(libs.okhttp.dnsoverhttps)
 
+    // ML Kit on-device screen translation (OCR + Translate). Models download on demand.
+    implementation(libs.bundles.mlkit.translation)
+
+
     // Split Modules
     implementation(libs.bundles.google)
 

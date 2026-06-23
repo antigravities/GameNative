@@ -54,7 +54,9 @@ import kotlinx.coroutines.delay
 @Composable
 fun SuspendBackdrop(
     logoUrl: String,
-    gameName: String,
+    // Nullable-tolerant: a Compose recompose codegen quirk on the very large QuickMenu param list can
+    // momentarily pass null here; treat it as empty rather than crashing.
+    gameName: String?,
     modifier: Modifier = Modifier,
     veilAlpha: Float = 0.5f,
     showInfo: Boolean = true,
@@ -102,11 +104,12 @@ fun SuspendBackdrop(
  * same image source + Landscapist pattern as the booting splash (BootingSplash.kt).
  */
 @Composable
-fun SuspendArtworkCorner(logoUrl: String, gameName: String, modifier: Modifier = Modifier) {
-    if (logoUrl.isEmpty() && gameName.isEmpty()) return
+fun SuspendArtworkCorner(logoUrl: String, gameName: String?, modifier: Modifier = Modifier) {
+    val safeGameName = gameName.orEmpty()
+    if (logoUrl.isEmpty() && safeGameName.isEmpty()) return
     val fallbackText: @Composable () -> Unit = {
         Text(
-            text = gameName,
+            text = safeGameName,
             color = Color.White.copy(alpha = 0.85f),
             style = MaterialTheme.typography.titleMedium,
             maxLines = 2,
@@ -126,7 +129,7 @@ fun SuspendArtworkCorner(logoUrl: String, gameName: String, modifier: Modifier =
                 imageOptions = ImageOptions(
                     contentScale = ContentScale.Fit,
                     alignment = Alignment.BottomEnd,
-                    contentDescription = gameName,
+                    contentDescription = safeGameName,
                 ),
                 loading = {},
                 failure = { fallbackText() },
