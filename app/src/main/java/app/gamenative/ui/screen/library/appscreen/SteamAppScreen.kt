@@ -991,9 +991,19 @@ class SteamAppScreen : BaseAppScreen() {
             File(context.getExternalFilesDir(null), "wine_logs/wine_debug.log")
         }
         val wineDebugEnabled = remember(appId) {
-            val container = ContainerUtils.getOrCreateContainer(context, appId)
-            PrefManager.enableWineDebug ||
-                EnvVars(container.envVars).get("WINEDEBUG") == "-all,err+all,warn+all"
+            // Only inspect a container that already exists — do NOT create one during
+            // composition. Creating a container is heavy, fallible filesystem work, and a
+            // failure here would crash the whole UI. If no container exists yet the game
+            // has never run, so there is no per-container WINEDEBUG override to honor.
+            val perContainerDebug = if (ContainerUtils.hasContainer(context, appId)) {
+                runCatching {
+                    EnvVars(ContainerUtils.getContainer(context, appId).envVars)
+                        .get("WINEDEBUG") == "-all,err+all,warn+all"
+                }.getOrDefault(false)
+            } else {
+                false
+            }
+            PrefManager.enableWineDebug || perContainerDebug
         }
         if (isInstalled && wineDebugEnabled && wineLogFile.exists()) {
             options.add(
