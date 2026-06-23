@@ -24,6 +24,10 @@ libarchive-android = "1.1.6" # https://mvnrepository.com/artifact/me.zhanghai.an
 media3 = "1.9.1" # https://mvnrepository.com/artifact/androidx.media3/media3-exoplayer
 lifecycleRuntimeKtx = "2.8.7" # https://mvnrepository.com/artifact/androidx.lifecycle/lifecycle-runtime-ktx
 material = "1.12.0" # https://mvnrepository.com/artifact/com.google.android.material/material
+mlkit-text-recognition-latin = "19.0.1" # https://developers.google.com/ml-kit/vision/text-recognition/v2/android (unbundled GMS, Latin)
+mlkit-text-recognition = "16.0.1" # https://developers.google.com/ml-kit/vision/text-recognition/v2/android (unbundled GMS, CJK)
+mlkit-translate = "17.0.3" # https://developers.google.com/ml-kit/language/translation/android
+coroutines-play-services = "1.10.2" # https://mvnrepository.com/artifact/org.jetbrains.kotlinx/kotlinx-coroutines-play-services
 material3Adaptive = "1.0.0" # https://mvnrepository.com/artifact/androidx.compose.material3.adaptive/adaptive-layout
 material3AdaptiveNavSuite = "1.3.1" # https://mvnrepository.com/artifact/androidx.compose.material3/material3-adaptive-navigation-suite
 material3Version = "1.3.1" # Minimum version for pull-to-refresh support
@@ -87,6 +91,14 @@ media3-exoplayer-hls = { module = "androidx.media3:media3-exoplayer-hls", versio
 media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
+# On-device screen translation. Unbundled GMS text-recognition artifacts download their OCR models on
+# demand via Google Play Services (no APK bloat); the Translate library downloads language packs on demand.
+mlkit-text-recognition-latin = { group = "com.google.android.gms", name = "play-services-mlkit-text-recognition", version.ref = "mlkit-text-recognition-latin" }
+mlkit-text-recognition-chinese = { group = "com.google.android.gms", name = "play-services-mlkit-text-recognition-chinese", version.ref = "mlkit-text-recognition" }
+mlkit-text-recognition-japanese = { group = "com.google.android.gms", name = "play-services-mlkit-text-recognition-japanese", version.ref = "mlkit-text-recognition" }
+mlkit-text-recognition-korean = { group = "com.google.android.gms", name = "play-services-mlkit-text-recognition-korean", version.ref = "mlkit-text-recognition" }
+mlkit-translate = { group = "com.google.mlkit", name = "translate", version.ref = "mlkit-translate" }
+kotlin-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines-play-services" }
 navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation-compose" }
 orgJson = { module = "org.json:json", version.ref = "orgJson" }
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
@@ -177,4 +189,13 @@ javasteam-dev = [
 google = [
     "feature-delivery",
     "play-integrity",
+]
+# On-device screen translation: OCR recognizers (one per script) + Translate + coroutines bridge for Task.await()
+mlkit-translation = [
+    "mlkit-text-recognition-latin",
+    "mlkit-text-recognition-chinese",
+    "mlkit-text-recognition-japanese",
+    "mlkit-text-recognition-korean",
+    "mlkit-translate",
+    "kotlin-coroutines-play-services",
 ]
