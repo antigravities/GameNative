@@ -188,6 +188,10 @@ class ScreenTranslator {
                 coroutineContext.ensureActive()
                 source // fall back to original text if this block fails to translate
             }
+            // Skip regions where ML Kit returned essentially the same text it was given — the region
+            // was already in the target language (e.g. an English UI string), so overlaying it with
+            // an identical box just covers readable text. This also drops the failure fallback above.
+            if (isSameText(source, translated)) continue
             blocks.add(Block(box.left, box.top, box.right, box.bottom, translated))
         }
 
@@ -258,6 +262,16 @@ class ScreenTranslator {
             out[i] = lum.toByte()
         }
         return out
+    }
+
+    /**
+     * True when ML Kit returned essentially the same text it was given. Normalizes away the trivial
+     * differences ML Kit may introduce (surrounding/collapsed whitespace, casing) so an "English ->
+     * English" passthrough is reliably detected as a no-op translation.
+     */
+    private fun isSameText(source: String, translated: String): Boolean {
+        fun norm(s: String) = s.trim().replace(Regex("\\s+"), " ").lowercase()
+        return norm(source) == norm(translated)
     }
 
     // --- ML Kit client management ---------------------------------------------------------------
