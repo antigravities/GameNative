@@ -363,6 +363,9 @@ dependencies {
     // ML Kit on-device GenAI summarization (requires AICore / Gemini Nano)
     implementation(libs.mlkit.genai.summarization)
 
+    // ML Kit on-device screen translation (OCR + Translate). Models download on demand.
+    implementation(libs.bundles.mlkit.translation)
+
     // Split Modules
     implementation(libs.bundles.google)
 
