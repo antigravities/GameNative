@@ -397,7 +397,7 @@ object PrefManager {
     var quickMenuLastTab: Int
         get() = getPref(QUICK_MENU_LAST_TAB, 0)
         set(value) {
-            setPref(QUICK_MENU_LAST_TAB, value.coerceIn(0, 6))
+            setPref(QUICK_MENU_LAST_TAB, value.coerceIn(0, 7))
         }
 
     private val SHOW_FPS = booleanPreferencesKey("show_fps")
@@ -415,6 +415,57 @@ object PrefManager {
         get() = getPref(SHOW_QUICK_MENU_ON_BACK, true)
         set(value) {
             setPref(SHOW_QUICK_MENU_ON_BACK, value)
+        }
+
+    // --- On-device screen translation (ML Kit OCR + Translate) ---------------------------------
+    // Live on/off is toggled from the in-game Quick Menu; we persist the last state and config so the
+    // tab restores where the user left off. Default OFF — opt-in so non-users pay zero overhead.
+    private val SCREEN_TRANSLATION_ENABLED = booleanPreferencesKey("screen_translation_enabled")
+    var screenTranslationEnabled: Boolean
+        get() = getPref(SCREEN_TRANSLATION_ENABLED, false)
+        set(value) {
+            setPref(SCREEN_TRANSLATION_ENABLED, value)
+        }
+
+    // Source/target are ML Kit TranslateLanguage codes (e.g. "ja", "zh", "ko", "en"). The source also
+    // selects which script-specific OCR recognizer is used (see ScreenTranslator).
+    private val SCREEN_TRANSLATION_SOURCE_LANG = stringPreferencesKey("screen_translation_source_lang")
+    var screenTranslationSourceLang: String
+        get() = getPref(SCREEN_TRANSLATION_SOURCE_LANG, "ja")
+        set(value) {
+            setPref(SCREEN_TRANSLATION_SOURCE_LANG, value)
+        }
+
+    private val SCREEN_TRANSLATION_TARGET_LANG = stringPreferencesKey("screen_translation_target_lang")
+    var screenTranslationTargetLang: String
+        get() = getPref(SCREEN_TRANSLATION_TARGET_LANG, "en")
+        set(value) {
+            setPref(SCREEN_TRANSLATION_TARGET_LANG, value)
+        }
+
+    // Milliseconds between capture/OCR passes. Default 2000ms suits slow-updating visual novels.
+    private val SCREEN_TRANSLATION_INTERVAL_MS = intPreferencesKey("screen_translation_interval_ms")
+    var screenTranslationIntervalMs: Int
+        get() = getPref(SCREEN_TRANSLATION_INTERVAL_MS, 2000)
+        set(value) {
+            setPref(SCREEN_TRANSLATION_INTERVAL_MS, value)
+        }
+
+    // Opacity (0..1) of the black box drawn behind translated text.
+    private val SCREEN_TRANSLATION_OPACITY = floatPreferencesKey("screen_translation_opacity")
+    var screenTranslationOpacity: Float
+        get() = getPref(SCREEN_TRANSLATION_OPACITY, 0.75f)
+        set(value) {
+            setPref(SCREEN_TRANSLATION_OPACITY, value)
+        }
+
+    // Max width (px) the captured frame is downscaled to before OCR. Higher = more accurate on small text
+    // but slower. 0 = no downscale (native resolution). Default 1920 (Balanced).
+    private val SCREEN_TRANSLATION_OCR_MAX_WIDTH = intPreferencesKey("screen_translation_ocr_max_width")
+    var screenTranslationOcrMaxWidth: Int
+        get() = getPref(SCREEN_TRANSLATION_OCR_MAX_WIDTH, 1920)
+        set(value) {
+            setPref(SCREEN_TRANSLATION_OCR_MAX_WIDTH, value)
         }
 
     private val PERFORMANCE_HUD_COMPACT_MODE = booleanPreferencesKey("performance_hud_compact_mode")

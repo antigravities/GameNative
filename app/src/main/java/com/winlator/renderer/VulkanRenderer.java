@@ -377,6 +377,29 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         }
     }
 
+    /**
+     * Captures the current composited frame via PixelCopy. The callback is invoked on the main
+     * thread with the result Bitmap, or null if the renderer isn't ready, native/scanout mode has
+     * bypassed the SurfaceView, or the copy fails. Always captures post-effects output; there is no
+     * pre-effects path for the Vulkan compositor (unlike GLRenderer's scene FBO).
+     */
+    public void captureFrame(java.util.function.Consumer<Bitmap> callback) {
+        android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        // Native/scanout mode bypasses the SurfaceView via ASurfaceControl — PixelCopy on xServerView
+        // would read stale/blank content. Same restriction as the instant-replay Vulkan capture path.
+        if (!initComplete || surfaceWidth <= 0 || surfaceHeight <= 0 || (nativeMode && !effectsRequireCompositor)) {
+            mainHandler.post(() -> callback.accept(null));
+            return;
+        }
+        Bitmap bitmap = Bitmap.createBitmap(surfaceWidth, surfaceHeight, Bitmap.Config.ARGB_8888);
+        android.view.PixelCopy.request(
+            xServerView,
+            bitmap,
+            result -> callback.accept(result == android.view.PixelCopy.SUCCESS ? bitmap : null),
+            mainHandler
+        );
+    }
+
     public void updateScene() {
         ArrayList<RenderableWindow> newList = new ArrayList<>();
         try (XLock xl = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {

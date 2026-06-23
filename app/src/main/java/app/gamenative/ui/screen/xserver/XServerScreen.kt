@@ -47,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -114,9 +115,13 @@ import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGService
 import app.gamenative.ui.component.LsfgQuickMenuState
 import app.gamenative.ui.component.PerformanceQuickMenuState
+import app.gamenative.translation.ScreenTranslator
 import app.gamenative.ui.component.QuickMenu
 import app.gamenative.ui.component.QuickMenuAction
 import app.gamenative.ui.component.SteamInviteState
+import app.gamenative.ui.component.QuickMenuTranslationCallbacks
+import app.gamenative.ui.component.QuickMenuTranslationState
+import app.gamenative.ui.component.ScreenTranslationOverlay
 import app.gamenative.ui.component.SuspendBackdrop
 import app.gamenative.ui.component.parseBooleanExtra
 import app.gamenative.ui.component.parsePositiveFpsLimit
@@ -545,6 +550,62 @@ fun XServerScreen(
 
     var swapInputOverlay: SwapInputOverlayView? by remember { mutableStateOf(null) }
     var imeInputReceiver: app.gamenative.externaldisplay.IMEInputReceiver? by remember { mutableStateOf(null) }
+
+    // --- On-device screen translation (ML Kit OCR + Translate) ---------------------------------
+    val screenTranslator = remember { ScreenTranslator() }
+    val translationOverlayState by screenTranslator.state.collectAsState()
+    // Quick Menu-editable config, seeded from persisted prefs so the tab restores last state.
+    var translationEnabled by rememberSaveable { mutableStateOf(PrefManager.screenTranslationEnabled) }
+    var translationSourceLang by rememberSaveable { mutableStateOf(PrefManager.screenTranslationSourceLang) }
+    var translationTargetLang by rememberSaveable { mutableStateOf(PrefManager.screenTranslationTargetLang) }
+    var translationIntervalMs by rememberSaveable { mutableStateOf(PrefManager.screenTranslationIntervalMs) }
+    var translationOpacity by rememberSaveable { mutableStateOf(PrefManager.screenTranslationOpacity) }
+    var translationOcrMaxWidth by rememberSaveable { mutableStateOf(PrefManager.screenTranslationOcrMaxWidth) }
+    // Stable callbacks instance — remembered so QuickMenu doesn't see a new lambda holder each
+    // recomposition. The lambdas write through the delegated state vars above (stable MutableStates).
+    val translationCallbacks = remember {
+        QuickMenuTranslationCallbacks(
+            onEnabledChange = {
+                translationEnabled = it
+                PrefManager.screenTranslationEnabled = it
+            },
+            onSourceLangChange = {
+                translationSourceLang = it
+                PrefManager.screenTranslationSourceLang = it
+            },
+            onTargetLangChange = {
+                translationTargetLang = it
+                PrefManager.screenTranslationTargetLang = it
+            },
+            onIntervalChange = {
+                translationIntervalMs = it
+                PrefManager.screenTranslationIntervalMs = it
+            },
+            onOpacityChange = {
+                translationOpacity = it
+                PrefManager.screenTranslationOpacity = it
+            },
+            onOcrMaxWidthChange = {
+                translationOcrMaxWidth = it
+                PrefManager.screenTranslationOcrMaxWidth = it
+            },
+        )
+    }
+
+    // Start/stop the live loop and push config. The loop reads config via @Volatile fields each pass,
+    // so a language/interval change just calls setConfig() without restarting. start() is idempotent.
+    LaunchedEffect(translationEnabled, translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth) {
+        if (translationEnabled) {
+            screenTranslator.setConfig(translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth)
+            screenTranslator.start(scope) { xServerView?.renderer }
+        } else {
+            screenTranslator.stop()
+        }
+    }
+    // Stop the loop and release ML Kit clients when leaving the session.
+    DisposableEffect(Unit) {
+        onDispose { screenTranslator.stop() }
+    }
 
     var win32AppWorkarounds: Win32AppWorkarounds? by remember { mutableStateOf(null) }
     var physicalControllerHandler: PhysicalControllerHandler? by remember { mutableStateOf(null) }
@@ -2885,6 +2946,16 @@ fun XServerScreen(
         // shared backdrop) draws on top of the veil. Touch-safe: a closed QuickMenu has no
         // pointer-input modifier, so taps fall through to these buttons. Extracted into a
         // separate composable to keep XServerScreen under ART's method/verifier size limit.
+        // Translated-text overlay sits directly on top of the game surface, below the Quick Menu and
+        // suspend overlays. Only renders while live translation is on and there are blocks to show; it
+        // adds no pointer-input modifier, so game touches pass through untouched.
+        if (translationEnabled) {
+            ScreenTranslationOverlay(
+                state = translationOverlayState,
+                opacity = translationOpacity,
+            )
+        }
+
         SuspendOverlays(
             manualResumeMode = manualResumeMode,
             suspendedWithoutMenu = suspendedWithoutMenu,
@@ -2955,6 +3026,18 @@ fun XServerScreen(
             onRequestOpen = { showQuickMenu = true },
             // Immersive tab (tab only visible when hosted by ImmersiveXrActivity)
             immersiveHooks = immersiveHooks,
+            // Screen translation (ML Kit OCR + Translate) — bundled into two holders (see QuickMenu).
+            translation = QuickMenuTranslationState(
+                enabled = translationEnabled,
+                sourceLang = translationSourceLang,
+                targetLang = translationTargetLang,
+                intervalMs = translationIntervalMs,
+                opacity = translationOpacity,
+                ocrMaxWidth = translationOcrMaxWidth,
+                status = translationOverlayState.status,
+                statusDetail = translationOverlayState.detail,
+            ),
+            translationCallbacks = translationCallbacks,
             onAnimationComplete = { isMenuVisible ->
                 if (isMenuVisible) {
                     // An invite dialog the game asked for must not suspend it -- the game has to

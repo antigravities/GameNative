@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
@@ -62,11 +63,15 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -79,6 +84,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Stable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -104,6 +110,7 @@ import app.gamenative.powercontrol.PowerManager
 import app.gamenative.ui.component.quickMenus.PowerControlQuickMenuTab
 import app.gamenative.ui.data.PerformanceHudConfig
 import app.gamenative.ui.data.PerformanceHudSize
+import app.gamenative.translation.ScreenTranslator
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.adaptivePanelWidth
 import app.gamenative.utils.GameSessionTimer
@@ -138,6 +145,7 @@ private object QuickMenuTab {
     const val IMMERSIVE = 5
     const val INVITE = 6
     const val POWER = 7
+    const val TRANSLATE = 8
 }
 
 data class QuickMenuItem(
@@ -146,6 +154,30 @@ data class QuickMenuItem(
     val labelResId: Int,
     val accentColor: Color = Color.Unspecified,
     val enabled: Boolean = true,
+)
+
+/** Immutable screen-translation inputs for the Quick Menu, bundled to keep QuickMenu's param count low. */
+data class QuickMenuTranslationState(
+    val enabled: Boolean = false,
+    val sourceLang: String = "ja",
+    val targetLang: String = "en",
+    val intervalMs: Int = 2000,
+    val opacity: Float = 0.75f,
+    // Max OCR input width (px); 0 = native. Higher = more accurate but slower.
+    val ocrMaxWidth: Int = 1920,
+    val status: ScreenTranslator.Status = ScreenTranslator.Status.Idle,
+    val statusDetail: String? = null,
+)
+
+/** Screen-translation callbacks for the Quick Menu. @Stable so a remembered instance skips recomposition. */
+@Stable
+class QuickMenuTranslationCallbacks(
+    val onEnabledChange: (Boolean) -> Unit = {},
+    val onSourceLangChange: (String) -> Unit = {},
+    val onTargetLangChange: (String) -> Unit = {},
+    val onIntervalChange: (Int) -> Unit = {},
+    val onOpacityChange: (Float) -> Unit = {},
+    val onOcrMaxWidthChange: (Int) -> Unit = {},
 )
 
 private enum class PerformanceHudPreset(val labelResId: Int) {
@@ -356,6 +388,11 @@ fun QuickMenu(
     onShooterModeSettingsClick: () -> Unit = {},
     activeToggleIds: Set<Int> = emptySet(),
     lsfg: LsfgQuickMenuState = LsfgQuickMenuState(),
+    // Screen translation (ML Kit OCR + Translate). Bundled into two holders to keep QuickMenu's total
+    // parameter count down — a very large @Composable param list trips a Compose default-argument
+    // codegen bug that corrupts unrelated params (e.g. gameName) on recomposition.
+    translation: QuickMenuTranslationState = QuickMenuTranslationState(),
+    translationCallbacks: QuickMenuTranslationCallbacks = QuickMenuTranslationCallbacks(),
     onAnimationComplete: (Boolean) -> Unit = {},
     /** Lets the menu open itself when the running game asks for its Steam invite dialog. */
     onRequestOpen: () -> Unit = {},
@@ -500,6 +537,7 @@ fun QuickMenu(
         QuickMenuTab.INVITE -> R.string.steam_invite_tab_title
         QuickMenuTab.POWER -> R.string.power_control
         QuickMenuTab.IMMERSIVE -> R.string.quick_menu_tab_immersive
+        QuickMenuTab.TRANSLATE -> R.string.translate_tab_title
         else -> R.string.quick_menu_tab_controller
     }
 
@@ -541,6 +579,8 @@ fun QuickMenu(
     val immersiveScrollState = rememberScrollState()
     val immersiveTabFocusRequester = remember { FocusRequester() }
     val immersiveItemFocusRequester = remember { FocusRequester() }
+    val translateTabFocusRequester = remember { FocusRequester() }
+    val translateScrollState = rememberScrollState()
 
     val visibleState = remember { MutableTransitionState(false) }
     visibleState.targetState = isVisible
@@ -575,6 +615,7 @@ fun QuickMenu(
             add(QuickMenuTab.CONTROLLER)
             add(QuickMenuTab.TOOLS)
             if (immersiveControls != null) add(QuickMenuTab.IMMERSIVE)
+            add(QuickMenuTab.TRANSLATE)
         }
     }
 
@@ -841,6 +882,18 @@ fun QuickMenu(
                                         focusRequester = immersiveTabFocusRequester,
                                     )
                                 }
+                                QuickMenuTabButton(
+                                    icon = Icons.Default.Translate,
+                                    contentDescriptionResId = R.string.translate_tab_title,
+                                    selected = selectedTab == QuickMenuTab.TRANSLATE,
+                                    accentColor = PluviaTheme.colors.accentPurple,
+                                    onSelected = {
+                                        selectedTab = QuickMenuTab.TRANSLATE
+                                        PrefManager.quickMenuLastTab = selectedTab
+                                    },
+                                    modifier = Modifier.width(56.dp),
+                                    focusRequester = translateTabFocusRequester,
+                                )
                             }
 
                             Box(
@@ -1002,6 +1055,27 @@ fun QuickMenu(
                                         }
                                     }
 
+                                    QuickMenuTab.TRANSLATE -> {
+                                        TranslateQuickMenuTab(
+                                            enabled = translation.enabled,
+                                            sourceLang = translation.sourceLang,
+                                            targetLang = translation.targetLang,
+                                            intervalMs = translation.intervalMs,
+                                            opacity = translation.opacity,
+                                            ocrMaxWidth = translation.ocrMaxWidth,
+                                            status = translation.status,
+                                            statusDetail = translation.statusDetail,
+                                            onEnabledChange = translationCallbacks.onEnabledChange,
+                                            onSourceLangChange = translationCallbacks.onSourceLangChange,
+                                            onTargetLangChange = translationCallbacks.onTargetLangChange,
+                                            onIntervalChange = translationCallbacks.onIntervalChange,
+                                            onOpacityChange = translationCallbacks.onOpacityChange,
+                                            onOcrMaxWidthChange = translationCallbacks.onOcrMaxWidthChange,
+                                            scrollState = translateScrollState,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
+
                                     else -> {
                                         Column(
                                             modifier = Modifier
@@ -1067,6 +1141,7 @@ fun QuickMenu(
                         QuickMenuTab.POWER -> powerItemFocusRequester.requestFocus()
                         QuickMenuTab.TOOLS -> toolsItemFocusRequester.requestFocus()
                         QuickMenuTab.IMMERSIVE -> immersiveItemFocusRequester.requestFocus()
+                        QuickMenuTab.TRANSLATE -> Unit
                         else -> controllerItemFocusRequester.requestFocus()
                     }
                     Timber.i("QuickMenu: requestFocus succeeded for tab=%d on attempt=%d", selectedTab, attempt)
@@ -1077,6 +1152,176 @@ fun QuickMenu(
                 }
             }
             Timber.w("QuickMenu: requestFocus never succeeded for tab=%d after 3 attempts", selectedTab)
+        }
+    }
+}
+
+// Languages the user can pick. Source languages are limited to scripts we ship an OCR recognizer for
+// (the Japanese/Chinese/Korean recognizers also read embedded Latin). Codes are ML Kit TranslateLanguage
+// tags. Display names are proper nouns, so they stay in code rather than strings.xml.
+private val TRANSLATE_SOURCE_LANGS = listOf(
+    "ja" to "Japanese",
+    "zh" to "Chinese",
+    "ko" to "Korean",
+    "en" to "English",
+)
+private val TRANSLATE_TARGET_LANGS = listOf(
+    "en" to "English",
+    "ja" to "Japanese",
+    "zh" to "Chinese",
+    "ko" to "Korean",
+    "es" to "Spanish",
+    "fr" to "French",
+    "de" to "German",
+    "ru" to "Russian",
+    "pt" to "Portuguese",
+    "it" to "Italian",
+)
+
+// OCR quality presets: max input width (px) → label. 0 = native resolution (no downscale).
+private val TRANSLATE_QUALITY_PRESETS = listOf(
+    1280 to R.string.translate_quality_fast,
+    1920 to R.string.translate_quality_balanced,
+    0 to R.string.translate_quality_accurate,
+)
+
+@Composable
+private fun TranslateQuickMenuTab(
+    enabled: Boolean,
+    sourceLang: String,
+    targetLang: String,
+    intervalMs: Int,
+    opacity: Float,
+    ocrMaxWidth: Int,
+    status: ScreenTranslator.Status,
+    statusDetail: String?,
+    onEnabledChange: (Boolean) -> Unit,
+    onSourceLangChange: (String) -> Unit,
+    onTargetLangChange: (String) -> Unit,
+    onIntervalChange: (Int) -> Unit,
+    onOpacityChange: (Float) -> Unit,
+    onOcrMaxWidthChange: (Int) -> Unit,
+    scrollState: ScrollState,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .verticalScroll(scrollState)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Live on/off
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(R.string.translate_live),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        }
+
+        // Status line. Error shows the underlying message when available; the OCR-module download is a
+        // transient wait, not an error.
+        val statusText = when (status) {
+            ScreenTranslator.Status.DownloadingOcr -> stringResource(R.string.translate_status_downloading_ocr)
+            ScreenTranslator.Status.DownloadingModel -> stringResource(R.string.translate_status_downloading)
+            ScreenTranslator.Status.Working -> stringResource(R.string.translate_status_working)
+            ScreenTranslator.Status.Ready -> stringResource(R.string.translate_status_ready)
+            ScreenTranslator.Status.Error -> if (statusDetail != null) {
+                stringResource(R.string.translate_status_error_detail, statusDetail)
+            } else {
+                stringResource(R.string.translate_status_error)
+            }
+            ScreenTranslator.Status.Idle -> stringResource(R.string.translate_status_idle)
+        }
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        // Source language
+        Text(
+            text = stringResource(R.string.translate_source),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        LanguageChips(options = TRANSLATE_SOURCE_LANGS, selected = sourceLang, onSelect = onSourceLangChange)
+
+        // Target language
+        Text(
+            text = stringResource(R.string.translate_target),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        LanguageChips(options = TRANSLATE_TARGET_LANGS, selected = targetLang, onSelect = onTargetLangChange)
+
+        // OCR quality: higher resolution = more accurate on small text, but slower passes.
+        Text(
+            text = stringResource(R.string.translate_quality),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            TRANSLATE_QUALITY_PRESETS.forEach { (width, labelResId) ->
+                FilterChip(
+                    selected = width == ocrMaxWidth,
+                    onClick = { onOcrMaxWidthChange(width) },
+                    label = { Text(stringResource(labelResId)) },
+                )
+            }
+        }
+
+        // Update interval (seconds)
+        Text(
+            text = stringResource(R.string.translate_interval, intervalMs / 1000f),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Slider(
+            value = intervalMs.toFloat(),
+            onValueChange = { onIntervalChange(it.roundToInt()) },
+            valueRange = 500f..5000f,
+            steps = 8, // 500ms increments
+        )
+
+        // Overlay box opacity
+        Text(
+            text = stringResource(R.string.translate_opacity, (opacity * 100).roundToInt()),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Slider(
+            value = opacity,
+            onValueChange = onOpacityChange,
+            valueRange = 0.3f..1f,
+        )
+    }
+}
+
+@Composable
+private fun LanguageChips(
+    options: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        options.forEach { (code, label) ->
+            FilterChip(
+                selected = code == selected,
+                onClick = { onSelect(code) },
+                label = { Text(label) },
+            )
         }
     }
 }

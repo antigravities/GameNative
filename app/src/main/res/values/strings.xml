@@ -347,6 +347,24 @@
     <string name="immersive_mode_xbox">Xbox controller mode</string>
     <string name="tools_wine_processes_running_hint">%1$d running, tap/click a process to close</string>
     <string name="tools_wine_processes_empty">No running EXEs detected.</string>
+    <!-- In-game Quick Menu: Screen Translation tab -->
+    <string name="translate_tab_title">Translate</string>
+    <string name="translate_live">Live translation</string>
+    <string name="translate_source">Source language</string>
+    <string name="translate_target">Target language</string>
+    <string name="translate_interval">Update interval: %1$.1fs</string>
+    <string name="translate_opacity">Overlay opacity: %1$d%%</string>
+    <string name="translate_status_idle">Off</string>
+    <string name="translate_status_downloading_ocr">Downloading text-recognition module…</string>
+    <string name="translate_status_downloading">Downloading language model…</string>
+    <string name="translate_status_working">Translating…</string>
+    <string name="translate_status_ready">Translation active</string>
+    <string name="translate_status_error">Translation error — see logs</string>
+    <string name="translate_status_error_detail">Translation error: %1$s</string>
+    <string name="translate_quality">OCR quality</string>
+    <string name="translate_quality_fast">Fast</string>
+    <string name="translate_quality_balanced">Balanced</string>
+    <string name="translate_quality_accurate">Accurate</string>
     <string name="settings_show_quick_menu_on_back_title">Show quick menu on back gesture</string>
     <string name="settings_show_quick_menu_on_back_subtitle">When off, shows Resume / Menu buttons instead of opening the quick menu directly</string>
     <string name="performance_hud">Performance HUD</string>
