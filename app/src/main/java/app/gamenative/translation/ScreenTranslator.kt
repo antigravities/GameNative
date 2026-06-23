@@ -71,6 +71,12 @@ class ScreenTranslator {
     private val _state = MutableStateFlow(OverlayState())
     val state: StateFlow<OverlayState> = _state.asStateFlow()
 
+    // Overlay opacity, exposed reactively so the overlay (now hosted in a ComposeView inside the
+    // Android view tree, below the on-screen controls) can observe slider changes even when the
+    // translated blocks themselves are unchanged.
+    private val _opacity = MutableStateFlow(0.6f)
+    val opacity: StateFlow<Float> = _opacity.asStateFlow()
+
     // Config is read on the loop thread each iteration, so mark @Volatile for safe cross-thread reads.
     @Volatile private var sourceLang: String = "ja"
     @Volatile private var targetLang: String = "en"
@@ -90,11 +96,12 @@ class ScreenTranslator {
     // Hash of the previous OCR frame for cheap change-detection (skip work on static screens).
     private var lastFrameHash: ByteArray? = null
 
-    fun setConfig(source: String, target: String, intervalMillis: Int, ocrMaxWidthPx: Int) {
+    fun setConfig(source: String, target: String, intervalMillis: Int, ocrMaxWidthPx: Int, overlayOpacity: Float) {
         sourceLang = source
         targetLang = target
         intervalMs = intervalMillis.toLong().coerceAtLeast(500L)
         ocrMaxWidth = ocrMaxWidthPx
+        _opacity.value = overlayOpacity
     }
 
     /**

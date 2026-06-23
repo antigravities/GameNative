@@ -64,6 +64,7 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -525,9 +526,9 @@ fun XServerScreen(
 
     // Start/stop the live loop and push config. The loop reads config via @Volatile fields each pass,
     // so a language/interval change just calls setConfig() without restarting. start() is idempotent.
-    LaunchedEffect(translationEnabled, translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth) {
+    LaunchedEffect(translationEnabled, translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth, translationOpacity) {
         if (translationEnabled) {
-            screenTranslator.setConfig(translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth)
+            screenTranslator.setConfig(translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth, translationOpacity)
             screenTranslator.start(scope) { xServerView?.renderer }
         } else {
             screenTranslator.stop()
@@ -2355,6 +2356,25 @@ fun XServerScreen(
             frameLayout.addView(gameHost)
             gameHost.addView(xServerView as View)
 
+            // Host the translated-text overlay INSIDE the Android view tree, above the game surface
+            // but below icView (the on-screen controls, added to frameLayout later) so the controls
+            // always stay on top in FrameLayout z-order and never get covered by translation boxes.
+            // ScreenTranslationOverlay early-returns when there are no blocks, and stop() resets the
+            // translator's state to empty, so this draws nothing while translation is off. It adds no
+            // pointerInput, so touches fall through to the views below.
+            val translationOverlayHost = ComposeView(context).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                setContent {
+                    val ovState by screenTranslator.state.collectAsState()
+                    val ovOpacity by screenTranslator.opacity.collectAsState()
+                    ScreenTranslationOverlay(state = ovState, opacity = ovOpacity)
+                }
+            }
+            gameHost.addView(translationOverlayHost)
+
             PluviaApp.inputControlsManager = InputControlsManager(context)
 
             // Store the loaded profile for auto-show logic later (declared outside apply block)
@@ -2884,15 +2904,9 @@ fun XServerScreen(
         // shared backdrop) draws on top of the veil. Touch-safe: a closed QuickMenu has no
         // pointer-input modifier, so taps fall through to these buttons. Extracted into a
         // separate composable to keep XServerScreen under ART's method/verifier size limit.
-        // Translated-text overlay sits directly on top of the game surface, below the Quick Menu and
-        // suspend overlays. Only renders while live translation is on and there are blocks to show; it
-        // adds no pointer-input modifier, so game touches pass through untouched.
-        if (translationEnabled) {
-            ScreenTranslationOverlay(
-                state = translationOverlayState,
-                opacity = translationOpacity,
-            )
-        }
+        // NOTE: the translated-text overlay is no longer rendered here. It is hosted in a ComposeView
+        // inside the Android view tree (gameHost), so it draws beneath the on-screen controls (icView)
+        // instead of on top of them. See the AndroidView factory above.
 
         SuspendOverlays(
             manualResumeMode = manualResumeMode,
