@@ -75,7 +75,8 @@ private const val LIBRARY_FILTERS =
     "AND (:search = '' OR LOWER(app.name) LIKE '%' || LOWER(:search) || '%') " +
     "AND (:hideAdult = 0 OR app.is_adult = 0) " +
     "AND app.id NOT IN (:hiddenIds) " +
-    "AND (:filterByCategory = 0 OR app.id IN (:categoryIds)) "
+    "AND (:filterByCategory = 0 OR app.id IN (:categoryIds)) " +
+    "AND (:includeFreeToPlay = 1 OR app.is_free_app = 0) "
 
 // The summary projection (kept in sync with the other *AppSummaries queries). Excludes the heavy
 // depots/config/branches/ufs blobs so a page row stays light. Columns are qualified with the `app`
@@ -85,7 +86,7 @@ private const val LIBRARY_FILTERS =
 private const val SUMMARY_COLS =
     "app.id, app.name, app.type, app.package_id, app.client_icon_hash, app.library_assets, " +
     "app.owner_account_id, app.install_dir, app.content_descriptors, app.size_bytes, app.store_tags, " +
-    "app.review_score, app.review_percentage "
+    "app.review_score, app.review_percentage, app.is_free_app "
 
 // Projection for buildLibraryPageQuery: SUMMARY returns the full SteamAppSummary columns (one page,
 // blobs included); STUB returns only the lightweight OrderedSteamStub columns (id, name_sort_key,
@@ -122,6 +123,7 @@ fun buildLibraryPageQuery(
     offset: Int = 0,
     invalidPkgId: Int = INVALID_PKG_ID,
     includeExpired: Int = 0,
+    includeFreeToPlay: Int = 1,
     projection: LibraryProjection = LibraryProjection.SUMMARY,
     filterByTag: Int = 0,
     tagIds: List<Int> = listOf(-1),
@@ -175,6 +177,9 @@ fun buildLibraryPageQuery(
     args.addAll(hiddenIds)
     sb.append("AND (? = 0 OR app.id IN (").append(placeholders(categoryIds.size)).append(")) ")
     args.add(filterByCategory); args.addAll(categoryIds)
+    // Free-to-play filter: when off (includeFreeToPlay = 0), hide apps flagged is_free_app.
+    sb.append("AND (? = 1 OR app.is_free_app = 0) ")
+    args.add(includeFreeToPlay)
     // Tag filter: matches if the app's store_tags JSON array contains ANY of the selected tag IDs.
     // json_each() is available on all Android versions the app targets (SQLite 3.9+ with JSON1).
     // Callers pass [-1] as tagIds when not filtering, so the IN () case never arises.
@@ -321,7 +326,7 @@ interface SteamAppDao {
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
             "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags, " +
-            "review_score, review_percentage " +
+            "review_score, review_percentage, is_free_app " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "ORDER BY LOWER(app.name), app.id LIMIT :limit OFFSET :offset",
     )
@@ -337,7 +342,7 @@ interface SteamAppDao {
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
             "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags, " +
-            "review_score, review_percentage " +
+            "review_score, review_percentage, is_free_app " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.id IN (:ids)",
     )
@@ -413,7 +418,7 @@ interface SteamAppDao {
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
             "owner_account_id, install_dir, content_descriptors, size_bytes, store_tags, " +
-            "review_score, review_percentage " +
+            "review_score, review_percentage, is_free_app " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.type IN (:types) " +
             "AND LOWER(app.name) LIKE '%' || LOWER(:searchQuery) || '%' " +
@@ -462,6 +467,7 @@ interface SteamAppDao {
         categoryIds: List<Int>,
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Int = 0,
+        includeFreeToPlay: Int = 1,
     ): Int
 
     // Installed-only COUNT variant: INNER JOIN app_info on is_downloaded = 1 (matching
@@ -482,6 +488,7 @@ interface SteamAppDao {
         categoryIds: List<Int>,
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Int = 0,
+        includeFreeToPlay: Int = 1,
     ): Int
 
     // Fetches only id + depots for owned apps. Used by the background sizeBytes computation job
@@ -682,6 +689,12 @@ interface SteamAppDao {
     // Self-healing: after the consumer processes each row it writes back the real lastChangeNumber.
     @Query("UPDATE steam_app SET last_change_number = 0 WHERE received_pics = 1 AND store_tags = '[]'")
     suspend fun resetChangeNumbersForEmptyStoreTags()
+
+    // One-time forced re-parse: zeroes lastChangeNumber for all synced rows so the app-PICS consumer
+    // re-runs generateSteamApp() (re-reading the now-fixed isfreeapp). The consumer restores the real
+    // lastChangeNumber after writing each updated row. Gated to one run by PrefManager (see refreshAllApps).
+    @Query("UPDATE steam_app SET last_change_number = 0 WHERE received_pics = 1")
+    suspend fun resetAllChangeNumbers()
 
     @Query("SELECT * FROM steam_app WHERE id IN (:appIds)")
     suspend fun findSteamAppWithAppIds(appIds: List<Int>): List<SteamApp>

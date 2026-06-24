@@ -77,6 +77,18 @@ object PrefManager {
                 removePref(oldRefreshToken)
             }
         }
+
+        // One-time: the FREE_TO_PLAY library filter is on by default, but existing users have a
+        // persisted library_filter bitmask that predates it. OR the bit in once so their F2P games
+        // don't suddenly disappear after this update. A -1 sentinel means "no saved value" → a brand
+        // new user, who already gets the new default from the libraryFilter getter, so leave it be.
+        if (!getPref(FREE_TO_PLAY_FILTER_MIGRATED, false)) {
+            val saved = getPref(LIBRARY_FILTER, -1)
+            if (saved != -1) {
+                libraryFilter = AppFilter.fromFlags(saved).apply { add(AppFilter.FREE_TO_PLAY) }
+            }
+            setPref(FREE_TO_PLAY_FILTER_MIGRATED, true)
+        }
     }
 
     fun clearPreferences() {
@@ -166,6 +178,14 @@ object PrefManager {
     var refreshAllAppsPending: Boolean
         get() = getPref(REFRESH_ALL_APPS_PENDING, false)
         set(value) { setPref(REFRESH_ALL_APPS_PENDING, value) }
+
+    // One-time guard: the isfreeapp parse path was fixed, so the next full refreshAllApps run must
+    // force a re-parse of every synced row (resetAllChangeNumbers) to repopulate is_free_app. Cleared
+    // after that first broad reset so later refreshes don't needlessly re-parse the whole library.
+    private val FREE_APP_REPARSE_PENDING = booleanPreferencesKey("free_app_reparse_pending")
+    var freeAppReparsePending: Boolean
+        get() = getPref(FREE_APP_REPARSE_PENDING, true)
+        set(value) { setPref(FREE_APP_REPARSE_PENDING, value) }
 
     // One-shot guard for the size_bytes backfill (SteamService.backfillSizesOnce). Rows synced
     // before the size_bytes column existed have 0; the backfill computes them once, then sets this.
@@ -1066,9 +1086,12 @@ object PrefManager {
         set(value) { setPref(LAST_CURATORS_FETCH_MS, value) }
 
     private val LIBRARY_FILTER = intPreferencesKey("library_filter")
+    // One-time flag: tracks whether the FREE_TO_PLAY filter bit has been back-filled into an
+    // existing user's saved library filter (see init()).
+    private val FREE_TO_PLAY_FILTER_MIGRATED = booleanPreferencesKey("ftp_filter_migrated")
     var libraryFilter: EnumSet<AppFilter>
         get() {
-            val value = getPref(LIBRARY_FILTER, AppFilter.toFlags(EnumSet.of(AppFilter.GAME, AppFilter.SHARED)))
+            val value = getPref(LIBRARY_FILTER, AppFilter.toFlags(EnumSet.of(AppFilter.GAME, AppFilter.SHARED, AppFilter.FREE_TO_PLAY)))
             return AppFilter.fromFlags(value)
         }
         set(value) {

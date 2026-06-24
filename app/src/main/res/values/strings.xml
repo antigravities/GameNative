@@ -719,6 +719,7 @@
     <string name="app_filter_demo">Demo</string>
     <string name="app_filter_playtest">Playtest</string>
     <string name="app_filter_family">Family</string>
+    <string name="app_filter_free_to_play">Free to Play</string>
     <string name="filter_expired">Expired</string>
     <string name="filter_playable">Playable (30+ FPS)</string>
     <string name="filter_five_star_device">5-star reviews on device</string>

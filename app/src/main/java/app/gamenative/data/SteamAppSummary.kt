@@ -31,6 +31,10 @@ data class SteamAppSummary(
     val reviewScore: Int = 0,
     @ColumnInfo("review_percentage")
     val reviewPercentage: Int = 0,
+    // PICS isfreeapp flag, projected so the in-memory library filter path can hide free-to-play
+    // titles without loading the full SteamApp entity. See AppFilter.FREE_TO_PLAY.
+    @ColumnInfo("is_free_app")
+    val isFreeApp: Boolean = false,
 ) {
     val isAdult: Boolean
         get() = contentDescriptors.any { it in ADULT_CONTENT_DESCRIPTOR_IDS }

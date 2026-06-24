@@ -135,7 +135,10 @@ fun KeyValue.generateSteamApp(): SteamApp {
         loadAllBeforeLaunch = this["common"]["extended"]["loadallbeforelaunch"].asBoolean(),
         // dlcAppIds = (this["common"]["extended"]["listofdlc"].value).Split(",").Select(uint.Parse).ToArray(),
         dlcAppIds = emptyList(),
-        isFreeApp = this["common"]["extended"]["isfreeapp"].asBoolean(),
+        // Steam's `extended` block is a top-level sibling of `common`, not a child of it (see
+        // dlcForAppId below). Read isfreeapp from the correct top-level path; keep the old nested
+        // path as a defensive fallback.
+        isFreeApp = this["extended"]["isfreeapp"].asBoolean(this["common"]["extended"]["isfreeapp"].asBoolean()),
         dlcForAppId = this["extended"]["dlcforappid"].asInteger(this["common"]["extended"]["dlcforappid"].asInteger()),
         mustOwnAppToPurchase = this["common"]["extended"]["mustownapptopurchase"].asInteger(),
         dlcAvailableOnStore = this["common"]["extended"]["dlcavailableonstore"].asBoolean(),

@@ -3604,6 +3604,13 @@ class SteamService : Service(), IChallengeUrlChanged {
                 // stored changeNumber matches Steam's current value and the consumer would skip them.
                 // Setting it to 0 forces generateSteamApp() to run for them; the consumer restores
                 // the real lastChangeNumber after writing the updated row.
+                // One-time broad reset to repopulate is_free_app after the isfreeapp parse-path fix:
+                // zero lastChangeNumber for every synced row so the consumer re-parses all of them.
+                if (PrefManager.freeAppReparsePending) {
+                    Timber.i("refreshAllApps: one-time full re-parse for is_free_app fix")
+                    service.appDao.resetAllChangeNumbers()
+                    PrefManager.freeAppReparsePending = false
+                }
                 service.appDao.resetChangeNumbersForEmptyStoreTags()
 
                 // ORDER BY id ASC ensures the list is stable across restarts so drop(offset) is correct.

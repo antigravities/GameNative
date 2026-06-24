@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Diversity3
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.InstallMobile
+import androidx.compose.material.icons.filled.MoneyOff
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material.icons.rounded.Speed
@@ -89,6 +90,11 @@ enum class AppFilter(
         code = 0x400,
         displayTextRes = R.string.filter_proven_gpu,
         icon = Icons.Rounded.SportsEsports,
+    ),
+    FREE_TO_PLAY(
+        code = 0x1000,
+        displayTextRes = R.string.app_filter_free_to_play,
+        icon = Icons.Default.MoneyOff,
     ),
     // ALPHABETIC(
     //     code = 0x20,

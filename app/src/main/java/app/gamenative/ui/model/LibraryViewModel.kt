@@ -1060,6 +1060,9 @@ class LibraryViewModel @Inject constructor(
                     currentState.appInfoSortType.contains(AppFilter.INSTALLED)
                 return !installedOnly || isInDownloadDirectory(item)
             }
+            // FREE_TO_PLAY is an inclusion toggle (on by default): when off, hide is_free_app titles.
+            val includeFreeToPlay = currentState.appInfoSortType.contains(AppFilter.FREE_TO_PLAY)
+            fun freeToPlayMatches(item: SteamAppSummary): Boolean = includeFreeToPlay || !item.isFreeApp
 
             val steamFilteredBeforeCompatibility: List<SteamAppSummary> =
                 if (currentState.searchQuery.isNotBlank()) {
@@ -1081,6 +1084,7 @@ class LibraryViewModel @Inject constructor(
                             .filter { ownerMatches(it) }
                             .filter { sharedMatches(it) }
                             .filter { installedMatches(it) }
+                            .filter { freeToPlayMatches(it) }
                             .filter { item ->
                                 // When hide adult content is on, exclude games with any adult descriptor ID.
                                 !PrefManager.hideAdultContent ||
@@ -1097,6 +1101,7 @@ class LibraryViewModel @Inject constructor(
                         .filter { item -> currentFilter.any { item.type == it } }
                         .filter { sharedMatches(it) }
                         .filter { installedMatches(it) }
+                        .filter { freeToPlayMatches(it) }
                         .filter { item ->
                             // When hide adult content is on, exclude games with any adult descriptor ID.
                             !PrefManager.hideAdultContent ||
@@ -1591,6 +1596,8 @@ class LibraryViewModel @Inject constructor(
         val installedFilter = currentTab.installedOnly || currentState.appInfoSortType.contains(AppFilter.INSTALLED)
         val hideAdult = if (PrefManager.hideAdultContent) 1 else 0
         val includeExpired = if (currentState.appInfoSortType.contains(AppFilter.EXPIRED)) 1 else 0
+        // FREE_TO_PLAY is an inclusion toggle (on by default): when off, hide is_free_app titles.
+        val includeFreeToPlay = if (currentState.appInfoSortType.contains(AppFilter.FREE_TO_PLAY)) 1 else 0
         val search = currentState.searchQuery
 
         // Hidden / Favorites / Category live in CategoryManager as composite ids ("STEAM_570"); the
@@ -1644,7 +1651,7 @@ class LibraryViewModel @Inject constructor(
         val signature = listOf(
             currentState.currentSortOption, search, currentTab,
             includeSteam, includeOpen, includeGOG, includeEpic, includeAmazon,
-            installedFilter, hideAdult, includeExpired, typeCodes,
+            installedFilter, hideAdult, includeExpired, includeFreeToPlay, typeCodes,
             favoriteComposite.hashCode(), hiddenComposite.hashCode(), categoryHash,
             selectedTagIds.hashCode(),
             filterByCurator, selectedCuratorId,
@@ -1741,9 +1748,9 @@ class LibraryViewModel @Inject constructor(
         val steamCountable = typeCodes.isNotEmpty()
         val steamBadgeCount = if (steamCountable) {
             if (installedFilter) {
-                steamAppDao.countInstalledOwnedAppSummaries(typeCodes, search, hideAdult, listOf(-1), 0, listOf(-1), includeExpired = includeExpired)
+                steamAppDao.countInstalledOwnedAppSummaries(typeCodes, search, hideAdult, listOf(-1), 0, listOf(-1), includeExpired = includeExpired, includeFreeToPlay = includeFreeToPlay)
             } else {
-                steamAppDao.countOwnedAppSummaries(typeCodes, search, hideAdult, listOf(-1), 0, listOf(-1), includeExpired = includeExpired)
+                steamAppDao.countOwnedAppSummaries(typeCodes, search, hideAdult, listOf(-1), 0, listOf(-1), includeExpired = includeExpired, includeFreeToPlay = includeFreeToPlay)
             }
         } else {
             0
@@ -1809,6 +1816,7 @@ class LibraryViewModel @Inject constructor(
                 installedFilter = installedFilter,
                 limit = null,
                 includeExpired = includeExpired,
+                includeFreeToPlay = includeFreeToPlay,
                 projection = LibraryProjection.STUB,
                 filterByTag = filterByTag,
                 tagIds = tagParam,

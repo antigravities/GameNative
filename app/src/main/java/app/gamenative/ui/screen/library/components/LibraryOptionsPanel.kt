@@ -354,6 +354,7 @@ fun LibraryOptionsPanel(
                                         AppFilter.INSTALLED,
                                         AppFilter.COMPATIBLE,
                                         AppFilter.EXPIRED,
+                                        AppFilter.FREE_TO_PLAY,
                                         AppFilter.PLAYABLE,
                                         AppFilter.FIVE_STAR,
                                         AppFilter.FIVE_STAR_GPU,
