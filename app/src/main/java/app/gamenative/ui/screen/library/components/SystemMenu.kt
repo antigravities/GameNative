@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.StarHalf
 import androidx.compose.material.icons.filled.CardGiftcard
+import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -251,6 +252,7 @@ fun SystemMenu(
     onDismiss: () -> Unit,
     onNavigateRoute: (String) -> Unit,
     onDownloadsClick: () -> Unit = {},
+    onFeelingLucky: () -> Unit = {},
     onLogout: () -> Unit,
     onGoOnline: () -> Unit,
     isOffline: Boolean = false,
@@ -630,6 +632,16 @@ fun SystemMenu(
                                 onDismiss()
                             },
                             focusRequester = firstItemFocusRequester,
+                        )
+
+                        // Opens a random game from the library's current filter (dice = "feeling lucky").
+                        SystemMenuItem(
+                            text = stringResource(R.string.feeling_lucky),
+                            icon = Icons.Default.Casino,
+                            onClick = {
+                                onFeelingLucky()
+                                onDismiss()
+                            },
                         )
 
                         SystemMenuItem(

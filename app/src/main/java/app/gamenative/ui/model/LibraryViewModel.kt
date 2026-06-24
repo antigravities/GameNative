@@ -206,6 +206,11 @@ class LibraryViewModel @Inject constructor(
 
     private var cachedFilterSignature: String? = null
     private var orderedSkeleton: List<LibraryRef> = emptyList()
+    // Full ordered set of composite appIds for the current filter when it was produced by the
+    // IN-MEMORY path (COMPATIBLE / stats sorts), which does NOT maintain orderedSkeleton. Null means
+    // the SQL path is authoritative and randomAppIdInFilter() should read orderedSkeleton instead.
+    // Used only by the "I'm Feeling Lucky" random pick — see randomAppIdInFilter().
+    private var inMemoryFilterAppIds: List<String>? = null
     private var cachedTotal: Int = 0
     private var cachedBadges: BadgeCounts? = null
     private val loadedDisplayItems = mutableListOf<LibraryItem>()
@@ -981,6 +986,29 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Picks a uniformly random game's composite appId (e.g. "STEAM_570") from the ENTIRE current
+     * filter — active tab + search + filters + sort — not just the pages already loaded into
+     * [LibraryState.appInfoList]. Backs the "I'm Feeling Lucky" system-menu button.
+     *
+     * Reads only in-memory state (no DB / coroutine work), so it is safe to call directly from the
+     * UI thread. Returns null when the current filter has no games (or hasn't been built yet).
+     *
+     * Source of truth depends on which filtering path last ran:
+     *  - SQL path (the common large-library case): [orderedSkeleton] holds every matching game as a
+     *    lightweight ref; we pick one and derive its composite id (O(1), no materialization).
+     *  - In-memory path (COMPATIBLE / stats sorts): orderedSkeleton is stale, so we fall back to
+     *    [inMemoryFilterAppIds], the full ordered id list captured during that path's run.
+     */
+    fun randomAppIdInFilter(): String? {
+        inMemoryFilterAppIds?.let { return it.randomOrNull() }
+        val ref = orderedSkeleton.randomOrNull() ?: return null
+        return when (ref) {
+            is LibraryRef.Steam -> "${GameSource.STEAM.name}_${ref.appId}"
+            is LibraryRef.NonSteam -> ref.item.appId // already a composite id
+        }
+    }
+
     // Original full-list filtering, retained verbatim as the fallback for filters that can't be
     // expressed in SQL (COMPATIBLE, family-sharing). Loads the whole appList, filters/sorts it all,
     // then paginates with take(endIndex).
@@ -1460,6 +1488,10 @@ class LibraryViewModel @Inject constructor(
             // Total count for the current filter
             val totalFound = effectiveCombined.size
 
+            // Record the full ordered filter set so the "I'm Feeling Lucky" pick spans every match on
+            // this path too (orderedSkeleton is stale here). Small list (COMPATIBLE/stats), cheap to map.
+            inMemoryFilterAppIds = effectiveCombined.map { it.appId }
+
             // Determine how many pages and slice the list for incremental loading
             val pageSize = PrefManager.itemsPerPage
             // Update internal pagination state
@@ -1805,6 +1837,8 @@ class LibraryViewModel @Inject constructor(
             else -> mergeSorted(steamRefs, nonSteamRefs, comparator)
         }
         cachedTotal = orderedSkeleton.size
+        // SQL path is now authoritative for the random pick; drop any stale in-memory override.
+        inMemoryFilterAppIds = null
 
         // Materialize the first endIndex items (preserves scroll depth on same-page event rebuilds).
         val endIndex = min((paginationPage + 1) * pageSize, cachedTotal)

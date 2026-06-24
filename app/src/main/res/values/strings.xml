@@ -748,6 +748,8 @@
     <!-- Profile & Menu -->
     <string name="help_and_support">Help &amp; Support</string>
     <string name="hall_of_fame">Hall of Fame</string>
+    <string name="feeling_lucky">I\'m Feeling Lucky</string>
+    <string name="library_feeling_lucky_empty">No games match the current filter</string>
     <string name="activate_product">Activate a Product</string>
     <string name="activate_product_key_hint">Product Key</string>
     <string name="activate_product_btn">Activate</string>

@@ -106,6 +106,7 @@ import app.gamenative.ui.screen.auth.AmazonOAuthActivity
 import app.gamenative.ui.screen.auth.EpicOAuthActivity
 import app.gamenative.ui.screen.auth.GOGOAuthActivity
 import app.gamenative.ui.screen.library.components.SystemMenu
+import app.gamenative.ui.screen.PluviaScreen
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.PlatformAuthUiHelpers
 import app.gamenative.ui.util.PlatformLogoutCallbacks
@@ -132,6 +133,7 @@ fun HomeLibraryScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
 
     // Listen for "Add to Category" events emitted from the game options panel in any source screen.
     // Because the dialog state lives in LibraryViewModel, we handle the event here where the VM is
@@ -187,6 +189,16 @@ fun HomeLibraryScreen(
         onLoadCurators = viewModel::loadCurators,
         onToggleFavorite = viewModel::onToggleFavorite,
         onToggleHidden = viewModel::onToggleHidden,
+        onFeelingLucky = {
+            // Pick a random game from the entire current filter and open its page. Returns null when
+            // the filter is empty, in which case we surface a snackbar instead of navigating.
+            val appId = viewModel.randomAppIdInFilter()
+            if (appId != null) {
+                onNavigateRoute(PluviaScreen.GamePage.route(appId))
+            } else {
+                SnackbarManager.show(context.getString(R.string.library_feeling_lucky_empty))
+            }
+        },
         isOffline = isOffline,
     )
 }
@@ -225,6 +237,7 @@ private fun LibraryScreenContent(
     onLoadCurators: () -> Unit = {},
     onToggleFavorite: (String) -> Unit = {},
     onToggleHidden: (String) -> Unit = {},
+    onFeelingLucky: () -> Unit = {},
     isOffline: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -1267,6 +1280,7 @@ private fun LibraryScreenContent(
                 onDismiss = { isSystemMenuOpen = false },
                 onNavigateRoute = onNavigateRoute,
                 onDownloadsClick = onDownloadsClick,
+                onFeelingLucky = onFeelingLucky,
                 onLogout = onLogout,
                 onGoOnline = onGoOnline,
                 isOffline = isOffline,
