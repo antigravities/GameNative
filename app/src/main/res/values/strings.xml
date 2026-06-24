@@ -1418,7 +1418,6 @@
     <string name="steam_save_import_failed">Failed to import saves: %s</string>
     <string name="library_categories_title">Categories</string>
     <string name="library_tag_filter_title">Filter by Tag</string>
-    <string name="library_tag_filter_all">All Tags</string>
     <string name="library_tag_filter_n_selected">%d tag(s) selected</string>
     <string name="library_tag_dialog_title">Filter by Tag</string>
     <string name="library_tag_dialog_search">Search tags…</string>
@@ -1427,7 +1426,6 @@
     <string name="library_tag_dialog_loading">Loading tags…</string>
     <string name="library_tag_dialog_no_results">No matching tags</string>
     <string name="library_curator_filter_title">Filter by Curator</string>
-    <string name="library_curator_filter_all">All Curators</string>
     <string name="library_curator_dialog_title">Filter by Curator</string>
     <string name="library_curator_dialog_search">Search curators…</string>
     <string name="library_curator_dialog_clear">Clear</string>

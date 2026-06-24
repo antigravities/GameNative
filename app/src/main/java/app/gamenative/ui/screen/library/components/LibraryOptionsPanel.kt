@@ -241,10 +241,10 @@ fun LibraryOptionsPanel(
                             Spacer(modifier = Modifier.height(20.dp))
                         }
 
-                        // Tag filter section — single tappable row that opens the tag picker dialog.
-                        // Only shown when there are tags loaded (first run may be empty briefly).
-                        if (availableTags.isNotEmpty()) {
-                            OptionSectionHeader(text = stringResource(R.string.library_tag_filter_title))
+                        // Tag & Curator filters — single tappable rows opening their pickers. Grouped
+                        // in one Column (like the Sort options) so the two rows sit together without a
+                        // big gap. Tag row shows only when tags are loaded; curator only for Steam users.
+                        if (availableTags.isNotEmpty() || showCuratorFilter) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -252,40 +252,29 @@ fun LibraryOptionsPanel(
                                     .padding(horizontal = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
-                                OptionListItem(
-                                    text = if (selectedTagIds.isEmpty())
-                                        stringResource(R.string.library_tag_filter_all)
-                                    else
-                                        stringResource(R.string.library_tag_filter_n_selected, selectedTagIds.size),
-                                    selected = selectedTagIds.isNotEmpty(),
-                                    onClick = onTagFilterDialogOpen,
-                                    icon = Icons.Default.LocalOffer,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(20.dp))
-                        }
-
-                        // Curator filter section — single tappable row opening the (single-select)
-                        // curator picker. Shown for Steam users; the followed list loads lazily on open.
-                        if (showCuratorFilter) {
-                            OptionSectionHeader(text = stringResource(R.string.library_curator_filter_title))
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .focusGroup()
-                                    .padding(horizontal = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
-                            ) {
-                                OptionListItem(
-                                    text = selectedCuratorName.ifEmpty {
-                                        stringResource(R.string.library_curator_filter_all)
-                                    },
-                                    selected = selectedCuratorName.isNotEmpty(),
-                                    onClick = onCuratorFilterDialogOpen,
-                                    icon = Icons.Default.Storefront,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
+                                if (availableTags.isNotEmpty()) {
+                                    OptionListItem(
+                                        text = if (selectedTagIds.isEmpty())
+                                            stringResource(R.string.library_tag_filter_title)
+                                        else
+                                            stringResource(R.string.library_tag_filter_n_selected, selectedTagIds.size),
+                                        selected = selectedTagIds.isNotEmpty(),
+                                        onClick = onTagFilterDialogOpen,
+                                        icon = Icons.Default.LocalOffer,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                                if (showCuratorFilter) {
+                                    OptionListItem(
+                                        text = selectedCuratorName.ifEmpty {
+                                            stringResource(R.string.library_curator_filter_title)
+                                        },
+                                        selected = selectedCuratorName.isNotEmpty(),
+                                        onClick = onCuratorFilterDialogOpen,
+                                        icon = Icons.Default.Storefront,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.height(20.dp))
                         }
