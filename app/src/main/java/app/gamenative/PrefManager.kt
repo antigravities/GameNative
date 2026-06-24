@@ -1067,6 +1067,13 @@ object PrefManager {
         get() = getPref(SELECTED_TAG_IDS, emptySet()).mapNotNull { it.toIntOrNull() }.toSet()
         set(value) { setPref(SELECTED_TAG_IDS, value.map { it.toString() }.toSet()) }
 
+    // Minimum Steam % positive reviews to show in the library (0 = filter off). When > 0, unrated
+    // games (review_percentage = 0) are hidden. Drives the review-rating slider in the options panel.
+    private val MIN_REVIEW_PERCENTAGE = intPreferencesKey("min_review_percentage")
+    var minReviewPercentage: Int
+        get() = getPref(MIN_REVIEW_PERCENTAGE, 0)
+        set(value) { setPref(MIN_REVIEW_PERCENTAGE, value) }
+
     // Timestamp (epoch ms) of the last successful Steam tag list fetch. Used to enforce a 30-day TTL.
     private val LAST_TAGS_FETCH_MS = longPreferencesKey("last_tags_fetch_ms")
     var lastTagsFetchMs: Long

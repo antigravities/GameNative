@@ -581,6 +581,15 @@ class LibraryViewModel @Inject constructor(
         onFilterApps()
     }
 
+    /** Sets the minimum Steam % positive review threshold (0 = off) and re-filters the list. */
+    fun onMinReviewChanged(value: Int) {
+        _state.update { s ->
+            PrefManager.minReviewPercentage = value
+            s.copy(minReviewPercentage = value)
+        }
+        onFilterApps()
+    }
+
     /** Clears all active tag filters and re-filters the list. */
     fun onTagFilterCleared() {
         PrefManager.selectedTagIds = emptySet()
@@ -1063,6 +1072,10 @@ class LibraryViewModel @Inject constructor(
             // FREE_TO_PLAY is an inclusion toggle (on by default): when off, hide is_free_app titles.
             val includeFreeToPlay = currentState.appInfoSortType.contains(AppFilter.FREE_TO_PLAY)
             fun freeToPlayMatches(item: SteamAppSummary): Boolean = includeFreeToPlay || !item.isFreeApp
+            // Review-rating filter: 0 = off; otherwise keep apps with % positive >= threshold.
+            // searchOwnedAppSummaries doesn't apply this in SQL (like free-to-play), so we filter here.
+            val minReview = currentState.minReviewPercentage
+            fun reviewMatches(item: SteamAppSummary): Boolean = minReview == 0 || item.reviewPercentage >= minReview
 
             val steamFilteredBeforeCompatibility: List<SteamAppSummary> =
                 if (currentState.searchQuery.isNotBlank()) {
@@ -1085,6 +1098,7 @@ class LibraryViewModel @Inject constructor(
                             .filter { sharedMatches(it) }
                             .filter { installedMatches(it) }
                             .filter { freeToPlayMatches(it) }
+                            .filter { reviewMatches(it) }
                             .filter { item ->
                                 // When hide adult content is on, exclude games with any adult descriptor ID.
                                 !PrefManager.hideAdultContent ||
@@ -1102,6 +1116,7 @@ class LibraryViewModel @Inject constructor(
                         .filter { sharedMatches(it) }
                         .filter { installedMatches(it) }
                         .filter { freeToPlayMatches(it) }
+                        .filter { reviewMatches(it) }
                         .filter { item ->
                             // When hide adult content is on, exclude games with any adult descriptor ID.
                             !PrefManager.hideAdultContent ||
@@ -1598,6 +1613,8 @@ class LibraryViewModel @Inject constructor(
         val includeExpired = if (currentState.appInfoSortType.contains(AppFilter.EXPIRED)) 1 else 0
         // FREE_TO_PLAY is an inclusion toggle (on by default): when off, hide is_free_app titles.
         val includeFreeToPlay = if (currentState.appInfoSortType.contains(AppFilter.FREE_TO_PLAY)) 1 else 0
+        // Review-rating threshold (0 = off): hide apps below this % positive in SQL.
+        val minReview = currentState.minReviewPercentage
         val search = currentState.searchQuery
 
         // Hidden / Favorites / Category live in CategoryManager as composite ids ("STEAM_570"); the
@@ -1651,7 +1668,7 @@ class LibraryViewModel @Inject constructor(
         val signature = listOf(
             currentState.currentSortOption, search, currentTab,
             includeSteam, includeOpen, includeGOG, includeEpic, includeAmazon,
-            installedFilter, hideAdult, includeExpired, includeFreeToPlay, typeCodes,
+            installedFilter, hideAdult, includeExpired, includeFreeToPlay, minReview, typeCodes,
             favoriteComposite.hashCode(), hiddenComposite.hashCode(), categoryHash,
             selectedTagIds.hashCode(),
             filterByCurator, selectedCuratorId,
@@ -1748,9 +1765,9 @@ class LibraryViewModel @Inject constructor(
         val steamCountable = typeCodes.isNotEmpty()
         val steamBadgeCount = if (steamCountable) {
             if (installedFilter) {
-                steamAppDao.countInstalledOwnedAppSummaries(typeCodes, search, hideAdult, listOf(-1), 0, listOf(-1), includeExpired = includeExpired, includeFreeToPlay = includeFreeToPlay)
+                steamAppDao.countInstalledOwnedAppSummaries(typeCodes, search, hideAdult, listOf(-1), 0, listOf(-1), includeExpired = includeExpired, includeFreeToPlay = includeFreeToPlay, minReviewPercentage = minReview)
             } else {
-                steamAppDao.countOwnedAppSummaries(typeCodes, search, hideAdult, listOf(-1), 0, listOf(-1), includeExpired = includeExpired, includeFreeToPlay = includeFreeToPlay)
+                steamAppDao.countOwnedAppSummaries(typeCodes, search, hideAdult, listOf(-1), 0, listOf(-1), includeExpired = includeExpired, includeFreeToPlay = includeFreeToPlay, minReviewPercentage = minReview)
             }
         } else {
             0
@@ -1817,6 +1834,7 @@ class LibraryViewModel @Inject constructor(
                 limit = null,
                 includeExpired = includeExpired,
                 includeFreeToPlay = includeFreeToPlay,
+                minReviewPercentage = minReview,
                 projection = LibraryProjection.STUB,
                 filterByTag = filterByTag,
                 tagIds = tagParam,

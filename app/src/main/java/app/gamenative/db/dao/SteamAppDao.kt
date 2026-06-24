@@ -76,7 +76,10 @@ private const val LIBRARY_FILTERS =
     "AND (:hideAdult = 0 OR app.is_adult = 0) " +
     "AND app.id NOT IN (:hiddenIds) " +
     "AND (:filterByCategory = 0 OR app.id IN (:categoryIds)) " +
-    "AND (:includeFreeToPlay = 1 OR app.is_free_app = 0) "
+    "AND (:includeFreeToPlay = 1 OR app.is_free_app = 0) " +
+    // Review-rating filter: bypassed when :minReviewPercentage = 0; otherwise keeps apps whose
+    // % positive meets the threshold. Unrated rows (review_percentage = 0) fall out when > 0.
+    "AND (:minReviewPercentage = 0 OR app.review_percentage >= :minReviewPercentage) "
 
 // The summary projection (kept in sync with the other *AppSummaries queries). Excludes the heavy
 // depots/config/branches/ufs blobs so a page row stays light. Columns are qualified with the `app`
@@ -124,6 +127,7 @@ fun buildLibraryPageQuery(
     invalidPkgId: Int = INVALID_PKG_ID,
     includeExpired: Int = 0,
     includeFreeToPlay: Int = 1,
+    minReviewPercentage: Int = 0,
     projection: LibraryProjection = LibraryProjection.SUMMARY,
     filterByTag: Int = 0,
     tagIds: List<Int> = listOf(-1),
@@ -180,6 +184,10 @@ fun buildLibraryPageQuery(
     // Free-to-play filter: when off (includeFreeToPlay = 0), hide apps flagged is_free_app.
     sb.append("AND (? = 1 OR app.is_free_app = 0) ")
     args.add(includeFreeToPlay)
+    // Review-rating filter: bypassed when minReviewPercentage = 0; otherwise keep apps whose
+    // % positive meets the threshold (unrated rows with review_percentage = 0 fall out when > 0).
+    sb.append("AND (? = 0 OR app.review_percentage >= ?) ")
+    args.add(minReviewPercentage); args.add(minReviewPercentage)
     // Tag filter: matches if the app's store_tags JSON array contains ANY of the selected tag IDs.
     // json_each() is available on all Android versions the app targets (SQLite 3.9+ with JSON1).
     // Callers pass [-1] as tagIds when not filtering, so the IN () case never arises.
@@ -468,6 +476,7 @@ interface SteamAppDao {
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Int = 0,
         includeFreeToPlay: Int = 1,
+        minReviewPercentage: Int = 0,
     ): Int
 
     // Installed-only COUNT variant: INNER JOIN app_info on is_downloaded = 1 (matching
@@ -489,6 +498,7 @@ interface SteamAppDao {
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Int = 0,
         includeFreeToPlay: Int = 1,
+        minReviewPercentage: Int = 0,
     ): Int
 
     // Fetches only id + depots for owned apps. Used by the background sizeBytes computation job

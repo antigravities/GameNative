@@ -1,6 +1,7 @@
 package app.gamenative.ui.screen.library.components
 
 import android.content.res.Configuration
+import androidx.annotation.StringRes
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -52,6 +53,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.filled.Bookmark
@@ -103,6 +105,8 @@ fun LibraryOptionsPanel(
     selectedTagIds: Set<Int> = emptySet(),
     availableTags: List<SteamTag> = emptyList(),
     onTagFilterDialogOpen: () -> Unit = {},
+    minReviewPercentage: Int = 0,
+    onMinReviewChanged: (Int) -> Unit = {},
     showCuratorFilter: Boolean = false,
     selectedCuratorName: String = "",
     onCuratorFilterDialogOpen: () -> Unit = {},
@@ -286,6 +290,47 @@ fun LibraryOptionsPanel(
                             Spacer(modifier = Modifier.height(20.dp))
                         }
 
+                        // Review-rating filter section — a slider for the minimum Steam % positive.
+                        // Held in local state so dragging is smooth; we only re-filter
+                        // (onMinReviewChanged) on release via onValueChangeFinished — committing on
+                        // every frame would re-query ~45k rows per drag step. Synced back to the
+                        // incoming prop with a LaunchedEffect so external resets are reflected.
+                        OptionSectionHeader(text = stringResource(R.string.filter_min_review_heading))
+                        var reviewSliderValue by remember { mutableStateOf(minReviewPercentage.toFloat()) }
+                        LaunchedEffect(minReviewPercentage) {
+                            reviewSliderValue = minReviewPercentage.toFloat()
+                        }
+                        val reviewInt = reviewSliderValue.toInt()
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                text = if (reviewInt == 0) {
+                                    stringResource(R.string.filter_min_review_any)
+                                } else {
+                                    stringResource(
+                                        R.string.filter_min_review_value,
+                                        reviewInt,
+                                        stringResource(reviewBucketRes(reviewInt)),
+                                    )
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Slider(
+                                value = reviewSliderValue,
+                                onValueChange = { reviewSliderValue = it },
+                                onValueChangeFinished = { onMinReviewChanged(reviewSliderValue.toInt()) },
+                                valueRange = 0f..100f,
+                                steps = 19, // 0..100 in 5% increments
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
                         OptionSectionHeader(text = stringResource(R.string.options_sort_by))
                         Column(
                             modifier = Modifier
@@ -371,8 +416,6 @@ fun LibraryOptionsPanel(
                                 }
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(20.dp))
 
                         OptionSectionHeader(text = stringResource(R.string.library_layout_title))
                         Column(
@@ -476,6 +519,19 @@ private fun Preview_LibraryOptionsPanel() {
             }
         }
     }
+}
+
+// Maps a % positive threshold to the closest Steam review-summary bucket name. This is a
+// display-only approximation: Steam's real buckets also weight review count, which we don't have
+// here, so the label is a guide rather than an exact reproduction of the store rating.
+@StringRes
+private fun reviewBucketRes(percentage: Int): Int = when {
+    percentage >= 95 -> R.string.review_bucket_overwhelmingly_positive
+    percentage >= 80 -> R.string.review_bucket_very_positive
+    percentage >= 70 -> R.string.review_bucket_mostly_positive
+    percentage >= 40 -> R.string.review_bucket_mixed
+    percentage >= 20 -> R.string.review_bucket_mostly_negative
+    else -> R.string.review_bucket_negative
 }
 
 private fun SortOption.icon(): ImageVector = when (this) {

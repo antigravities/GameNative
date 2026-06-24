@@ -721,6 +721,16 @@
     <string name="app_filter_family">Family</string>
     <string name="app_filter_free_to_play">Free to Play</string>
     <string name="filter_expired">Expired</string>
+    <!-- Review-rating slider in the library options panel -->
+    <string name="filter_min_review_heading">Filter by review rating</string>
+    <string name="filter_min_review_any">Any</string>
+    <string name="filter_min_review_value">%1$d%%+ · %2$s</string>
+    <string name="review_bucket_overwhelmingly_positive">Overwhelmingly Positive</string>
+    <string name="review_bucket_very_positive">Very Positive</string>
+    <string name="review_bucket_mostly_positive">Mostly Positive</string>
+    <string name="review_bucket_mixed">Mixed</string>
+    <string name="review_bucket_mostly_negative">Mostly Negative</string>
+    <string name="review_bucket_negative">Negative</string>
     <string name="filter_playable">Playable (30+ FPS)</string>
     <string name="filter_five_star_device">5-star reviews on device</string>
     <string name="filter_five_star_gpu">5-star reviews on GPU</string>

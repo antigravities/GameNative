@@ -88,6 +88,8 @@ data class LibraryState(
 
     // Active Steam store tag ID filters (empty = no filtering; tags are OR-ed together)
     val selectedTagIds: Set<Int> = PrefManager.selectedTagIds,
+    // Minimum Steam % positive reviews to show (0 = filter off). Unrated games hidden when > 0.
+    val minReviewPercentage: Int = PrefManager.minReviewPercentage,
     // All known Steam tags, populated on first library open from the steam_tag DB table.
     val availableTags: List<SteamTag> = emptyList(),
 
