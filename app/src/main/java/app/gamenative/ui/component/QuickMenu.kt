@@ -17,6 +17,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -97,6 +98,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -927,12 +931,33 @@ fun QuickMenu(
                             modifier = Modifier
                                 .fillMaxSize(),
                         ) {
-                            Text(
-                                text = stringResource(selectedTabLabelResId),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = stringResource(selectedTabLabelResId),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                // Google ML Kit Translate attribution badge (required by Google's branding
+                                // terms); shown only on the Translate tab, right-aligned beside the header.
+                                if (selectedTab == QuickMenuTab.TRANSLATE) {
+                                    Image(
+                                        painter = painterResource(R.drawable.translations_by_google_white),
+                                        contentDescription = stringResource(R.string.translate_attribution),
+                                        // The logo is very wide (~7.6:1); with the default ContentScale.Fit
+                                        // the intrinsic WIDTH binds the rendered size, so .height() has no
+                                        // visible effect. Drive the width with FillWidth instead so it
+                                        // scales up uniformly (height follows the aspect ratio).
+                                        contentScale = ContentScale.FillWidth,
+                                        modifier = Modifier.width(150.dp),
+                                    )
+                                }
+                            }
 
                             HorizontalDivider(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),

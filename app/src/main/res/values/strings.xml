@@ -349,6 +349,7 @@
     <string name="tools_wine_processes_empty">No running EXEs detected.</string>
     <!-- In-game Quick Menu: Screen Translation tab -->
     <string name="translate_tab_title">Translate</string>
+    <string name="translate_attribution">Translations by Google</string>
     <string name="translate_live">Live translation</string>
     <string name="translate_source">Source language</string>
     <string name="translate_target">Target language</string>
