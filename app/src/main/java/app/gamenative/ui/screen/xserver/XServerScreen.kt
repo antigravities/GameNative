@@ -250,6 +250,15 @@ private const val DEFAULT_FPS_LIMITER_TARGET_HZ = 60
 private const val FPS_LIMITER_ENABLED_EXTRA = "fpsLimiterEnabled"
 private const val FPS_LIMITER_TARGET_EXTRA = "fpsLimiterTarget"
 
+// Per-container screen-translation settings. Stored in container extras (not PrefManager) so each
+// game remembers its own translation config — most games don't need machine translation.
+private const val TRANSLATION_ENABLED_EXTRA = "translationEnabled"
+private const val TRANSLATION_SOURCE_LANG_EXTRA = "translationSourceLang"
+private const val TRANSLATION_TARGET_LANG_EXTRA = "translationTargetLang"
+private const val TRANSLATION_INTERVAL_MS_EXTRA = "translationIntervalMs"
+private const val TRANSLATION_OPACITY_EXTRA = "translationOpacity"
+private const val TRANSLATION_OCR_MAX_WIDTH_EXTRA = "translationOcrMaxWidth"
+
 private fun initialFpsLimiterEnabled(container: Container): Boolean =
     parseBooleanExtra(container.getExtra(FPS_LIMITER_ENABLED_EXTRA)) ?: true
 
@@ -486,13 +495,28 @@ fun XServerScreen(
     // --- On-device screen translation (ML Kit OCR + Translate) ---------------------------------
     val screenTranslator = remember { ScreenTranslator() }
     val translationOverlayState by screenTranslator.state.collectAsState()
-    // Quick Menu-editable config, seeded from persisted prefs so the tab restores last state.
-    var translationEnabled by rememberSaveable { mutableStateOf(PrefManager.screenTranslationEnabled) }
-    var translationSourceLang by rememberSaveable { mutableStateOf(PrefManager.screenTranslationSourceLang) }
-    var translationTargetLang by rememberSaveable { mutableStateOf(PrefManager.screenTranslationTargetLang) }
-    var translationIntervalMs by rememberSaveable { mutableStateOf(PrefManager.screenTranslationIntervalMs) }
-    var translationOpacity by rememberSaveable { mutableStateOf(PrefManager.screenTranslationOpacity) }
-    var translationOcrMaxWidth by rememberSaveable { mutableStateOf(PrefManager.screenTranslationOcrMaxWidth) }
+    // Quick Menu-editable config, seeded PER-CONTAINER from container extras so each game remembers its
+    // own translation settings. `enabled` defaults to false (per-game opt-in — most games don't need
+    // translation); the rest fall back to the PrefManager global as a "last-used default" for games
+    // that have never configured translation. Keyed on container.id like the FPS-limiter settings.
+    var translationEnabled by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_ENABLED_EXTRA, "false").toBoolean())
+    }
+    var translationSourceLang by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_SOURCE_LANG_EXTRA, PrefManager.screenTranslationSourceLang))
+    }
+    var translationTargetLang by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_TARGET_LANG_EXTRA, PrefManager.screenTranslationTargetLang))
+    }
+    var translationIntervalMs by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_INTERVAL_MS_EXTRA, PrefManager.screenTranslationIntervalMs.toString()).toIntOrNull() ?: PrefManager.screenTranslationIntervalMs)
+    }
+    var translationOpacity by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_OPACITY_EXTRA, PrefManager.screenTranslationOpacity.toString()).toFloatOrNull() ?: PrefManager.screenTranslationOpacity)
+    }
+    var translationOcrMaxWidth by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_OCR_MAX_WIDTH_EXTRA, PrefManager.screenTranslationOcrMaxWidth.toString()).toIntOrNull() ?: PrefManager.screenTranslationOcrMaxWidth)
+    }
     // Stable callbacks instance — remembered so QuickMenu doesn't see a new lambda holder each
     // recomposition. The lambdas write through the delegated state vars above (stable MutableStates).
     val translationCallbacks = remember {
@@ -533,6 +557,20 @@ fun XServerScreen(
         } else {
             screenTranslator.stop()
         }
+    }
+    // Persist translation settings per-container. Separate from the setConfig effect above (which must
+    // stay un-debounced for live updates): opacity/interval are continuous sliders and saveData() is a
+    // synchronous disk write, so debounce with a short delay — the relaunch-on-change cancels the prior
+    // delay so the write only fires once the user settles.
+    LaunchedEffect(translationEnabled, translationSourceLang, translationTargetLang, translationIntervalMs, translationOpacity, translationOcrMaxWidth) {
+        delay(500)
+        container.putExtra(TRANSLATION_ENABLED_EXTRA, translationEnabled)
+        container.putExtra(TRANSLATION_SOURCE_LANG_EXTRA, translationSourceLang)
+        container.putExtra(TRANSLATION_TARGET_LANG_EXTRA, translationTargetLang)
+        container.putExtra(TRANSLATION_INTERVAL_MS_EXTRA, translationIntervalMs)
+        container.putExtra(TRANSLATION_OPACITY_EXTRA, translationOpacity)
+        container.putExtra(TRANSLATION_OCR_MAX_WIDTH_EXTRA, translationOcrMaxWidth)
+        container.saveData()
     }
     // Stop the loop and release ML Kit clients when leaving the session.
     DisposableEffect(Unit) {
