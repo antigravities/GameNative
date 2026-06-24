@@ -89,6 +89,21 @@ object PrefManager {
             }
             setPref(FREE_TO_PLAY_FILTER_MIGRATED, true)
         }
+
+        // One-time: adult-content filtering moved from the standalone hideAdultContent preference
+        // into the ADULT library-filter chip (on by default = show adult). Back-fill the bit for
+        // existing users, OR-ing it in UNLESS they had previously enabled "Hide adult content" — in
+        // which case we leave ADULT off so their library stays filtered. -1 = brand new user (the
+        // getter default already includes ADULT), so nothing to do.
+        if (!getPref(ADULT_FILTER_MIGRATED, false)) {
+            val saved = getPref(LIBRARY_FILTER, -1)
+            if (saved != -1) {
+                val set = AppFilter.fromFlags(saved)
+                if (!getPref(HIDE_ADULT_CONTENT, false)) set.add(AppFilter.ADULT)
+                libraryFilter = set
+            }
+            setPref(ADULT_FILTER_MIGRATED, true)
+        }
     }
 
     fun clearPreferences() {
@@ -1096,9 +1111,12 @@ object PrefManager {
     // One-time flag: tracks whether the FREE_TO_PLAY filter bit has been back-filled into an
     // existing user's saved library filter (see init()).
     private val FREE_TO_PLAY_FILTER_MIGRATED = booleanPreferencesKey("ftp_filter_migrated")
+    // One-time flag: tracks whether the ADULT filter bit has been back-filled into an existing
+    // user's saved library filter, honoring their old hideAdultContent preference (see init()).
+    private val ADULT_FILTER_MIGRATED = booleanPreferencesKey("adult_filter_migrated")
     var libraryFilter: EnumSet<AppFilter>
         get() {
-            val value = getPref(LIBRARY_FILTER, AppFilter.toFlags(EnumSet.of(AppFilter.GAME, AppFilter.SHARED, AppFilter.FREE_TO_PLAY)))
+            val value = getPref(LIBRARY_FILTER, AppFilter.toFlags(EnumSet.of(AppFilter.GAME, AppFilter.SHARED, AppFilter.FREE_TO_PLAY, AppFilter.ADULT)))
             return AppFilter.fromFlags(value)
         }
         set(value) {

@@ -1076,6 +1076,8 @@ class LibraryViewModel @Inject constructor(
             // searchOwnedAppSummaries doesn't apply this in SQL (like free-to-play), so we filter here.
             val minReview = currentState.minReviewPercentage
             fun reviewMatches(item: SteamAppSummary): Boolean = minReview == 0 || item.reviewPercentage >= minReview
+            // ADULT is an inclusion toggle (on by default): when off, hide games with an adult descriptor.
+            val includeAdult = currentState.appInfoSortType.contains(AppFilter.ADULT)
 
             val steamFilteredBeforeCompatibility: List<SteamAppSummary> =
                 if (currentState.searchQuery.isNotBlank()) {
@@ -1100,8 +1102,8 @@ class LibraryViewModel @Inject constructor(
                             .filter { freeToPlayMatches(it) }
                             .filter { reviewMatches(it) }
                             .filter { item ->
-                                // When hide adult content is on, exclude games with any adult descriptor ID.
-                                !PrefManager.hideAdultContent ||
+                                // When the ADULT chip is off, exclude games with any adult descriptor ID.
+                                includeAdult ||
                                     item.contentDescriptors.none { it in adultDescriptorIds }
                             }
                             .toList()
@@ -1118,8 +1120,8 @@ class LibraryViewModel @Inject constructor(
                         .filter { freeToPlayMatches(it) }
                         .filter { reviewMatches(it) }
                         .filter { item ->
-                            // When hide adult content is on, exclude games with any adult descriptor ID.
-                            !PrefManager.hideAdultContent ||
+                            // When the ADULT chip is off, exclude games with any adult descriptor ID.
+                            includeAdult ||
                                 item.contentDescriptors.none { it in adultDescriptorIds }
                         }
                         .toList()
@@ -1609,7 +1611,8 @@ class LibraryViewModel @Inject constructor(
             AmazonService.hasStoredCredentials(context)
 
         val installedFilter = currentTab.installedOnly || currentState.appInfoSortType.contains(AppFilter.INSTALLED)
-        val hideAdult = if (PrefManager.hideAdultContent) 1 else 0
+        // ADULT is an inclusion toggle (on by default): when off, hide is_adult titles.
+        val hideAdult = if (currentState.appInfoSortType.contains(AppFilter.ADULT)) 0 else 1
         val includeExpired = if (currentState.appInfoSortType.contains(AppFilter.EXPIRED)) 1 else 0
         // FREE_TO_PLAY is an inclusion toggle (on by default): when off, hide is_free_app titles.
         val includeFreeToPlay = if (currentState.appInfoSortType.contains(AppFilter.FREE_TO_PLAY)) 1 else 0

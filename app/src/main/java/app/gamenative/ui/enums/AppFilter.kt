@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.AvTimer
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Diversity3
+import androidx.compose.material.icons.filled.Explicit
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.MoneyOff
@@ -95,6 +96,11 @@ enum class AppFilter(
         code = 0x1000,
         displayTextRes = R.string.app_filter_free_to_play,
         icon = Icons.Default.MoneyOff,
+    ),
+    ADULT(
+        code = 0x2000,
+        displayTextRes = R.string.app_filter_adult,
+        icon = Icons.Default.Explicit,
     ),
     // ALPHABETIC(
     //     code = 0x20,
