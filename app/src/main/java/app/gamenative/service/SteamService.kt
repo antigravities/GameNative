@@ -3711,6 +3711,25 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         }
 
+        /**
+         * Debug-only: wipes the cached curator data so it re-fetches fresh from Steam. Deletes the
+         * cached recommendation rows and the followed-curator list (deleting the curator rows also
+         * drops their recommendations_fetched_at timestamps), then resets the followed-list TTL
+         * marker. The followed list re-downloads on the next fresh LibraryViewModel (app restart),
+         * since loadCurators() guards its network refresh with a per-VM flag.
+         */
+        fun clearCuratorCache() {
+            with(instance!!) {
+                scope.launch {
+                    db.withTransaction {
+                        db.steamCuratorRecommendationDao().deleteAll()
+                        db.steamCuratorDao().deleteAll()
+                    }
+                    PrefManager.lastCuratorsFetchMs = 0L
+                }
+            }
+        }
+
         private fun cancelLongLivedSteamJobs() {
             // Cancel previous continuous jobs or else they will continue to run even after logout
             instance?.picsGetProductInfoJob?.cancel()

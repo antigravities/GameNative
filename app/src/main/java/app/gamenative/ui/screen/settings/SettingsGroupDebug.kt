@@ -388,6 +388,22 @@ fun SettingsGroupDebug() {
             subtitle = { Text(text = stringResource(R.string.settings_debug_clear_cache_subtitle)) },
             onClick = {},
         )
+
+        SettingsMenuLink(
+            modifier = Modifier.combinedClickable(
+                onLongClick = {
+                    SteamService.clearCuratorCache()
+                    SnackbarManager.show(context.getString(R.string.settings_debug_clear_curator_done))
+                },
+                onClick = {
+                    SnackbarManager.show("Long click to activate")
+                },
+            ),
+            colors = settingsTileColorsDebug(),
+            title = { Text(text = stringResource(R.string.settings_debug_clear_curator_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_debug_clear_curator_subtitle)) },
+            onClick = {},
+        )
     }
 }
 

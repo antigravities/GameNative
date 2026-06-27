@@ -133,11 +133,14 @@ import app.gamenative.ui.data.GameDisplayInfo
 import app.gamenative.ui.enums.AppOptionMenuType
 import app.gamenative.ui.internal.fakeAppInfo
 import app.gamenative.ui.screen.library.appscreen.AmazonAppScreen
+import app.gamenative.ui.screen.library.appscreen.BaseAppScreen
+import app.gamenative.ui.screen.library.appscreen.KnownConfigInstallState
 import app.gamenative.ui.screen.library.appscreen.CustomGameAppScreen
 import app.gamenative.ui.screen.library.appscreen.EpicAppScreen
 import app.gamenative.ui.screen.library.appscreen.GOGAppScreen
 import app.gamenative.ui.screen.library.appscreen.SteamAppScreen
 import app.gamenative.ui.screen.library.components.GameOptionsPanel
+import app.gamenative.ui.util.ContainerConfigTransfer
 import app.gamenative.utils.HltbService
 import app.gamenative.ui.theme.PluviaTheme
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1331,7 +1334,11 @@ internal fun AppScreenContent(
             // Curator review (shown only when a curator filter is active and that curator reviewed
             // this game). Sits above achievements, below game information.
             if (curatorReview != null) {
-                CuratorReviewSection(review = curatorReview)
+                CuratorReviewSection(
+                    review = curatorReview,
+                    appId = displayInfo.appId,
+                    gameId = displayInfo.gameId,
+                )
             }
 
             // Achievements row (Steam only for now, shown when data is available)
@@ -1460,8 +1467,70 @@ fun GameMigrationDialog(
 
 @SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
-private fun CuratorReviewSection(review: app.gamenative.ui.data.CuratorReviewDisplay) {
+private fun CuratorReviewSection(
+    review: app.gamenative.ui.data.CuratorReviewDisplay,
+    appId: String,
+    gameId: Int,
+) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Curators encode a downloadable container-config behind the "Read full review" link using the
+    // sentinel scheme "https://armconfig@<host>/...". When present we swap the link for an
+    // "Apply curator-suggested configuration" button instead of opening the URL in a browser.
+    val isCuratorConfig = review.reviewUrl.startsWith("https://armconfig@", ignoreCase = true)
+    var showApplyConfirm by remember(review.reviewUrl) { mutableStateOf(false) }
+    var applying by remember(review.reviewUrl) { mutableStateOf(false) }
+
+    if (showApplyConfirm) {
+        AlertDialog(
+            onDismissRequest = { showApplyConfirm = false },
+            title = { Text(text = stringResource(R.string.curator_config_confirm_title)) },
+            text = { Text(text = stringResource(R.string.curator_config_confirm_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showApplyConfirm = false
+                    // Strip the sentinel "armconfig@" userinfo to recover the real download URL.
+                    val downloadUrl = review.reviewUrl.replaceFirst(
+                        "https://armconfig@", "https://", ignoreCase = true,
+                    )
+                    applying = true
+                    scope.launch {
+                        try {
+                            ContainerConfigTransfer.applyConfigFromUrl(
+                                context = context,
+                                appId = appId,
+                                url = downloadUrl,
+                                onInstallStateChange = { visible, progress, label ->
+                                    if (visible) {
+                                        BaseAppScreen.showKnownConfigInstallState(
+                                            gameId,
+                                            KnownConfigInstallState(
+                                                visible = true,
+                                                progress = progress,
+                                                label = label,
+                                            ),
+                                        )
+                                    } else {
+                                        BaseAppScreen.hideKnownConfigInstallState(gameId)
+                                    }
+                                },
+                            )
+                        } finally {
+                            applying = false
+                        }
+                    }
+                }) {
+                    Text(text = stringResource(R.string.curator_config_confirm_apply))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showApplyConfirm = false }) {
+                    Text(text = stringResource(android.R.string.cancel))
+                }
+            },
+        )
+    }
 
     Spacer(modifier = Modifier.height(10.dp))
 
@@ -1516,11 +1585,17 @@ private fun CuratorReviewSection(review: app.gamenative.ui.data.CuratorReviewDis
                 )
             }
 
-            // Date and (when the curator supplied one) the "Read full review" link on one line, e.g.
-            // "June 13, 2026 · Read full review". The link is a clickable Text styled as a link.
+            Timber.tag("CuratorReviewSection").d(review.reviewUrl)
+
+            // Date and (when the curator supplied one) the action link on one line, e.g.
+            // "June 13, 2026 · Read full review". For a normal review the link opens the URL; for the
+            // curator-config sentinel it instead reads "Apply curator-suggested configuration" and
+            // opens the confirm dialog. Both are clickable Text styled as a link.
             val hasDate = review.reviewDate.isNotBlank()
             val hasUrl = review.reviewUrl.isNotBlank()
-            if (hasDate || hasUrl) {
+            val showLink = hasUrl && !isCuratorConfig
+            val showConfigLink = hasUrl && isCuratorConfig
+            if (hasDate || showLink || showConfigLink) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (hasDate) {
                         Text(
@@ -1529,7 +1604,7 @@ private fun CuratorReviewSection(review: app.gamenative.ui.data.CuratorReviewDis
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    if (hasUrl) {
+                    if (showLink) {
                         if (hasDate) {
                             Text(
                                 text = " · ",
@@ -1544,6 +1619,33 @@ private fun CuratorReviewSection(review: app.gamenative.ui.data.CuratorReviewDis
                             modifier = Modifier.clickable {
                                 val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(review.reviewUrl))
                                 context.startActivity(intent)
+                            },
+                        )
+                    }
+                    if (showConfigLink) {
+                        if (hasDate) {
+                            Text(
+                                text = " · ",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        // While applying, drop the click handler and dim the text so it can't be
+                        // re-triggered (the shared install overlay shows the actual progress).
+                        Text(
+                            text = stringResource(
+                                if (applying) R.string.curator_review_applying
+                                else R.string.curator_review_apply_config,
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (applying)
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            else
+                                MaterialTheme.colorScheme.primary,
+                            modifier = if (applying) {
+                                Modifier
+                            } else {
+                                Modifier.clickable { showApplyConfirm = true }
                             },
                         )
                     }

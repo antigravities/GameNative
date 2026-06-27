@@ -92,13 +92,15 @@ private val REC_TYPE_REGEX = Regex("""color_(recommended|informational|not_recom
 private val REC_DESC_REGEX =
     Regex("""<div class="recommendation_desc">(.*?)</div>""", RegexOption.DOT_MATCHES_ALL)
 private val REC_DATE_REGEX = Regex("""<span class="curator_review_date">(.*?)</span>""")
-// The curator's "Read the full review" link — the curator-SUPPLIED review URL (a Steam news /
-// community-announcement page), present only when the curator attached one. NOT the recommendation_link
-// (that's just the game's store page). It's the only anchor whose text is exactly "Read the full
-// review", so matching on the link text targets it unambiguously. [^>]* can't cross '>' so the capture
-// stays within one opening tag whose '>' is immediately followed by the link text.
+// The curator's "Read the full review" link — the curator-SUPPLIED review URL, present only when the
+// curator attached one. NOT the recommendation_link (that's just the game's store page). It's the
+// only anchor whose text starts with "Read the full review", so matching on the link text targets it
+// unambiguously. [^>]* can't cross '>' so the capture stays within one opening tag whose '>' is
+// immediately followed by the link text. We deliberately do NOT require the closing </a>: Steam
+// appends a host suffix (e.g. `&nbsp;<span class="bb_link_host">[host]</span>`) before </a> for
+// bbcode links, which an over-strict pattern would miss.
 private val REC_LINK_REGEX =
-    Regex("""<a\b[^>]*\bhref="([^"]*)"[^>]*>\s*Read (?:the )?full review\s*</a>""", RegexOption.IGNORE_CASE)
+    Regex("""<a\b[^>]*\bhref="([^"]*)"[^>]*>\s*Read (?:the )?full review""", RegexOption.IGNORE_CASE)
 
 /**
  * Fetches the games a curator has reviewed, keeping only "Recommended" and "Informational" entries
@@ -140,7 +142,10 @@ suspend fun fetchCuratorRecommendations(
 
                 val blurb = REC_DESC_REGEX.find(block)?.groupValues?.get(1)?.let { unescapeHtml(it.trim()) } ?: ""
                 val date = REC_DATE_REGEX.find(block)?.groupValues?.get(1)?.trim().orEmpty()
-                val url = REC_LINK_REGEX.find(block)?.groupValues?.get(1)?.let { unescapeHtml(it.trim()) }.orEmpty()
+                val url = REC_LINK_REGEX.find(block)?.groupValues?.get(1)
+                    ?.let { unescapeHtml(it.trim()) }
+                    ?.let { resolveCuratorLink(it) }
+                    .orEmpty()
                 result.add(SteamCuratorRecommendation(curatorId, appId, type, blurb, date, url))
             }
 
@@ -155,6 +160,24 @@ suspend fun fetchCuratorRecommendations(
 
     Timber.tag("SteamCuratorFetcher").d("Fetched ${result.size} recommendations for curator $curatorId")
     result
+}
+
+// Steam wraps curator-supplied external links in a redirect:
+//   https://steamcommunity.com/linkfilter/?u=<percent-encoded real URL>   (older form: ?url=)
+// Recover the real URL so sentinels like the armconfig@ prefix survive; non-linkfilter hrefs and any
+// decode failure pass through unchanged.
+private fun resolveCuratorLink(rawHref: String): String = try {
+    if (rawHref.contains("/linkfilter/")) {
+        val query = rawHref.substringAfter('?', "")
+        val enc = query.split('&')
+            .firstOrNull { it.startsWith("u=") || it.startsWith("url=") }
+            ?.substringAfter('=')
+        if (enc.isNullOrEmpty()) rawHref else java.net.URLDecoder.decode(enc, "UTF-8")
+    } else {
+        rawHref
+    }
+} catch (e: Exception) {
+    rawHref
 }
 
 // Minimal HTML entity unescape for the short curator blurbs (full HTML parsing is overkill here).

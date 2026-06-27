@@ -22,4 +22,8 @@ interface SteamCuratorRecommendationDao {
 
     @Query("DELETE FROM steam_curator_recommendation WHERE curator_id = :curatorId")
     suspend fun deleteByCurator(curatorId: Long)
+
+    // Debug-only: wipe every curator's cached recommendations so they re-fetch from Steam.
+    @Query("DELETE FROM steam_curator_recommendation")
+    suspend fun deleteAll()
 }

@@ -8,6 +8,7 @@ import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.utils.BestConfigService
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.ManifestInstaller
+import app.gamenative.utils.Net
 import java.io.IOException
 import kotlin.text.Charsets
 import kotlinx.coroutines.CancellationException
@@ -18,6 +19,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import okhttp3.Request
 import org.json.JSONObject
 
 object ContainerConfigTransfer {
@@ -71,12 +73,59 @@ object ContainerConfigTransfer {
         uri: Uri,
         onInstallStateChange: ((visible: Boolean, progress: Float, label: String) -> Unit)? = null,
     ): Boolean {
-        return try {
-            val jsonText =
-                withContext(Dispatchers.IO) {
-                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                }.orEmpty()
+        // Read the config JSON from the user-picked document, then hand off to the shared
+        // apply pipeline (same logic used by applyConfigFromUrl).
+        val jsonText =
+            withContext(Dispatchers.IO) {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }.orEmpty()
+        return applyConfigJson(context, appId, jsonText, onInstallStateChange)
+    }
 
+    /**
+     * Downloads a container-config JSON from [url] (a plain https URL — the caller is responsible
+     * for stripping any sentinel such as the curator `armconfig@` prefix) and applies it to the
+     * container for [appId] through the same pipeline as a manual file import.
+     */
+    suspend fun applyConfigFromUrl(
+        context: Context,
+        appId: String,
+        url: String,
+        onInstallStateChange: ((visible: Boolean, progress: Float, label: String) -> Unit)? = null,
+    ): Boolean {
+        val jsonText =
+            try {
+                withContext(Dispatchers.IO) {
+                    // Use the app's shared OkHttp client (DoH-enabled), same as the curator fetcher.
+                    val request = Request.Builder().url(url).build()
+                    Net.http.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            throw IOException("HTTP ${response.code}")
+                        }
+                        response.body?.string().orEmpty()
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                SnackbarManager.show(
+                    context.getString(
+                        R.string.best_config_apply_failed,
+                        e.message ?: "Download error",
+                    ),
+                )
+                return false
+            }
+        return applyConfigJson(context, appId, jsonText, onInstallStateChange)
+    }
+
+    private suspend fun applyConfigJson(
+        context: Context,
+        appId: String,
+        jsonText: String,
+        onInstallStateChange: ((visible: Boolean, progress: Float, label: String) -> Unit)? = null,
+    ): Boolean {
+        return try {
             if (jsonText.isBlank()) {
                 SnackbarManager.show(
                     context.getString(R.string.best_config_known_config_invalid),

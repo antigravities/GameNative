@@ -1082,6 +1082,9 @@
     <string name="settings_debug_clear_db_subtitle">[Closes app] May help fix issues with library items or messages.</string>
     <string name="settings_debug_clear_cache_title">Clear Image Cache</string>
     <string name="settings_debug_clear_cache_subtitle">Remove all images that were loaded.</string>
+    <string name="settings_debug_clear_curator_title">Purge curator cache</string>
+    <string name="settings_debug_clear_curator_subtitle">Long click to delete cached curator recommendations and the followed-curator list. Restart the app to re-fetch.</string>
+    <string name="settings_debug_clear_curator_done">Curator cache purged. Restart the app to re-fetch.</string>
 
     <!-- Settings: Info Group -->
     <string name="settings_info_title">Info</string>
@@ -1437,6 +1440,11 @@
     <string name="library_company_dialog_close">Close</string>
     <string name="curator_review_title">Curator Review</string>
     <string name="curator_review_open_full">Read full review</string>
+    <string name="curator_review_apply_config">Apply curator-suggested configuration</string>
+    <string name="curator_review_applying">Applying…</string>
+    <string name="curator_config_confirm_title">Apply curator configuration?</string>
+    <string name="curator_config_confirm_message">This downloads the curator\'s recommended configuration and applies it to this game\'s container. Missing components (Wine, DXVK, drivers) may be installed.</string>
+    <string name="curator_config_confirm_apply">Apply</string>
     <string name="curator_review_type_recommended">Recommended</string>
     <string name="curator_review_type_informational">Informational</string>
     <string name="library_app_type">App Type</string>
