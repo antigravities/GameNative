@@ -4024,41 +4024,40 @@ class SteamService : Service(), IChallengeUrlChanged {
         scope.launch {
             db.withTransaction {
                 // Send off an event if we change states.
-                val userSteamId = steamClient?.steamID ?: return@withTransaction
-                if(callback.friendId != userSteamId) return@withTransaction
+                if (callback.friendId == steamClient!!.steamID) {
+                    val avatarHash = callback.avatarHash.toHexString()
+                    val playerName = callback.playerName
 
-                val avatarHash = callback.avatarHash.toHexString()
-                val playerName = callback.playerName
+                    // When connected, callback may return Offline due to missing Status flag in request.
+                    // Trust PrefManager.personaState (user's chosen state) in that case.
+                    val state = if (callback.personaState == EPersonaState.Offline && isConnected) {
+                        PrefManager.personaState
+                    } else {
+                        callback.personaState
+                    }
 
-                // When connected, callback may return Offline due to missing Status flag in request.
-                // Trust PrefManager.personaState (user's chosen state) in that case.
-                val state = if (callback.personaState == EPersonaState.Offline && isConnected) {
-                    PrefManager.personaState
-                } else {
-                    callback.personaState
-                }
-
-                Timber.d(
-                    "Local persona state received: ${callback.playerName}, state=$state, gameAppId=${callback.gamePlayedAppId}, gameName=${callback.gameName}",
-                )
-
-                // Update local state flow
-                _localPersona.update {
-                    it.copy(
-                        avatarHash = avatarHash,
-                        name = playerName,
-                        state = state,
-                        gameAppID = callback.gamePlayedAppId,
-                        gameName = appDao.findApp(callback.gamePlayedAppId)?.name ?: callback.gameName,
+                    Timber.d(
+                        "Local persona state received: ${callback.playerName}, state=$state, gameAppId=${callback.gamePlayedAppId}, gameName=${callback.gameName}",
                     )
+
+                    // Update local state flow
+                    _localPersona.update {
+                        it.copy(
+                            avatarHash = avatarHash,
+                            name = playerName,
+                            state = state,
+                            gameAppID = callback.gamePlayedAppId,
+                            gameName = appDao.findApp(callback.gamePlayedAppId)?.name ?: callback.gameName,
+                        )
+                    }
+
+                    // Cache local persona
+                    PrefManager.steamUserAvatarHash = avatarHash
+                    PrefManager.steamUserName = playerName
+
+                    val event = SteamEvent.PersonaStateReceived(localPersona.value)
+                    PluviaApp.events.emit(event)
                 }
-
-                // Cache local persona
-                PrefManager.steamUserAvatarHash = avatarHash
-                PrefManager.steamUserName = playerName
-
-                val event = SteamEvent.PersonaStateReceived(localPersona.value)
-                PluviaApp.events.emit(event)
             }
         }
     }
@@ -4150,16 +4149,14 @@ class SteamService : Service(), IChallengeUrlChanged {
                 //      from family sharing... We really can't test this as there is a 1-year cooldown.
                 //      Then 'findStaleLicences' will find these now invalid items to remove.
 
-                // Chunk the input to reduce memory pressures for very large items.
+                // Store raw licenses for DepotDownloader - each license in its own row
                 licenses = callback.licenseList
                 cachedLicenseDao.deleteAll()
-                callback.licenseList.chunked(500).forEach { chunk ->
-                    cachedLicenseDao.insertAll(
-                        chunk.map { license ->
-                            CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
-                        },
-                    )
+                val cachedLicenses = callback.licenseList.map { license ->
+                    CachedLicense(licenseJson = LicenseSerializer.serializeLicense(license))
                 }
+                cachedLicenseDao.insertAll(cachedLicenses)
+
                 val licensesToAdd = callback.licenseList
                     .groupBy { it.packageID }
                     .map { licensesEntry ->
@@ -4192,9 +4189,7 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                 if (licensesToAdd.isNotEmpty()) {
                     Timber.i("Adding ${licensesToAdd.size} licenses")
-                    licensesToAdd.chunked(500).forEach { chunk ->
-                        licenseDao.insertAll(chunk)
-                    }
+                    licenseDao.insertAll(licensesToAdd)
                 }
 
                 val licensesToRemove = licenseDao.findStaleLicences(
