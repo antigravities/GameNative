@@ -388,7 +388,6 @@ class ImmersiveXrActivity : androidx.activity.ComponentActivity() {
                 app.gamenative.ui.components.BootingSplash(
                     visible = splashVisible,
                     text = mainState.bootingSplashText,
-                    heroImageUrl = mainState.bootingSplashHeroImageUrl,
                 )
 
                 ImmersiveControlsOnboarding(

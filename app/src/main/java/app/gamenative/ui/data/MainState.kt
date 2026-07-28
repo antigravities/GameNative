@@ -24,7 +24,6 @@ data class MainState(
     val debugRun: Boolean = false,
     val showBootingSplash: Boolean = false,
     val bootingSplashText: String = "Booting...",
-    val bootingSplashHeroImageUrl: String = "",
 
     // Connection state for background reconnection
     // Default to DISCONNECTED - service will start and set to CONNECTING
