@@ -578,8 +578,12 @@ class MainViewModel @Inject constructor(
 
                 val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
                 Timber.tag("Exit").i("Got game id: $gameId")
-                ActiveGameRegistry.clearIfMatches(gameId)
-                SteamService.notifyRunningProcesses()
+
+                if (ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.STEAM) {
+                    ActiveGameRegistry.clearIfMatches(gameId)
+                    SteamService.notifyRunningProcesses()
+                }
+
                 handleExitCloudSync(context, appId, gameId)
 
                 // Prompt user to save temporary container configuration if one was applied
