@@ -59,6 +59,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import app.gamenative.MainActivity
@@ -186,6 +187,7 @@ import com.winlator.widget.TouchpadView
 import com.winlator.renderer.ASurfaceRenderer
 import com.winlator.renderer.GLRenderer
 import com.winlator.renderer.VulkanRenderer
+import com.winlator.renderer.XServerRenderer
 import com.winlator.widget.XServerRendererView
 import com.winlator.widget.XServerView
 import com.winlator.widget.XServerViewGL
@@ -268,12 +270,475 @@ private const val TRANSLATION_INTERVAL_MS_EXTRA = "translationIntervalMs"
 private const val TRANSLATION_OPACITY_EXTRA = "translationOpacity"
 private const val TRANSLATION_OCR_MAX_WIDTH_EXTRA = "translationOcrMaxWidth"
 
+/**
+ * Holds on-device screen-translation state + wiring, extracted out of XServerScreen's main
+ * composable to keep it under ART's dex verifier register limit (same constraint documented
+ * for bfgMenu/inviteMenu in QuickMenu.kt). Owns the ScreenTranslator instance, its per-container
+ * persisted config, and the Quick Menu callbacks.
+ */
+@Stable
+private class ScreenTranslationHandle(
+    val translator: ScreenTranslator,
+    val quickMenuState: QuickMenuTranslationState,
+    val callbacks: QuickMenuTranslationCallbacks,
+)
+
+@Composable
+private fun rememberScreenTranslation(
+    container: Container,
+    scope: CoroutineScope,
+    rendererProvider: () -> XServerRenderer?,
+): ScreenTranslationHandle {
+    // --- On-device screen translation (ML Kit OCR + Translate) ---------------------------------
+    val screenTranslator = remember { ScreenTranslator() }
+    val translationOverlayState by screenTranslator.state.collectAsState()
+    // Quick Menu-editable config, seeded PER-CONTAINER from container extras so each game remembers its
+    // own translation settings. `enabled` defaults to false (per-game opt-in — most games don't need
+    // translation); the rest fall back to the PrefManager global as a "last-used default" for games
+    // that have never configured translation. Keyed on container.id like the FPS-limiter settings.
+    var translationEnabled by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_ENABLED_EXTRA, "false").toBoolean())
+    }
+    var translationSourceLang by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_SOURCE_LANG_EXTRA, PrefManager.screenTranslationSourceLang))
+    }
+    var translationTargetLang by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_TARGET_LANG_EXTRA, PrefManager.screenTranslationTargetLang))
+    }
+    var translationIntervalMs by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_INTERVAL_MS_EXTRA, PrefManager.screenTranslationIntervalMs.toString()).toIntOrNull() ?: PrefManager.screenTranslationIntervalMs)
+    }
+    var translationOpacity by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_OPACITY_EXTRA, PrefManager.screenTranslationOpacity.toString()).toFloatOrNull() ?: PrefManager.screenTranslationOpacity)
+    }
+    var translationOcrMaxWidth by rememberSaveable(container.id) {
+        mutableStateOf(container.getExtra(TRANSLATION_OCR_MAX_WIDTH_EXTRA, PrefManager.screenTranslationOcrMaxWidth.toString()).toIntOrNull() ?: PrefManager.screenTranslationOcrMaxWidth)
+    }
+    // Stable callbacks instance — remembered so QuickMenu doesn't see a new lambda holder each
+    // recomposition. The lambdas write through the delegated state vars above (stable MutableStates).
+    val translationCallbacks = remember {
+        QuickMenuTranslationCallbacks(
+            onEnabledChange = {
+                translationEnabled = it
+                PrefManager.screenTranslationEnabled = it
+            },
+            onSourceLangChange = {
+                translationSourceLang = it
+                PrefManager.screenTranslationSourceLang = it
+            },
+            onTargetLangChange = {
+                translationTargetLang = it
+                PrefManager.screenTranslationTargetLang = it
+            },
+            onIntervalChange = {
+                translationIntervalMs = it
+                PrefManager.screenTranslationIntervalMs = it
+            },
+            onOpacityChange = {
+                translationOpacity = it
+                PrefManager.screenTranslationOpacity = it
+            },
+            onOcrMaxWidthChange = {
+                translationOcrMaxWidth = it
+                PrefManager.screenTranslationOcrMaxWidth = it
+            },
+        )
+    }
+
+    // Start/stop the live loop and push config. The loop reads config via @Volatile fields each pass,
+    // so a language/interval change just calls setConfig() without restarting. start() is idempotent.
+    LaunchedEffect(translationEnabled, translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth, translationOpacity) {
+        if (translationEnabled) {
+            screenTranslator.setConfig(translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth, translationOpacity)
+            screenTranslator.start(scope) { rendererProvider() }
+        } else {
+            screenTranslator.stop()
+        }
+    }
+    // Persist translation settings per-container. Separate from the setConfig effect above (which must
+    // stay un-debounced for live updates): opacity/interval are continuous sliders and saveData() is a
+    // synchronous disk write, so debounce with a short delay — the relaunch-on-change cancels the prior
+    // delay so the write only fires once the user settles.
+    LaunchedEffect(translationEnabled, translationSourceLang, translationTargetLang, translationIntervalMs, translationOpacity, translationOcrMaxWidth) {
+        delay(500)
+        container.putExtra(TRANSLATION_ENABLED_EXTRA, translationEnabled)
+        container.putExtra(TRANSLATION_SOURCE_LANG_EXTRA, translationSourceLang)
+        container.putExtra(TRANSLATION_TARGET_LANG_EXTRA, translationTargetLang)
+        container.putExtra(TRANSLATION_INTERVAL_MS_EXTRA, translationIntervalMs)
+        container.putExtra(TRANSLATION_OPACITY_EXTRA, translationOpacity)
+        container.putExtra(TRANSLATION_OCR_MAX_WIDTH_EXTRA, translationOcrMaxWidth)
+        container.saveData()
+    }
+    // Stop the loop and release ML Kit clients when leaving the session.
+    DisposableEffect(Unit) {
+        onDispose { screenTranslator.stop() }
+    }
+
+    return ScreenTranslationHandle(
+        translator = screenTranslator,
+        quickMenuState = QuickMenuTranslationState(
+            enabled = translationEnabled,
+            sourceLang = translationSourceLang,
+            targetLang = translationTargetLang,
+            intervalMs = translationIntervalMs,
+            opacity = translationOpacity,
+            ocrMaxWidth = translationOcrMaxWidth,
+            status = translationOverlayState.status,
+            statusDetail = translationOverlayState.detail,
+        ),
+        callbacks = translationCallbacks,
+    )
+}
+
 private fun initialFpsLimiterEnabled(container: Container): Boolean =
     parseBooleanExtra(container.getExtra(FPS_LIMITER_ENABLED_EXTRA)) ?: true
 
 private fun initialFpsLimiterTarget(container: Container): Int =
     parsePositiveFpsLimit(container.getExtra(FPS_LIMITER_TARGET_EXTRA))
         ?: DEFAULT_FPS_LIMITER_TARGET_HZ
+
+/**
+ * Performance HUD + FPS limiter/LSFG state, extracted out of XServerScreen's main composable to
+ * keep it under ART's dex verifier register limit (same constraint as ScreenTranslationHandle
+ * above and bfgMenu/inviteMenu in QuickMenu.kt). Bundled together because they cross-reference
+ * each other (the HUD's fpsProvider reads isLsfgAvailable/lsfgMultiplier; applyLsfgMultiplier
+ * re-applies the FPS limiter).
+ */
+@Stable
+private class PerformanceAndFpsState(
+    private val context: Context,
+    private val container: Container,
+    private val xServerViewProvider: () -> XServerRendererView?,
+    private val frameRatingProvider: () -> FrameRating?,
+) {
+    var isPerformanceHudEnabled by mutableStateOf(PrefManager.showFps)
+    val shouldTrackDisplayedFrames = AtomicBoolean(false)
+    var detectedMaxRefreshRateHz by mutableIntStateOf(detectMaxRefreshRateHz(context, null))
+    var fpsLimiterEnabled by mutableStateOf(initialFpsLimiterEnabled(container))
+    var fpsLimiterTarget by mutableIntStateOf(initialFpsLimiterTarget(container))
+
+    // LSFG tab in QuickMenu only visible when enabled in container settings
+    val isLsfgAvailable = LsfgQuickMenuHelper.isAvailable(container)
+    private val initialLsfgSettings = LsfgQuickMenuHelper.readSettings(container)
+    var lsfgMultiplier by mutableIntStateOf(initialLsfgSettings.multiplier)
+    var lsfgFlowScale by mutableStateOf(initialLsfgSettings.flowScale)
+    var lsfgPerformanceMode by mutableStateOf(initialLsfgSettings.performanceMode)
+
+    fun persistFpsLimiterState() {
+        container.putExtra(FPS_LIMITER_ENABLED_EXTRA, fpsLimiterEnabled)
+        container.putExtra(FPS_LIMITER_TARGET_EXTRA, fpsLimiterTarget)
+        container.saveData()
+    }
+
+    fun loadPerformanceHudConfig(): PerformanceHudConfig {
+        return PerformanceHudConfig(
+            showFrameRate = PrefManager.performanceHudShowFrameRate,
+            showCpuUsage = PrefManager.performanceHudShowCpuUsage,
+            showGpuUsage = PrefManager.performanceHudShowGpuUsage,
+            showRamUsage = PrefManager.performanceHudShowRamUsage,
+            showBatteryLevel = PrefManager.performanceHudShowBatteryLevel,
+            showPowerDraw = PrefManager.performanceHudShowPowerDraw,
+            showBatteryRuntime = PrefManager.performanceHudShowBatteryRuntime,
+            showBatteryTemperature = PrefManager.performanceHudShowBatteryTemperature,
+            showClockTime = PrefManager.performanceHudShowClockTime,
+            showCpuTemperature = PrefManager.performanceHudShowCpuTemperature,
+            showGpuTemperature = PrefManager.performanceHudShowGpuTemperature,
+            showFrameRateGraph = PrefManager.performanceHudShowFrameRateGraph,
+            showCpuUsageGraph = PrefManager.performanceHudShowCpuUsageGraph,
+            showGpuUsageGraph = PrefManager.performanceHudShowGpuUsageGraph,
+            backgroundOpacity = PrefManager.performanceHudBackgroundOpacity,
+            colorIntensity = PrefManager.performanceHudColorIntensity,
+            showTextOutline = PrefManager.performanceHudShowTextOutline,
+            size = PerformanceHudSize.fromPrefValue(PrefManager.performanceHudSize),
+        )
+    }
+
+    var performanceHudConfig by mutableStateOf(loadPerformanceHudConfig())
+    var performanceHudView by mutableStateOf<PerformanceHudView?>(null)
+    var performanceHudHost by mutableStateOf<FrameLayout?>(null)
+    var isDraggingPerformanceHud by mutableStateOf(false)
+    var isTrackingPerformanceHudTouch by mutableStateOf(false)
+    var performanceHudTouchDownRawX by mutableStateOf(0f)
+    var performanceHudTouchDownRawY by mutableStateOf(0f)
+    var performanceHudDragOffsetX by mutableStateOf(0f)
+    var performanceHudDragOffsetY by mutableStateOf(0f)
+    val performanceHudTouchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+
+    fun persistPerformanceHudConfig(config: PerformanceHudConfig) {
+        PrefManager.performanceHudShowFrameRate = config.showFrameRate
+        PrefManager.performanceHudShowCpuUsage = config.showCpuUsage
+        PrefManager.performanceHudShowGpuUsage = config.showGpuUsage
+        PrefManager.performanceHudShowRamUsage = config.showRamUsage
+        PrefManager.performanceHudShowBatteryLevel = config.showBatteryLevel
+        PrefManager.performanceHudShowPowerDraw = config.showPowerDraw
+        PrefManager.performanceHudShowBatteryRuntime = config.showBatteryRuntime
+        PrefManager.performanceHudShowBatteryTemperature = config.showBatteryTemperature
+        PrefManager.performanceHudShowClockTime = config.showClockTime
+        PrefManager.performanceHudShowCpuTemperature = config.showCpuTemperature
+        PrefManager.performanceHudShowGpuTemperature = config.showGpuTemperature
+        PrefManager.performanceHudShowFrameRateGraph = config.showFrameRateGraph
+        PrefManager.performanceHudShowCpuUsageGraph = config.showCpuUsageGraph
+        PrefManager.performanceHudShowGpuUsageGraph = config.showGpuUsageGraph
+        PrefManager.performanceHudBackgroundOpacity = config.backgroundOpacity
+        PrefManager.performanceHudColorIntensity = config.colorIntensity
+        PrefManager.performanceHudShowTextOutline = config.showTextOutline
+        PrefManager.performanceHudSize = config.size.prefValue
+    }
+
+    fun applyPerformanceHudConfig(config: PerformanceHudConfig) {
+        performanceHudConfig = config
+        persistPerformanceHudConfig(config)
+        performanceHudView?.setConfig(config)
+    }
+
+    fun applyFpsLimiterToEngines(limit: Int) {
+        // With LSFG active the layer owns ALL pacing (vsync-locked via
+        // vsync.txt) and presents at limit * multiplier. Both the renderer's
+        // SurfaceControl frame-rate hint and the PresentExtension's scheduled
+        // idle-release pacing must stay off: the hint would clamp the display
+        // to the base rate, and the extension's Choreographer-scheduled pixmap
+        // releases mix stale pixmaps under multiplied present traffic
+        // (measured as constant multi-exposure ghosting on the X11/turnip
+        // present path).
+        val xServerView = xServerViewProvider()
+        val effectiveLimit = if (isLsfgAvailable && lsfgMultiplier >= 2) 0 else limit
+        xServerView?.setFrameRateLimit(effectiveLimit)
+        xServerView?.getxServer()
+            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
+            ?.setFrameRateLimit(effectiveLimit)
+        // Not disarmed with LSFG: the layer only multiplies Vulkan-swapchain
+        // presents, so SHM-presenting games never pass through it and would
+        // otherwise run uncapped whenever LSFG is armed.
+        ShmFramePacer.setFrameRateLimit(limit)
+        PowerManager.targetFps = limit
+        // keeps frame stats in base units while generated frames tick the ring
+        PowerManager.frameSampleStride =
+            if (isLsfgAvailable && lsfgMultiplier >= 2) lsfgMultiplier else 1
+    }
+
+    fun effectiveFpsLimit(): Int =
+        if (isLsfgAvailable && lsfgMultiplier >= 2) 0
+        else if (fpsLimiterEnabled) fpsLimiterTarget
+        else 0
+
+    fun applyFpsLimiterEnabled(enabled: Boolean) {
+        fpsLimiterEnabled = enabled
+        applyFpsLimiterToEngines(effectiveFpsLimit())
+        persistFpsLimiterState()
+        if (isLsfgAvailable && lsfgMultiplier >= 2) {
+            applyLsfgSettings()
+        }
+    }
+
+    fun applyFpsLimiterTarget(target: Int) {
+        val sanitized = target.coerceAtLeast(5).coerceAtMost(detectedMaxRefreshRateHz)
+        fpsLimiterTarget = sanitized
+        if (fpsLimiterEnabled) {
+            applyFpsLimiterToEngines(effectiveFpsLimit())
+        }
+        persistFpsLimiterState()
+        if (isLsfgAvailable && lsfgMultiplier >= 2) {
+            applyLsfgSettings()
+        }
+    }
+
+    fun applyLsfgSettings() {
+        LsfgQuickMenuHelper.applySettings(
+            container,
+            LsfgQuickMenuHelper.Settings(lsfgMultiplier, lsfgFlowScale, lsfgPerformanceMode),
+        )
+    }
+
+    fun applyLsfgMultiplier(mult: Int) {
+        lsfgMultiplier = LsfgQuickMenuHelper.sanitizeMultiplier(mult)
+        applyLsfgSettings()
+        applyFpsLimiterToEngines(effectiveFpsLimit())
+    }
+
+    fun applyLsfgFlowScale(scale: Float) {
+        lsfgFlowScale = LsfgQuickMenuHelper.sanitizeFlowScale(scale)
+        applyLsfgSettings()
+    }
+
+    fun applyLsfgPerformanceMode(enabled: Boolean) {
+        lsfgPerformanceMode = enabled
+        applyLsfgSettings()
+    }
+
+    fun restorePerformanceHudPosition() {
+        val host = performanceHudHost ?: return
+        val hud = performanceHudView ?: return
+        if (host.width <= 0 || host.height <= 0 || hud.width <= 0 || hud.height <= 0) return
+
+        val maxX = (host.width - hud.width).coerceAtLeast(0).toFloat()
+        val maxY = (host.height - hud.height).coerceAtLeast(0).toFloat()
+        val margin = 12 * context.resources.displayMetrics.density
+        val savedX = PrefManager.performanceHudXFraction
+        val savedY = PrefManager.performanceHudYFraction
+
+        hud.x = if (savedX in 0f..1f) maxX * savedX else margin.coerceAtMost(maxX)
+        hud.y = if (savedY in 0f..1f) maxY * savedY else margin.coerceAtMost(maxY)
+
+        PrefManager.performanceHudXFraction = if (maxX > 0f) hud.x / maxX else 0f
+        PrefManager.performanceHudYFraction = if (maxY > 0f) hud.y / maxY else 0f
+    }
+
+    fun movePerformanceHud(rawX: Float, rawY: Float, save: Boolean) {
+        val host = performanceHudHost ?: return
+        val hud = performanceHudView ?: return
+        if (host.width <= 0 || host.height <= 0 || hud.width <= 0 || hud.height <= 0) return
+
+        val hostLocation = IntArray(2)
+        host.getLocationOnScreen(hostLocation)
+        val maxX = (host.width - hud.width).coerceAtLeast(0).toFloat()
+        val maxY = (host.height - hud.height).coerceAtLeast(0).toFloat()
+
+        hud.x = (rawX - hostLocation[0] - performanceHudDragOffsetX).coerceIn(0f, maxX)
+        hud.y = (rawY - hostLocation[1] - performanceHudDragOffsetY).coerceIn(0f, maxY)
+
+        if (save) {
+            PrefManager.performanceHudXFraction = if (maxX > 0f) hud.x / maxX else 0f
+            PrefManager.performanceHudYFraction = if (maxY > 0f) hud.y / maxY else 0f
+        }
+    }
+
+    fun removePerformanceHud() {
+        isDraggingPerformanceHud = false
+        isTrackingPerformanceHudTouch = false
+        performanceHudView?.let { hud ->
+            (hud.parent as? ViewGroup)?.removeView(hud)
+        }
+        performanceHudView = null
+    }
+
+    fun togglePerformanceHudLayout() {
+        val hud = performanceHudView ?: return
+        val compactMode = !hud.isCompactMode()
+        hud.setCompactMode(compactMode)
+        PrefManager.performanceHudCompactMode = compactMode
+        hud.post {
+            if (performanceHudView === hud && !isDraggingPerformanceHud) {
+                restorePerformanceHudPosition()
+            }
+        }
+    }
+
+    fun updatePerformanceHud(show: Boolean) {
+        if (!show) {
+            removePerformanceHud()
+            return
+        }
+        if (performanceHudView != null) {
+            return
+        }
+
+        val targetLayout = performanceHudHost ?: return
+        val hud = PerformanceHudView(
+            context = context,
+            fpsProvider = {
+                val raw = frameRatingProvider()?.currentFPS ?: 0f
+                if (isLsfgAvailable && lsfgMultiplier >= 2) {
+                    // Only trust the layer's own measurement; multiplying raw
+                    // fabricates fps for games the layer never attaches to
+                    // (SHM-presenting games have no Vulkan swapchain).
+                    LsfgVkManager.readMeasuredFps(container) ?: raw
+                } else {
+                    raw
+                }
+            },
+            initialConfig = performanceHudConfig,
+            initialCompactMode = PrefManager.performanceHudCompactMode,
+        )
+        val layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+
+        targetLayout.addView(hud, layoutParams)
+        performanceHudView = hud
+        hud.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (!isDraggingPerformanceHud) restorePerformanceHudPosition()
+        }
+        targetLayout.post {
+            if (performanceHudView === hud) restorePerformanceHudPosition()
+        }
+        hud.bringToFront()
+    }
+}
+
+@Composable
+private fun rememberPerformanceAndFpsState(
+    context: Context,
+    container: Container,
+    lifecycleOwner: LifecycleOwner,
+    xServerViewProvider: () -> XServerRendererView?,
+    frameRatingProvider: () -> FrameRating?,
+): PerformanceAndFpsState {
+    val state = remember(container.id) {
+        PerformanceAndFpsState(context, container, xServerViewProvider, frameRatingProvider)
+    }
+
+    // Adaptive-cap steps route through the LSFG limiter; the X-server
+    // limiters must stay at 0 under LSFG.
+    LaunchedEffect(Unit) {
+        PowerManager.fpsCapApplier = applier@{ capFps: Int ->
+            if (!state.isLsfgAvailable || state.lsfgMultiplier < 2) return@applier false
+            PowerManager.targetFps = capFps
+            LsfgQuickMenuHelper.applyLiveFpsCap(container, capFps)
+            ShmFramePacer.setFrameRateLimit(capFps)
+            true
+        }
+    }
+
+    // Mirrors the original LaunchedEffect(xServerView): detect the display's max refresh rate once
+    // the renderer view is attached, clamp the persisted FPS-limiter target to it, and push the
+    // effective limit to the engines.
+    LaunchedEffect(xServerViewProvider()) {
+        val detectedMax = detectMaxRefreshRateHz(context, xServerViewProvider() as? View)
+        state.detectedMaxRefreshRateHz = detectedMax
+        val clampedTarget = state.fpsLimiterTarget.coerceAtMost(detectedMax).coerceAtLeast(5)
+        if (clampedTarget != state.fpsLimiterTarget) {
+            state.fpsLimiterTarget = clampedTarget
+        }
+        state.applyFpsLimiterToEngines(state.effectiveFpsLimit())
+    }
+
+    // Pause/resume the HUD's own render loop in step with the screen's lifecycle.
+    DisposableEffect(lifecycleOwner, state.performanceHudView) {
+        val hud = state.performanceHudView
+        if (hud != null) {
+            if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                hud.resume()
+            } else {
+                hud.pause()
+            }
+
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_PAUSE -> {
+                        Timber.d("Pausing PerformanceHudView for lifecycle event: $event")
+                        hud.pause()
+                    }
+                    Lifecycle.Event.ON_RESUME -> {
+                        Timber.d("Resuming PerformanceHudView for lifecycle event: $event")
+                        hud.resume()
+                    }
+                    else -> Unit
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
+        } else {
+            onDispose { }
+        }
+    }
+
+    return state
+}
 
 private fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int {
     val display = attachedView?.display
@@ -561,90 +1026,10 @@ fun XServerScreen(
     var swapInputOverlay: SwapInputOverlayView? by remember { mutableStateOf(null) }
     var imeInputReceiver: app.gamenative.externaldisplay.IMEInputReceiver? by remember { mutableStateOf(null) }
 
-    // --- On-device screen translation (ML Kit OCR + Translate) ---------------------------------
-    val screenTranslator = remember { ScreenTranslator() }
-    val translationOverlayState by screenTranslator.state.collectAsState()
-    // Quick Menu-editable config, seeded PER-CONTAINER from container extras so each game remembers its
-    // own translation settings. `enabled` defaults to false (per-game opt-in — most games don't need
-    // translation); the rest fall back to the PrefManager global as a "last-used default" for games
-    // that have never configured translation. Keyed on container.id like the FPS-limiter settings.
-    var translationEnabled by rememberSaveable(container.id) {
-        mutableStateOf(container.getExtra(TRANSLATION_ENABLED_EXTRA, "false").toBoolean())
-    }
-    var translationSourceLang by rememberSaveable(container.id) {
-        mutableStateOf(container.getExtra(TRANSLATION_SOURCE_LANG_EXTRA, PrefManager.screenTranslationSourceLang))
-    }
-    var translationTargetLang by rememberSaveable(container.id) {
-        mutableStateOf(container.getExtra(TRANSLATION_TARGET_LANG_EXTRA, PrefManager.screenTranslationTargetLang))
-    }
-    var translationIntervalMs by rememberSaveable(container.id) {
-        mutableStateOf(container.getExtra(TRANSLATION_INTERVAL_MS_EXTRA, PrefManager.screenTranslationIntervalMs.toString()).toIntOrNull() ?: PrefManager.screenTranslationIntervalMs)
-    }
-    var translationOpacity by rememberSaveable(container.id) {
-        mutableStateOf(container.getExtra(TRANSLATION_OPACITY_EXTRA, PrefManager.screenTranslationOpacity.toString()).toFloatOrNull() ?: PrefManager.screenTranslationOpacity)
-    }
-    var translationOcrMaxWidth by rememberSaveable(container.id) {
-        mutableStateOf(container.getExtra(TRANSLATION_OCR_MAX_WIDTH_EXTRA, PrefManager.screenTranslationOcrMaxWidth.toString()).toIntOrNull() ?: PrefManager.screenTranslationOcrMaxWidth)
-    }
-    // Stable callbacks instance — remembered so QuickMenu doesn't see a new lambda holder each
-    // recomposition. The lambdas write through the delegated state vars above (stable MutableStates).
-    val translationCallbacks = remember {
-        QuickMenuTranslationCallbacks(
-            onEnabledChange = {
-                translationEnabled = it
-                PrefManager.screenTranslationEnabled = it
-            },
-            onSourceLangChange = {
-                translationSourceLang = it
-                PrefManager.screenTranslationSourceLang = it
-            },
-            onTargetLangChange = {
-                translationTargetLang = it
-                PrefManager.screenTranslationTargetLang = it
-            },
-            onIntervalChange = {
-                translationIntervalMs = it
-                PrefManager.screenTranslationIntervalMs = it
-            },
-            onOpacityChange = {
-                translationOpacity = it
-                PrefManager.screenTranslationOpacity = it
-            },
-            onOcrMaxWidthChange = {
-                translationOcrMaxWidth = it
-                PrefManager.screenTranslationOcrMaxWidth = it
-            },
-        )
-    }
-
-    // Start/stop the live loop and push config. The loop reads config via @Volatile fields each pass,
-    // so a language/interval change just calls setConfig() without restarting. start() is idempotent.
-    LaunchedEffect(translationEnabled, translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth, translationOpacity) {
-        if (translationEnabled) {
-            screenTranslator.setConfig(translationSourceLang, translationTargetLang, translationIntervalMs, translationOcrMaxWidth, translationOpacity)
-            screenTranslator.start(scope) { xServerView?.renderer }
-        } else {
-            screenTranslator.stop()
-        }
-    }
-    // Persist translation settings per-container. Separate from the setConfig effect above (which must
-    // stay un-debounced for live updates): opacity/interval are continuous sliders and saveData() is a
-    // synchronous disk write, so debounce with a short delay — the relaunch-on-change cancels the prior
-    // delay so the write only fires once the user settles.
-    LaunchedEffect(translationEnabled, translationSourceLang, translationTargetLang, translationIntervalMs, translationOpacity, translationOcrMaxWidth) {
-        delay(500)
-        container.putExtra(TRANSLATION_ENABLED_EXTRA, translationEnabled)
-        container.putExtra(TRANSLATION_SOURCE_LANG_EXTRA, translationSourceLang)
-        container.putExtra(TRANSLATION_TARGET_LANG_EXTRA, translationTargetLang)
-        container.putExtra(TRANSLATION_INTERVAL_MS_EXTRA, translationIntervalMs)
-        container.putExtra(TRANSLATION_OPACITY_EXTRA, translationOpacity)
-        container.putExtra(TRANSLATION_OCR_MAX_WIDTH_EXTRA, translationOcrMaxWidth)
-        container.saveData()
-    }
-    // Stop the loop and release ML Kit clients when leaving the session.
-    DisposableEffect(Unit) {
-        onDispose { screenTranslator.stop() }
-    }
+    // On-device screen translation (ML Kit OCR + Translate) — state/wiring extracted into its own
+    // composable to keep this function under ART's dex verifier register limit (see
+    // rememberScreenTranslation's doc comment).
+    val translationHandle = rememberScreenTranslation(container, scope) { xServerView?.renderer }
 
     var win32AppWorkarounds: Win32AppWorkarounds? by remember { mutableStateOf(null) }
     var physicalControllerHandler: PhysicalControllerHandler? by remember { mutableStateOf(null) }
@@ -725,85 +1110,9 @@ fun XServerScreen(
     var usingScreenMirror by remember { mutableStateOf(false) }
     var hasInternalTouchpad by remember { mutableStateOf(false) }
     var hasUpdatedScreenGamepad by remember { mutableStateOf(false) }
-    var isPerformanceHudEnabled by remember { mutableStateOf(PrefManager.showFps) }
-    val shouldTrackDisplayedFrames = remember { AtomicBoolean(false) }
-    var detectedMaxRefreshRateHz by remember { mutableIntStateOf(detectMaxRefreshRateHz(context, null)) }
-    var fpsLimiterEnabled by rememberSaveable(container.id) { mutableStateOf(initialFpsLimiterEnabled(container)) }
-    var fpsLimiterTarget by rememberSaveable(container.id) { mutableIntStateOf(initialFpsLimiterTarget(container)) }
-
-    // LSFG tab in QuickMenu only visible when enabled in container settings
-    val isLsfgAvailable = LsfgQuickMenuHelper.isAvailable(container)
-    val initialLsfgSettings = remember(container.id) { LsfgQuickMenuHelper.readSettings(container) }
-    var lsfgMultiplier by rememberSaveable(container.id) { mutableIntStateOf(initialLsfgSettings.multiplier) }
-    var lsfgFlowScale by rememberSaveable(container.id) { mutableStateOf(initialLsfgSettings.flowScale) }
-    var lsfgPerformanceMode by rememberSaveable(container.id) { mutableStateOf(initialLsfgSettings.performanceMode) }
-
-    fun persistFpsLimiterState() {
-        container.putExtra(FPS_LIMITER_ENABLED_EXTRA, fpsLimiterEnabled)
-        container.putExtra(FPS_LIMITER_TARGET_EXTRA, fpsLimiterTarget)
-        container.saveData()
-    }
-
-    fun loadPerformanceHudConfig(): PerformanceHudConfig {
-        return PerformanceHudConfig(
-            showFrameRate = PrefManager.performanceHudShowFrameRate,
-            showCpuUsage = PrefManager.performanceHudShowCpuUsage,
-            showGpuUsage = PrefManager.performanceHudShowGpuUsage,
-            showRamUsage = PrefManager.performanceHudShowRamUsage,
-            showBatteryLevel = PrefManager.performanceHudShowBatteryLevel,
-            showPowerDraw = PrefManager.performanceHudShowPowerDraw,
-            showBatteryRuntime = PrefManager.performanceHudShowBatteryRuntime,
-            showBatteryTemperature = PrefManager.performanceHudShowBatteryTemperature,
-            showClockTime = PrefManager.performanceHudShowClockTime,
-            showCpuTemperature = PrefManager.performanceHudShowCpuTemperature,
-            showGpuTemperature = PrefManager.performanceHudShowGpuTemperature,
-            showFrameRateGraph = PrefManager.performanceHudShowFrameRateGraph,
-            showCpuUsageGraph = PrefManager.performanceHudShowCpuUsageGraph,
-            showGpuUsageGraph = PrefManager.performanceHudShowGpuUsageGraph,
-            backgroundOpacity = PrefManager.performanceHudBackgroundOpacity,
-            colorIntensity = PrefManager.performanceHudColorIntensity,
-            showTextOutline = PrefManager.performanceHudShowTextOutline,
-            size = PerformanceHudSize.fromPrefValue(PrefManager.performanceHudSize),
-        )
-    }
-
-    var performanceHudConfig by remember { mutableStateOf(loadPerformanceHudConfig()) }
-    var performanceHudView by remember { mutableStateOf<PerformanceHudView?>(null) }
-    var performanceHudHost by remember { mutableStateOf<FrameLayout?>(null) }
-    var isDraggingPerformanceHud by remember { mutableStateOf(false) }
-    var isTrackingPerformanceHudTouch by remember { mutableStateOf(false) }
-    var performanceHudTouchDownRawX by remember { mutableStateOf(0f) }
-    var performanceHudTouchDownRawY by remember { mutableStateOf(0f) }
-    var performanceHudDragOffsetX by remember { mutableStateOf(0f) }
-    var performanceHudDragOffsetY by remember { mutableStateOf(0f) }
-    val performanceHudTouchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
-
-    fun persistPerformanceHudConfig(config: PerformanceHudConfig) {
-        PrefManager.performanceHudShowFrameRate = config.showFrameRate
-        PrefManager.performanceHudShowCpuUsage = config.showCpuUsage
-        PrefManager.performanceHudShowGpuUsage = config.showGpuUsage
-        PrefManager.performanceHudShowRamUsage = config.showRamUsage
-        PrefManager.performanceHudShowBatteryLevel = config.showBatteryLevel
-        PrefManager.performanceHudShowPowerDraw = config.showPowerDraw
-        PrefManager.performanceHudShowBatteryRuntime = config.showBatteryRuntime
-        PrefManager.performanceHudShowBatteryTemperature = config.showBatteryTemperature
-        PrefManager.performanceHudShowClockTime = config.showClockTime
-        PrefManager.performanceHudShowCpuTemperature = config.showCpuTemperature
-        PrefManager.performanceHudShowGpuTemperature = config.showGpuTemperature
-        PrefManager.performanceHudShowFrameRateGraph = config.showFrameRateGraph
-        PrefManager.performanceHudShowCpuUsageGraph = config.showCpuUsageGraph
-        PrefManager.performanceHudShowGpuUsageGraph = config.showGpuUsageGraph
-        PrefManager.performanceHudBackgroundOpacity = config.backgroundOpacity
-        PrefManager.performanceHudColorIntensity = config.colorIntensity
-        PrefManager.performanceHudShowTextOutline = config.showTextOutline
-        PrefManager.performanceHudSize = config.size.prefValue
-    }
-
-    fun applyPerformanceHudConfig(config: PerformanceHudConfig) {
-        performanceHudConfig = config
-        persistPerformanceHudConfig(config)
-        performanceHudView?.setConfig(config)
-    }
+    // Performance HUD + FPS limiter/LSFG state, extracted into its own composable to keep this
+    // function under ART's dex verifier register limit (see PerformanceAndFpsState's doc comment).
+    val perf = rememberPerformanceAndFpsState(context, container, lifecycleOwner, { xServerView }) { frameRating }
 
     LaunchedEffect(xServerView?.renderer) {
         val screenEffectsConfig = loadScreenEffectsConfig(container)
@@ -811,197 +1120,6 @@ fun XServerScreen(
             is VulkanRenderer -> applyScreenEffectsConfig(renderer, screenEffectsConfig)
             is GLRenderer -> applyScreenEffectsConfig(renderer, screenEffectsConfig)
         }
-    }
-
-    fun applyFpsLimiterToEngines(limit: Int) {
-        // With LSFG active the layer owns ALL pacing (vsync-locked via
-        // vsync.txt) and presents at limit * multiplier. Both the renderer's
-        // SurfaceControl frame-rate hint and the PresentExtension's scheduled
-        // idle-release pacing must stay off: the hint would clamp the display
-        // to the base rate, and the extension's Choreographer-scheduled pixmap
-        // releases mix stale pixmaps under multiplied present traffic
-        // (measured as constant multi-exposure ghosting on the X11/turnip
-        // present path).
-        xServerView?.setFrameRateLimit(if (isLsfgAvailable && lsfgMultiplier >= 2) 0 else limit)
-        xServerView?.getxServer()
-            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
-            ?.setFrameRateLimit(if (isLsfgAvailable && lsfgMultiplier >= 2) 0 else limit)
-        // Not disarmed with LSFG: the layer only multiplies Vulkan-swapchain
-        // presents, so SHM-presenting games never pass through it and would
-        // otherwise run uncapped whenever LSFG is armed.
-        ShmFramePacer.setFrameRateLimit(limit)
-        PowerManager.targetFps = limit
-        // keeps frame stats in base units while generated frames tick the ring
-        PowerManager.frameSampleStride =
-            if (isLsfgAvailable && lsfgMultiplier >= 2) lsfgMultiplier else 1
-    }
-
-    fun effectiveFpsLimit(): Int =
-        if (fpsLimiterEnabled) fpsLimiterTarget else 0
-
-    fun applyLsfgSettings() {
-        LsfgQuickMenuHelper.applySettings(
-            container,
-            LsfgQuickMenuHelper.Settings(lsfgMultiplier, lsfgFlowScale, lsfgPerformanceMode),
-        )
-    }
-
-    fun applyFpsLimiterEnabled(enabled: Boolean) {
-        fpsLimiterEnabled = enabled
-        applyFpsLimiterToEngines(effectiveFpsLimit())
-        persistFpsLimiterState()
-        if (isLsfgAvailable && lsfgMultiplier >= 2) {
-            applyLsfgSettings()
-        }
-    }
-
-    fun applyFpsLimiterTarget(target: Int) {
-        val sanitized = target.coerceAtLeast(5).coerceAtMost(detectedMaxRefreshRateHz)
-        fpsLimiterTarget = sanitized
-        if (fpsLimiterEnabled) {
-            applyFpsLimiterToEngines(effectiveFpsLimit())
-        }
-        persistFpsLimiterState()
-        if (isLsfgAvailable && lsfgMultiplier >= 2) {
-            applyLsfgSettings()
-        }
-    }
-
-    fun applyLsfgMultiplier(mult: Int) {
-        lsfgMultiplier = LsfgQuickMenuHelper.sanitizeMultiplier(mult)
-        applyLsfgSettings()
-        applyFpsLimiterToEngines(effectiveFpsLimit())
-    }
-
-    fun applyLsfgFlowScale(scale: Float) {
-        lsfgFlowScale = LsfgQuickMenuHelper.sanitizeFlowScale(scale)
-        applyLsfgSettings()
-    }
-
-    fun applyLsfgPerformanceMode(enabled: Boolean) {
-        lsfgPerformanceMode = enabled
-        applyLsfgSettings()
-    }
-
-    LaunchedEffect(xServerView) {
-        // Adaptive-cap steps route through the LSFG limiter; the X-server
-        // limiters must stay at 0 under LSFG.
-        PowerManager.fpsCapApplier = applier@{ capFps: Int ->
-            if (!isLsfgAvailable || lsfgMultiplier < 2) return@applier false
-            PowerManager.targetFps = capFps
-            LsfgQuickMenuHelper.applyLiveFpsCap(container, capFps)
-            ShmFramePacer.setFrameRateLimit(capFps)
-            true
-        }
-        val detectedMax = detectMaxRefreshRateHz(context, xServerView as? View)
-        detectedMaxRefreshRateHz = detectedMax
-        val clampedTarget = fpsLimiterTarget.coerceAtMost(detectedMax).coerceAtLeast(5)
-        if (clampedTarget != fpsLimiterTarget) {
-            fpsLimiterTarget = clampedTarget
-        }
-        applyFpsLimiterToEngines(effectiveFpsLimit())
-    }
-
-    fun restorePerformanceHudPosition() {
-        val host = performanceHudHost ?: return
-        val hud = performanceHudView ?: return
-        if (host.width <= 0 || host.height <= 0 || hud.width <= 0 || hud.height <= 0) return
-
-        val maxX = (host.width - hud.width).coerceAtLeast(0).toFloat()
-        val maxY = (host.height - hud.height).coerceAtLeast(0).toFloat()
-        val margin = 12 * context.resources.displayMetrics.density
-        val savedX = PrefManager.performanceHudXFraction
-        val savedY = PrefManager.performanceHudYFraction
-
-        hud.x = if (savedX in 0f..1f) maxX * savedX else margin.coerceAtMost(maxX)
-        hud.y = if (savedY in 0f..1f) maxY * savedY else margin.coerceAtMost(maxY)
-
-        PrefManager.performanceHudXFraction = if (maxX > 0f) hud.x / maxX else 0f
-        PrefManager.performanceHudYFraction = if (maxY > 0f) hud.y / maxY else 0f
-    }
-
-    fun movePerformanceHud(rawX: Float, rawY: Float, save: Boolean) {
-        val host = performanceHudHost ?: return
-        val hud = performanceHudView ?: return
-        if (host.width <= 0 || host.height <= 0 || hud.width <= 0 || hud.height <= 0) return
-
-        val hostLocation = IntArray(2)
-        host.getLocationOnScreen(hostLocation)
-        val maxX = (host.width - hud.width).coerceAtLeast(0).toFloat()
-        val maxY = (host.height - hud.height).coerceAtLeast(0).toFloat()
-
-        hud.x = (rawX - hostLocation[0] - performanceHudDragOffsetX).coerceIn(0f, maxX)
-        hud.y = (rawY - hostLocation[1] - performanceHudDragOffsetY).coerceIn(0f, maxY)
-
-        if (save) {
-            PrefManager.performanceHudXFraction = if (maxX > 0f) hud.x / maxX else 0f
-            PrefManager.performanceHudYFraction = if (maxY > 0f) hud.y / maxY else 0f
-        }
-    }
-
-    fun removePerformanceHud() {
-        isDraggingPerformanceHud = false
-        isTrackingPerformanceHudTouch = false
-        performanceHudView?.let { hud ->
-            (hud.parent as? ViewGroup)?.removeView(hud)
-        }
-        performanceHudView = null
-    }
-
-    fun togglePerformanceHudLayout() {
-        val hud = performanceHudView ?: return
-        val compactMode = !hud.isCompactMode()
-        hud.setCompactMode(compactMode)
-        PrefManager.performanceHudCompactMode = compactMode
-        hud.post {
-            if (performanceHudView === hud && !isDraggingPerformanceHud) {
-                restorePerformanceHudPosition()
-            }
-        }
-    }
-
-    fun updatePerformanceHud(show: Boolean) {
-        if (!show) {
-            removePerformanceHud()
-            return
-        }
-        if (performanceHudView != null) {
-            return
-        }
-
-        val targetLayout = performanceHudHost ?: return
-        val hud = PerformanceHudView(
-            context = context,
-            fpsProvider = {
-                val raw = frameRating?.currentFPS ?: 0f
-                if (isLsfgAvailable && lsfgMultiplier >= 2) {
-                    // Only trust the layer's own measurement; multiplying raw
-                    // fabricates fps for games the layer never attaches to
-                    // (SHM-presenting games have no Vulkan swapchain).
-                    LsfgVkManager.readMeasuredFps(container) ?: raw
-                } else {
-                    raw
-                }
-            },
-            initialConfig = performanceHudConfig,
-            initialCompactMode = PrefManager.performanceHudCompactMode,
-        )
-        val layoutParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-        }
-
-        targetLayout.addView(hud, layoutParams)
-        performanceHudView = hud
-        hud.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (!isDraggingPerformanceHud) restorePerformanceHudPosition()
-        }
-        targetLayout.post {
-            if (performanceHudView === hud) restorePerformanceHudPosition()
-        }
-        hud.bringToFront()
     }
 
     fun clearOverlayPauseState() {
@@ -1526,10 +1644,10 @@ fun XServerScreen(
             }
 
             QuickMenuAction.PERFORMANCE_HUD -> {
-                val enabled = !isPerformanceHudEnabled
-                isPerformanceHudEnabled = enabled
+                val enabled = !perf.isPerformanceHudEnabled
+                perf.isPerformanceHudEnabled = enabled
                 PrefManager.showFps = enabled
-                updatePerformanceHud(enabled)
+                perf.updatePerformanceHud(enabled)
                 if (PrefManager.usageAnalyticsEnabled) {
                     PostHog.capture(
                         event = "performance_hud_toggled",
@@ -1691,14 +1809,14 @@ fun XServerScreen(
                 showQuickMenu = true
             }
         }
-        if (isLsfgAvailable) {
+        if (perf.isLsfgAvailable) {
             LsfgVkManager.startVsyncClock(context, container)
         }
         onDispose {
             Timber.d("XServerScreen leaving, clearing back action")
             LsfgVkManager.stopVsyncClock()
-            removePerformanceHud()
-            performanceHudHost = null
+            perf.removePerformanceHud()
+            perf.performanceHudHost = null
             imeInputReceiver?.hideKeyboard()
             imeInputReceiver = null
             if (!SteamService.keepAlive) {
@@ -1949,37 +2067,6 @@ fun XServerScreen(
         }
     }
 
-    DisposableEffect(lifecycleOwner, performanceHudView) {
-        val hud = performanceHudView
-        if (hud != null) {
-            if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                hud.resume()
-            } else {
-                hud.pause()
-            }
-
-            val observer = LifecycleEventObserver { _, event ->
-                when (event) {
-                    Lifecycle.Event.ON_PAUSE -> {
-                        Timber.d("Pausing PerformanceHudView for lifecycle event: $event")
-                        hud.pause()
-                    }
-                    Lifecycle.Event.ON_RESUME -> {
-                        Timber.d("Resuming PerformanceHudView for lifecycle event: $event")
-                        hud.resume()
-                    }
-                    else -> Unit
-                }
-            }
-            lifecycleOwner.lifecycle.addObserver(observer)
-            onDispose {
-                lifecycleOwner.lifecycle.removeObserver(observer)
-            }
-        } else {
-            onDispose { }
-        }
-    }
-
     val isPortrait = container.isPortraitMode
     // var launchedView by rememberSaveable { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize()) {
@@ -1989,7 +2076,7 @@ fun XServerScreen(
             .fillMaxSize()
             .pointerHoverIcon(PointerIcon.Default)
             .pointerInteropFilter { event ->
-                val hud = performanceHudView
+                val hud = perf.performanceHudView
                 if (hud != null) {
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
@@ -2002,28 +2089,28 @@ fun XServerScreen(
                                         event.rawY >= hudLocation[1] &&
                                         event.rawY <= hudLocation[1] + hud.height
                                 if (insideHud) {
-                                    performanceHudTouchDownRawX = event.rawX
-                                    performanceHudTouchDownRawY = event.rawY
-                                    performanceHudDragOffsetX = event.rawX - hudLocation[0]
-                                    performanceHudDragOffsetY = event.rawY - hudLocation[1]
-                                    isTrackingPerformanceHudTouch = true
-                                    isDraggingPerformanceHud = false
+                                    perf.performanceHudTouchDownRawX = event.rawX
+                                    perf.performanceHudTouchDownRawY = event.rawY
+                                    perf.performanceHudDragOffsetX = event.rawX - hudLocation[0]
+                                    perf.performanceHudDragOffsetY = event.rawY - hudLocation[1]
+                                    perf.isTrackingPerformanceHudTouch = true
+                                    perf.isDraggingPerformanceHud = false
                                     return@pointerInteropFilter true
                                 }
                             }
                         }
                         MotionEvent.ACTION_MOVE -> {
-                            if (isTrackingPerformanceHudTouch) {
-                                if (!isDraggingPerformanceHud) {
-                                    val deltaX = event.rawX - performanceHudTouchDownRawX
-                                    val deltaY = event.rawY - performanceHudTouchDownRawY
+                            if (perf.isTrackingPerformanceHudTouch) {
+                                if (!perf.isDraggingPerformanceHud) {
+                                    val deltaX = event.rawX - perf.performanceHudTouchDownRawX
+                                    val deltaY = event.rawY - perf.performanceHudTouchDownRawY
                                     val distanceSquared = (deltaX * deltaX) + (deltaY * deltaY)
-                                    if (distanceSquared >= performanceHudTouchSlop * performanceHudTouchSlop) {
-                                        isDraggingPerformanceHud = true
+                                    if (distanceSquared >= perf.performanceHudTouchSlop * perf.performanceHudTouchSlop) {
+                                        perf.isDraggingPerformanceHud = true
                                     }
                                 }
-                                if (isDraggingPerformanceHud) {
-                                    movePerformanceHud(event.rawX, event.rawY, save = false)
+                                if (perf.isDraggingPerformanceHud) {
+                                    perf.movePerformanceHud(event.rawX, event.rawY, save = false)
                                     return@pointerInteropFilter true
                                 }
                             }
@@ -2031,32 +2118,32 @@ fun XServerScreen(
                         MotionEvent.ACTION_POINTER_DOWN,
                         MotionEvent.ACTION_POINTER_UP,
                         -> {
-                            if (isTrackingPerformanceHudTouch || isDraggingPerformanceHud) {
-                                isTrackingPerformanceHudTouch = false
-                                isDraggingPerformanceHud = false
+                            if (perf.isTrackingPerformanceHudTouch || perf.isDraggingPerformanceHud) {
+                                perf.isTrackingPerformanceHudTouch = false
+                                perf.isDraggingPerformanceHud = false
                                 return@pointerInteropFilter true
                             }
                         }
                         MotionEvent.ACTION_UP -> {
-                            if (isTrackingPerformanceHudTouch) {
-                                if (isDraggingPerformanceHud) {
-                                    movePerformanceHud(event.rawX, event.rawY, save = true)
+                            if (perf.isTrackingPerformanceHudTouch) {
+                                if (perf.isDraggingPerformanceHud) {
+                                    perf.movePerformanceHud(event.rawX, event.rawY, save = true)
                                 } else {
                                     hud.performClick()
-                                    togglePerformanceHudLayout()
+                                    perf.togglePerformanceHudLayout()
                                 }
-                                isTrackingPerformanceHudTouch = false
-                                isDraggingPerformanceHud = false
+                                perf.isTrackingPerformanceHudTouch = false
+                                perf.isDraggingPerformanceHud = false
                                 return@pointerInteropFilter true
                             }
                         }
                         MotionEvent.ACTION_CANCEL -> {
-                            if (isTrackingPerformanceHudTouch || isDraggingPerformanceHud) {
-                                if (isDraggingPerformanceHud) {
-                                    movePerformanceHud(event.rawX, event.rawY, save = true)
+                            if (perf.isTrackingPerformanceHudTouch || perf.isDraggingPerformanceHud) {
+                                if (perf.isDraggingPerformanceHud) {
+                                    perf.movePerformanceHud(event.rawX, event.rawY, save = true)
                                 }
-                                isTrackingPerformanceHudTouch = false
-                                isDraggingPerformanceHud = false
+                                perf.isTrackingPerformanceHudTouch = false
+                                perf.isDraggingPerformanceHud = false
                                 return@pointerInteropFilter true
                             }
                         }
@@ -2106,7 +2193,7 @@ fun XServerScreen(
             } else {
                 mainRoot as FrameLayout
             }
-            performanceHudHost = frameLayout
+            perf.performanceHudHost = frameLayout
             val appId = appId
             val usrGlibc: Boolean = container.getContainerVariant().equals(Container.GLIBC, ignoreCase = true)
             val mouseDragCompatibility = GameInputCompatibility.needsMouseDragCompatibility(appId, usrGlibc)
@@ -2131,7 +2218,7 @@ fun XServerScreen(
             }
             val xServerView = xServerViewInstance.apply {
                 xServerView = this
-                setFrameRateLimit(if (fpsLimiterEnabled) fpsLimiterTarget else 0)
+                setFrameRateLimit(if (perf.fpsLimiterEnabled) perf.fpsLimiterTarget else 0)
                 val renderer = this.renderer
                 if (!useGLRenderer && renderer is VulkanRenderer) {
                     val pm = container.rendererPresentMode.ifEmpty { "fifo" }
@@ -2148,7 +2235,7 @@ fun XServerScreen(
                 }
                 applyMouseCursorVisibility()
                 renderer.setOnFrameRenderedListener {
-                    if (shouldTrackDisplayedFrames.get()) {
+                    if (perf.shouldTrackDisplayedFrames.get()) {
                         (context as? Activity)?.runOnUiThread {
                             frameRating?.update()
                         }
@@ -2500,7 +2587,7 @@ fun XServerScreen(
                                     context,
                                     fpsProvider = {
                                         val raw = frameRating?.currentFPS ?: 0f
-                                        if (isLsfgAvailable && lsfgMultiplier >= 2) {
+                                        if (perf.isLsfgAvailable && perf.lsfgMultiplier >= 2) {
                                             LsfgVkManager.readMeasuredFps(container) ?: raw
                                         } else {
                                             raw
@@ -2607,8 +2694,8 @@ fun XServerScreen(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 setContent {
-                    val ovState by screenTranslator.state.collectAsState()
-                    val ovOpacity by screenTranslator.opacity.collectAsState()
+                    val ovState by translationHandle.translator.state.collectAsState()
+                    val ovOpacity by translationHandle.translator.opacity.collectAsState()
                     ScreenTranslationOverlay(state = ovState, opacity = ovOpacity)
                 }
             }
@@ -2841,9 +2928,9 @@ fun XServerScreen(
             frameRating?.setVisibility(View.GONE)
             xServerView.renderer.setFrameRating(frameRating)
 
-            if (isPerformanceHudEnabled) {
+            if (perf.isPerformanceHudEnabled) {
                 frameLayout.post {
-                    updatePerformanceHud(true)
+                    perf.updatePerformanceHud(true)
                 }
             }
 
@@ -2874,9 +2961,9 @@ fun XServerScreen(
         },
         onRelease = { view ->
             gameRoot = null
-            removePerformanceHud()
-            performanceHudHost = null
-            shouldTrackDisplayedFrames.set(false)
+            perf.removePerformanceHud()
+            perf.performanceHudHost = null
+            perf.shouldTrackDisplayedFrames.set(false)
             ShmFramePacer.setFrameRateLimit(0)
 
             val releaseBinding = view.tag as? XServerViewReleaseBinding
@@ -3045,14 +3132,14 @@ fun XServerScreen(
                 }
             },
             performance = PerformanceQuickMenuState(
-                hudEnabled = isPerformanceHudEnabled,
-                hudConfig = performanceHudConfig,
-                fpsLimiterEnabled = fpsLimiterEnabled,
-                fpsLimiterTarget = fpsLimiterTarget,
-                fpsLimiterMax = detectedMaxRefreshRateHz,
-                onHudConfigChanged = ::applyPerformanceHudConfig,
-                onFpsLimiterEnabledChanged = ::applyFpsLimiterEnabled,
-                onFpsLimiterChanged = ::applyFpsLimiterTarget,
+                hudEnabled = perf.isPerformanceHudEnabled,
+                hudConfig = perf.performanceHudConfig,
+                fpsLimiterEnabled = perf.fpsLimiterEnabled,
+                fpsLimiterTarget = perf.fpsLimiterTarget,
+                fpsLimiterMax = perf.detectedMaxRefreshRateHz,
+                onHudConfigChanged = perf::applyPerformanceHudConfig,
+                onFpsLimiterEnabledChanged = perf::applyFpsLimiterEnabled,
+                onFpsLimiterChanged = perf::applyFpsLimiterTarget,
             ),
             hasPhysicalController = hasPhysicalController,
             isTouchscreenModeActive = isTouchscreenModeActive,
@@ -3067,29 +3154,20 @@ fun XServerScreen(
             },
             // LSFG hot-reload (tab only visible when enabled in container settings)
             lsfg = LsfgQuickMenuState(
-                isAvailable = isLsfgAvailable,
-                multiplier = lsfgMultiplier,
-                flowScale = lsfgFlowScale,
-                performanceMode = lsfgPerformanceMode,
-                onMultiplierChanged = ::applyLsfgMultiplier,
-                onFlowScaleChanged = ::applyLsfgFlowScale,
-                onPerformanceModeChanged = ::applyLsfgPerformanceMode,
+                isAvailable = perf.isLsfgAvailable,
+                multiplier = perf.lsfgMultiplier,
+                flowScale = perf.lsfgFlowScale,
+                performanceMode = perf.lsfgPerformanceMode,
+                onMultiplierChanged = perf::applyLsfgMultiplier,
+                onFlowScaleChanged = perf::applyLsfgFlowScale,
+                onPerformanceModeChanged = perf::applyLsfgPerformanceMode,
             ),
             onRequestOpen = { showQuickMenu = true },
             // Immersive tab (tab only visible when hosted by ImmersiveXrActivity)
             immersiveHooks = immersiveHooks,
             // Screen translation (ML Kit OCR + Translate) — bundled into two holders (see QuickMenu).
-            translation = QuickMenuTranslationState(
-                enabled = translationEnabled,
-                sourceLang = translationSourceLang,
-                targetLang = translationTargetLang,
-                intervalMs = translationIntervalMs,
-                opacity = translationOpacity,
-                ocrMaxWidth = translationOcrMaxWidth,
-                status = translationOverlayState.status,
-                statusDetail = translationOverlayState.detail,
-            ),
-            translationCallbacks = translationCallbacks,
+            translation = translationHandle.quickMenuState,
+            translationCallbacks = translationHandle.callbacks,
             onAnimationComplete = { isMenuVisible ->
                 if (isMenuVisible) {
                     // An invite dialog the game asked for must not suspend it -- the game has to
