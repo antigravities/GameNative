@@ -39,6 +39,7 @@ enum class AppOptionMenuType(@StringRes val title: Int) {
     ImportFiles(R.string.option_import_files),
     ExportFiles(R.string.option_export_files),
     ManageMods(R.string.option_manage_mods),
+    InstallThunderstoreMod(R.string.option_install_thunderstore_mod),
     ChangeBranch(R.string.change_branch),
     ChangePreferredCopy(R.string.change_preferred_copy),
     AddToFavorites(R.string.option_add_to_favorites),
