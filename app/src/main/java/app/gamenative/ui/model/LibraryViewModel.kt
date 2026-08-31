@@ -161,12 +161,16 @@ class LibraryViewModel @Inject constructor(
         abstract val sortKey: String          // == NameSortKey.of(name); matches steam_app.name_sort_key
         abstract val sizeBytes: Long
         abstract val installedTier: Boolean   // ordering tier only (Steam: app_info; non-Steam: real install)
+        // Unix timestamp (ms) from steam_license.time_created for the PURCHASE_DATE sort.
+        // Non-Steam sources have no license data → 0, sinking them to the bottom.
+        abstract val purchaseDateEpoch: Long
 
         data class Steam(
             val appId: Int,
             override val sortKey: String,
             override val sizeBytes: Long,
             override val installedTier: Boolean,
+            override val purchaseDateEpoch: Long,
         ) : LibraryRef()
 
         // displayInstalled is the badge value (kept verbatim from the prebuilt entry); installedTier is
@@ -177,6 +181,7 @@ class LibraryViewModel @Inject constructor(
             override val sortKey: String,
             override val sizeBytes: Long,
             override val installedTier: Boolean,
+            override val purchaseDateEpoch: Long = 0,
         ) : LibraryRef()
     }
 
@@ -1187,6 +1192,12 @@ class LibraryViewModel @Inject constructor(
                 SortOption.REVIEWS_GPU_HIGH -> compareByDescending<LibraryEntry> {
                     currentState.statsFor(it.item)?.reviewsGpu ?: -1
                 }.thenBy { it.item.name.lowercase() }
+
+                // This in-memory path is only reached for the COMPATIBLE filter or a selected Steam
+                // Collection. Purchase-date timestamps aren't available on LibraryEntry, so fall back
+                // to name order (same behaviour as hitting this path for any other non-stats sort
+                // that lacks an in-memory equivalent).
+                SortOption.PURCHASE_DATE -> compareBy { it.item.name.lowercase() }
             }
 
             // A Steam collection can only contain Steam apps, so when one is selected the non-Steam
@@ -1509,6 +1520,7 @@ class LibraryViewModel @Inject constructor(
                     sortKey = stub.nameSortKey,
                     sizeBytes = stub.sizeBytes,
                     installedTier = stub.isDownloaded,
+                    purchaseDateEpoch = stub.timeCreatedEpoch,
                 )
             }
         } else {
@@ -1582,6 +1594,7 @@ class LibraryViewModel @Inject constructor(
             SortOption.NAME_DESC -> compareByDescending { it.sortKey }
             SortOption.SIZE_SMALLEST -> compareBy<LibraryRef> { it.sizeBytes }.thenBy { it.sortKey }
             SortOption.SIZE_LARGEST -> compareByDescending<LibraryRef> { it.sizeBytes }.thenBy { it.sortKey }
+            SortOption.PURCHASE_DATE -> compareByDescending<LibraryRef> { it.purchaseDateEpoch }.thenBy { it.sortKey }
             // Stats sorts (FPS_HIGH, RUNS_HIGH, REVIEWS_HIGH, REVIEWS_GPU_HIGH) are routed to
             // filterAppsInMemory before refComparator is called, so this branch is unreachable.
             else -> compareBy { it.sortKey }
