@@ -97,6 +97,7 @@ data class LibraryState(
  */
 data class GameCardStats(
     val runsGpu: Int,
+    val runsDevice: Int,
     val reviewsDevice: Int,
     val reviewsGpu: Int,
     val fps: Int?,
@@ -112,6 +113,7 @@ fun LibraryState.statsFor(source: GameSource, name: String): GameCardStats? {
     if (device == null && gpu == null) return null
     return GameCardStats(
         runsGpu = gpu?.successfulRuns ?: 0,
+        runsDevice = device?.successfulRuns ?: 0,
         reviewsDevice = device?.fiveStarReviews ?: 0,
         reviewsGpu = gpu?.fiveStarReviews ?: 0,
         fps = device?.medianFps,
