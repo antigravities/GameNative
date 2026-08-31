@@ -561,4 +561,5 @@ private fun SortOption.icon(): ImageVector = when (this) {
     SortOption.REVIEWS_HIGH -> Icons.Rounded.Star
     SortOption.REVIEWS_GPU_HIGH -> Icons.Rounded.Stars
     SortOption.PURCHASE_DATE -> Icons.Default.AddShoppingCart
+    SortOption.RATING -> Icons.Rounded.Star
 }
