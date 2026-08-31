@@ -279,6 +279,7 @@ class EpicAppScreen : BaseAppScreen() {
         val gameNameForCompatibility = game?.title ?: libraryItem.name
         val (compatibilityMessage, compatibilityColor) = rememberCompatibilityInfo(
             context = context,
+            gameSource = libraryItem.gameSource,
             gameName = gameNameForCompatibility,
         )
 
