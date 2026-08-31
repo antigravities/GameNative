@@ -178,6 +178,7 @@ class AmazonAppScreen : BaseAppScreen() {
         val gameNameForCompatibility = g?.title ?: libraryItem.name
         val (compatibilityMessage, compatibilityColor) = rememberCompatibilityInfo(
             context = context,
+            gameSource = libraryItem.gameSource,
             gameName = gameNameForCompatibility,
         )
 
