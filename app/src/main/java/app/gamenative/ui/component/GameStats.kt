@@ -39,7 +39,7 @@ private data class StatEntry(val icon: ImageVector, val value: String)
 private fun Int?.orUnknown(): String = this?.toString() ?: "?"
 
 private fun statEntries(stats: GameCardStats?): List<StatEntry> = listOf(
-    StatEntry(Icons.Rounded.SportsEsports, (stats?.runsGpu ?: 0).toString()),
+    StatEntry(Icons.Rounded.SportsEsports, "${stats?.runsGpu ?: 0}/${stats?.runsDevice ?: 0}"),
     StatEntry(Icons.Rounded.Star, "${stats?.reviewsGpu ?: 0}/${stats?.reviewsDevice ?: 0}"),
     StatEntry(Icons.Rounded.Speed, (stats?.fps).orUnknown()),
     StatEntry(Icons.Rounded.Timer, (stats?.sessionSec)?.let { formatSessionLength(it) } ?: "?"),
