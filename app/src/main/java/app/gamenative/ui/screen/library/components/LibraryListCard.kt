@@ -238,7 +238,11 @@ internal fun ListViewCard(
             badgeStatus?.let { status ->
                 CompatibilityBadge(
                     status = status,
-                    showLabel = true,
+                    // Compatible/Unknown show icon-only (backdrop, no text) here, matching the
+                    // grid view's icon-only style; Not Compatible/Recommended keep the label pill.
+                    showLabel = status != GameCompatibilityStatus.COMPATIBLE &&
+                        status != GameCompatibilityStatus.GPU_COMPATIBLE &&
+                        status != GameCompatibilityStatus.UNKNOWN,
                 )
             }
         }
