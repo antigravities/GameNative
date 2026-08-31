@@ -47,6 +47,7 @@ import app.gamenative.ui.component.dialog.ExportFilesDialog
 import app.gamenative.ui.component.dialog.ImportFilesDialog
 import app.gamenative.ui.component.dialog.LoadingDialog
 import app.gamenative.ui.component.dialog.NexusModsDialog
+import app.gamenative.ui.component.dialog.ThunderstoreModInstallDialog
 import app.gamenative.ui.data.AppMenuOption
 import app.gamenative.ui.data.Achievement
 import app.gamenative.ui.data.GameDisplayInfo
@@ -177,6 +178,7 @@ abstract class BaseAppScreen {
         private val importFilesRequests = mutableStateMapOf<String, Boolean>()
         private val exportFilesRequests = mutableStateMapOf<String, Boolean>()
         private val manageModsRequests = mutableStateMapOf<String, Boolean>()
+        private val installThunderstoreModRequests = mutableStateMapOf<String, Boolean>()
         private val communityConfigRequests = mutableStateMapOf<String, Boolean>()
         private val knownConfigInstallStates = mutableStateMapOf<Int, KnownConfigInstallState>()
 
@@ -274,6 +276,18 @@ abstract class BaseAppScreen {
 
         fun shouldManageMods(appId: String): Boolean {
             return manageModsRequests[appId] == true
+        }
+
+        fun requestInstallThunderstoreMod(appId: String) {
+            installThunderstoreModRequests[appId] = true
+        }
+
+        fun clearInstallThunderstoreModRequest(appId: String) {
+            installThunderstoreModRequests.remove(appId)
+        }
+
+        fun shouldInstallThunderstoreMod(appId: String): Boolean {
+            return installThunderstoreModRequests[appId] == true
         }
 
         fun requestCommunityConfigs(appId: String) {
@@ -809,6 +823,17 @@ abstract class BaseAppScreen {
         },
     )
 
+    @Composable
+    protected open fun getInstallThunderstoreModOption(
+        context: Context,
+        libraryItem: LibraryItem,
+    ): AppMenuOption = AppMenuOption(
+        optionType = AppOptionMenuType.InstallThunderstoreMod,
+        onClick = {
+            requestInstallThunderstoreMod(libraryItem.appId)
+        },
+    )
+
     protected suspend fun cleanupNexusModsForApp(
         context: Context,
         libraryItem: LibraryItem,
@@ -1265,6 +1290,7 @@ abstract class BaseAppScreen {
 
         if (isInstalled) {
             menuOptions.add(getManageModsOption(context, libraryItem))
+            menuOptions.add(getInstallThunderstoreModOption(context, libraryItem))
         }
 
         // Add config-related options (export/import) after source-specific options,
@@ -1730,6 +1756,17 @@ abstract class BaseAppScreen {
                 }
         }
 
+        var installThunderstoreModRequested by remember(appId) {
+            mutableStateOf(shouldInstallThunderstoreMod(appId))
+        }
+
+        LaunchedEffect(appId) {
+            snapshotFlow { shouldInstallThunderstoreMod(appId) }
+                .collect { shouldRequest ->
+                    installThunderstoreModRequested = shouldRequest
+                }
+        }
+
         var communityConfigsRequested by remember(appId) {
             mutableStateOf(shouldBrowseCommunityConfigs(appId))
         }
@@ -1828,7 +1865,8 @@ abstract class BaseAppScreen {
             onBack = onBack,
             achievements = achievementsState,
             optionsMenu = optionsMenu,
-            dialogOpen = showConfigDialog || communityConfigsRequested || manageModsRequested || importFilesRequested || exportFilesRequested,
+            dialogOpen = showConfigDialog || communityConfigsRequested || manageModsRequested ||
+                importFilesRequested || exportFilesRequested || installThunderstoreModRequested,
         )
 
         if (showReadiness && launchActivity != null) {
@@ -1933,6 +1971,17 @@ abstract class BaseAppScreen {
                 winePrefix = ModContainerResolver.getWinePrefix(context, libraryItem.appId),
                 onDismissRequest = {
                     clearManageModsRequest(appId)
+                },
+            )
+        }
+
+        if (installThunderstoreModRequested) {
+            ThunderstoreModInstallDialog(
+                visible = true,
+                appId = libraryItem.appId,
+                gameRootDir = getInstallPath(context, libraryItem)?.let { File(it) },
+                onDismissRequest = {
+                    clearInstallThunderstoreModRequest(appId)
                 },
             )
         }
