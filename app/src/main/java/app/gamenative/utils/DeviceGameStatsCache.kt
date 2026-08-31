@@ -121,3 +121,13 @@ object DeviceGameStatsCache {
         Timber.tag("DeviceGameStatsCache").d("Cache cleared")
     }
 }
+
+/**
+ * Median FPS for one source's game: device-exact first, then GPU-only fallback (GPU and CPU are
+ * effectively the same SOC on these devices, so a GPU match is still a reasonably precise proxy).
+ * 0 when neither dataset has an entry.
+ */
+fun medianFpsFor(source: GameSource, gameName: String): Int =
+    DeviceGameStatsCache.getStats(source, gameName)?.medianFps
+        ?: GpuGameStatsCache.getStats(source, gameName)?.medianFps
+        ?: 0
