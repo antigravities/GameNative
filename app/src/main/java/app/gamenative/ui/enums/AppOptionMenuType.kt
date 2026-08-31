@@ -37,6 +37,7 @@ enum class AppOptionMenuType(@StringRes val title: Int) {
     ManageGameContent(R.string.option_manage_dlc),
     ManageWorkshop(R.string.option_manage_workshop),
     ManageMods(R.string.option_manage_mods),
+    InstallThunderstoreMod(R.string.option_install_thunderstore_mod),
     ChangeBranch(R.string.change_branch),
     ChangePreferredCopy(R.string.change_preferred_copy),
     AddToFavorites(R.string.option_add_to_favorites),
