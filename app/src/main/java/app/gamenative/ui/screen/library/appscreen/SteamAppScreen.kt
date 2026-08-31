@@ -416,6 +416,7 @@ class SteamAppScreen : BaseAppScreen() {
 
         val (compatibilityMessage, compatibilityColor) = rememberCompatibilityInfo(
             context = context,
+            gameSource = libraryItem.gameSource,
             gameName = appInfo.name,
         )
 
