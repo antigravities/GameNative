@@ -75,7 +75,7 @@ private const val LIBRARY_FILTERS =
 // SteamAppSummary mapping is unaffected.
 private const val SUMMARY_COLS =
     "app.id, app.name, app.type, app.package_id, app.client_icon_hash, app.library_assets, " +
-    "app.owner_account_id, app.install_dir, app.size_bytes "
+    "app.owner_account_id, app.install_dir, app.size_bytes, app.review_score, app.review_percentage "
 
 // Projection for buildLibraryPageQuery: SUMMARY returns the full SteamAppSummary columns (one page,
 // blobs included); STUB returns only the lightweight OrderedSteamStub columns (id, name_sort_key,
@@ -123,7 +123,8 @@ fun buildLibraryPageQuery(
             // Project the license purchase timestamp only when sorting by it; otherwise use a
             // literal 0 so the column is always present in the cursor for OrderedSteamStub.
             val purchaseDate = if (usesPurchaseDate) "COALESCE(lic.time_created, 0)" else "0"
-            "app.id, app.name_sort_key, app.size_bytes, $downloaded AS is_downloaded, $purchaseDate AS time_created_epoch "
+            "app.id, app.name_sort_key, app.size_bytes, app.review_score, app.review_percentage, " +
+                "$downloaded AS is_downloaded, $purchaseDate AS time_created_epoch "
         }
     }
     sb.append("SELECT ").append(selectCols).append("FROM steam_app AS app ")
@@ -160,6 +161,7 @@ fun buildLibraryPageQuery(
         SortOption.INSTALLED_FIRST, SortOption.RECENTLY_PLAYED ->
             sb.append("(CASE WHEN app_info.is_downloaded = 1 THEN 0 ELSE 1 END), app.name_sort_key, app.id ")
         SortOption.PURCHASE_DATE -> sb.append("time_created_epoch DESC, app.name_sort_key, app.id ")
+        SortOption.RATING -> sb.append("app.review_score DESC, app.review_percentage DESC, app.name_sort_key, app.id ")
         else -> sb.append("app.name_sort_key, app.id ") // NAME_ASC and any future default
     }
 
@@ -279,7 +281,7 @@ interface SteamAppDao {
 
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, size_bytes " +
+            "owner_account_id, install_dir, size_bytes, review_score, review_percentage " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "ORDER BY LOWER(app.name), app.id LIMIT :limit OFFSET :offset",
     )
@@ -338,7 +340,7 @@ interface SteamAppDao {
     // An FTS5 virtual table (proposal #4) would fix this properly.
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, size_bytes " +
+            "owner_account_id, install_dir, size_bytes, review_score, review_percentage " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.type IN (:types) " +
             "AND LOWER(app.name) LIKE '%' || LOWER(:searchQuery) || '%' " +
@@ -480,7 +482,7 @@ interface SteamAppDao {
     // rather than the whole owned list.
     @Query(
         "SELECT id, name, type, package_id, client_icon_hash, library_assets, " +
-            "owner_account_id, install_dir, size_bytes " +
+            "owner_account_id, install_dir, size_bytes, review_score, review_percentage " +
             "FROM steam_app AS app " + OWNED_APPS_WHERE +
             "AND app.id IN (:ids)",
     )
