@@ -114,12 +114,16 @@ fun buildLibraryPageQuery(
     val sb = StringBuilder()
 
     val usesInstalledTier = sortOption == SortOption.INSTALLED_FIRST || sortOption == SortOption.RECENTLY_PLAYED
+    val usesPurchaseDate = sortOption == SortOption.PURCHASE_DATE
     val joinedAppInfo = installedFilter || usesInstalledTier
     val selectCols = when (projection) {
         LibraryProjection.SUMMARY -> SUMMARY_COLS
         LibraryProjection.STUB -> {
             val downloaded = if (joinedAppInfo) "COALESCE(app_info.is_downloaded, 0)" else "0"
-            "app.id, app.name_sort_key, app.size_bytes, $downloaded AS is_downloaded "
+            // Project the license purchase timestamp only when sorting by it; otherwise use a
+            // literal 0 so the column is always present in the cursor for OrderedSteamStub.
+            val purchaseDate = if (usesPurchaseDate) "COALESCE(lic.time_created, 0)" else "0"
+            "app.id, app.name_sort_key, app.size_bytes, $downloaded AS is_downloaded, $purchaseDate AS time_created_epoch "
         }
     }
     sb.append("SELECT ").append(selectCols).append("FROM steam_app AS app ")
@@ -127,6 +131,10 @@ fun buildLibraryPageQuery(
         sb.append("INNER JOIN app_info ON app_info.id = app.id AND app_info.is_downloaded = 1 ")
     } else if (usesInstalledTier) {
         sb.append("LEFT JOIN app_info ON app_info.id = app.id ")
+    }
+    // Join steam_license only for PURCHASE_DATE sort to avoid overhead on other sorts.
+    if (usesPurchaseDate) {
+        sb.append("LEFT JOIN steam_license AS lic ON lic.packageId = app.package_id ")
     }
 
     // OWNED_APPS_WHERE, inlined with positional args (the EXISTS subqueries bind nothing).
@@ -151,6 +159,7 @@ fun buildLibraryPageQuery(
         SortOption.SIZE_LARGEST -> sb.append("app.size_bytes DESC, app.name_sort_key, app.id ")
         SortOption.INSTALLED_FIRST, SortOption.RECENTLY_PLAYED ->
             sb.append("(CASE WHEN app_info.is_downloaded = 1 THEN 0 ELSE 1 END), app.name_sort_key, app.id ")
+        SortOption.PURCHASE_DATE -> sb.append("time_created_epoch DESC, app.name_sort_key, app.id ")
         else -> sb.append("app.name_sort_key, app.id ") // NAME_ASC and any future default
     }
 

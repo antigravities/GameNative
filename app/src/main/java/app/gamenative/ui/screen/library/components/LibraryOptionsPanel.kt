@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Download
@@ -559,4 +560,5 @@ private fun SortOption.icon(): ImageVector = when (this) {
     SortOption.RUNS_HIGH -> Icons.Rounded.SportsEsports
     SortOption.REVIEWS_HIGH -> Icons.Rounded.Star
     SortOption.REVIEWS_GPU_HIGH -> Icons.Rounded.Stars
+    SortOption.PURCHASE_DATE -> Icons.Default.AddShoppingCart
 }
