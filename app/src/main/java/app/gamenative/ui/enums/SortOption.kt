@@ -21,6 +21,7 @@ enum class SortOption(
     REVIEWS_HIGH(displayTextRes = R.string.sort_reviews, key = "reviews_high"),
     REVIEWS_GPU_HIGH(displayTextRes = R.string.sort_reviews_gpu, key = "reviews_gpu_high"),
     PURCHASE_DATE(displayTextRes = R.string.sort_purchase_date, key = "purchase_date"),
+    RATING(displayTextRes = R.string.sort_rating, key = "rating"),
     ;
 
     companion object {
