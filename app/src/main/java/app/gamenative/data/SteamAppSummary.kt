@@ -21,6 +21,12 @@ data class SteamAppSummary(
     val installDir: String = "",
     @ColumnInfo("size_bytes")
     val sizeBytes: Long = 0,
+    // Steam review data (synced via PICS) for the RATING library sort. review_score is the 0-9
+    // bucket ("Very Positive" = 8), review_percentage the % positive; both 0 when unrated.
+    @ColumnInfo("review_score")
+    val reviewScore: Int = 0,
+    @ColumnInfo("review_percentage")
+    val reviewPercentage: Int = 0,
     // Same columns as SteamApp; selected by the DAO summary queries for the VR library filter.
     @ColumnInfo("is_vr_only")
     val isVrOnly: Boolean = false,
