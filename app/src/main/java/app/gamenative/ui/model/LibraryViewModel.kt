@@ -55,6 +55,7 @@ import app.gamenative.utils.CustomGameScanner
 import app.gamenative.data.RecommendationRepository
 import app.gamenative.data.RecommendedGame
 import app.gamenative.utils.DeviceGameStatsCache
+import app.gamenative.utils.medianFpsFor
 import app.gamenative.utils.GpuGameStatsCache
 import app.gamenative.utils.GameCompatibilityCache
 import app.gamenative.utils.GameCompatibilityService
@@ -830,7 +831,7 @@ class LibraryViewModel @Inject constructor(
                     return true
                 }
                 val cached = GameCompatibilityCache.getCached(gameName) ?: return true
-                val status = compatibilityStatusFor(cached)
+                val status = compatibilityStatusFor(gameName, cached)
                 return status == GameCompatibilityStatus.COMPATIBLE || status == GameCompatibilityStatus.GPU_COMPATIBLE
             }
 
@@ -1833,7 +1834,7 @@ class LibraryViewModel @Inject constructor(
         results: Map<String, GameCompatibilityService.GameCompatibilityResponse>
     ) {
         val compatibilityMap = results.mapValues { (gameName, response) ->
-            compatibilityStatusFor(response)
+            compatibilityStatusFor(gameName, response)
         }
 
         // Update state with compatibility map (merge with existing)
@@ -1845,15 +1846,30 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    // compatibilityMap is keyed by game name only (no platform — a pre-existing simplification
+    // in this subsystem), so FPS is looked up across all sources for that name via medianFpsFor
+    // (device-exact first, then GPU-only fallback per source).
+    private fun medianFpsForName(gameName: String): Int {
+        for (source in GameSource.entries) {
+            medianFpsFor(source, gameName).takeIf { it > 0 }?.let { return it }
+        }
+        return 0
+    }
+
+    // Locally-derived verdict: the server's aggregate response only supplies avgRating here
+    // (totalPlayableCount/gpuPlayableCount/isNotWorking are left for getCompatibilityMessageFromResponse's
+    // separate game-page text). A game is COMPATIBLE only when the community rating is decent
+    // AND this device/GPU has a confirmed playable median FPS — both already-fetched datasets,
+    // so this adds no new requests. NOT_COMPATIBLE/GPU_COMPATIBLE are intentionally not produced.
     private fun compatibilityStatusFor(
+        gameName: String,
         response: GameCompatibilityService.GameCompatibilityResponse,
     ): GameCompatibilityStatus {
-        return when {
-            response.isNotWorking -> GameCompatibilityStatus.NOT_COMPATIBLE
-            !response.hasBeenTried -> GameCompatibilityStatus.UNKNOWN
-            response.gpuPlayableCount > 0 -> GameCompatibilityStatus.GPU_COMPATIBLE
-            response.totalPlayableCount > 0 -> GameCompatibilityStatus.COMPATIBLE
-            else -> GameCompatibilityStatus.UNKNOWN
+        val medianFps = medianFpsForName(gameName)
+        return if (response.avgRating >= 3.0f && medianFps >= 20) {
+            GameCompatibilityStatus.COMPATIBLE
+        } else {
+            GameCompatibilityStatus.UNKNOWN
         }
     }
 }

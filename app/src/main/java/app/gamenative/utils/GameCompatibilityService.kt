@@ -1,9 +1,7 @@
 package app.gamenative.utils
 
-import android.content.Context
 import androidx.compose.ui.graphics.Color
 import app.gamenative.BuildConfig
-import app.gamenative.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -48,20 +46,21 @@ object GameCompatibilityService {
     )
 
     /**
-     * Gets user-friendly compatibility message based on compatibility response.
-     * Uses totalPlayableCount and gpuPlayableCount to determine the message.
+     * Gets a compatibility message showing the community's average rating and this device/GPU's
+     * confirmed median FPS, e.g. "4⭐, ⏱ 60 FPS". Shows just one half when only one value is
+     * available, or null (hide entirely) when neither is.
      */
-    fun getCompatibilityMessageFromResponse(context: Context, response: GameCompatibilityResponse): CompatibilityMessage {
-        return when {
-            response.totalPlayableCount > 0 && response.gpuPlayableCount > 0 ->
-                CompatibilityMessage(context.getString(R.string.best_config_exact_gpu_match), Color.Green)
-            response.gpuPlayableCount == 0 && response.totalPlayableCount > 0 ->
-                CompatibilityMessage(context.getString(R.string.best_config_fallback_match), Color.Yellow)
-            response.isNotWorking ->
-                CompatibilityMessage(context.getString(R.string.library_not_compatible), Color.Red)
-            else ->
-                CompatibilityMessage(context.getString(R.string.library_compatibility_unknown), Color.Gray)
-        }
+    fun getCompatibilityMessageFromResponse(
+        response: GameCompatibilityResponse,
+        medianFps: Int,
+    ): CompatibilityMessage? {
+        val stars = Math.round(response.avgRating).takeIf { response.avgRating > 0f }
+        val fps = medianFps.takeIf { medianFps > 0 }
+        val text = listOfNotNull(
+            stars?.let { "$it⭐" },
+            fps?.let { "⏱ $it FPS" },
+        ).joinToString(", ")
+        return if (text.isEmpty()) null else CompatibilityMessage(text, Color.Green)
     }
 
     /**

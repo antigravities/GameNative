@@ -52,6 +52,7 @@ import app.gamenative.utils.DiagnosticsLog
 import app.gamenative.utils.GameCompatibilityCache
 import app.gamenative.utils.GameCompatibilityService
 import app.gamenative.utils.ManifestInstaller
+import app.gamenative.utils.medianFpsFor
 import app.gamenative.utils.createPinnedShortcut
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
@@ -290,6 +291,7 @@ abstract class BaseAppScreen {
     @Composable
     protected fun rememberCompatibilityInfo(
         context: Context,
+        gameSource: GameSource,
         gameName: String,
     ): Pair<String?, ULong?> {
         var compatibilityMessage by remember(gameName) { mutableStateOf<String?>(null) }
@@ -303,14 +305,12 @@ abstract class BaseAppScreen {
             }
             try {
                 val cachedResponse = GameCompatibilityCache.getCached(gameName)
-                if (cachedResponse != null) {
-                    val message = GameCompatibilityService.getCompatibilityMessageFromResponse(context, cachedResponse)
-                    compatibilityMessage = message.text
-                    compatibilityColor = message.color.value
-                } else {
-                    compatibilityMessage = null
-                    compatibilityColor = null
+                val medianFps = medianFpsFor(gameSource, gameName)
+                val message = cachedResponse?.let {
+                    GameCompatibilityService.getCompatibilityMessageFromResponse(it, medianFps)
                 }
+                compatibilityMessage = message?.text
+                compatibilityColor = message?.color?.value
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
