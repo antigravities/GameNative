@@ -335,7 +335,11 @@ internal fun GridViewCard(
                 badgeStatus?.let { status ->
                     CompatibilityBadge(
                         status = status,
-                        showLabel = true,
+                        // Compatible/Unknown show icon-only (backdrop, no text), matching
+                        // list view; Not Compatible/Recommended keep the label pill.
+                        showLabel = status != GameCompatibilityStatus.COMPATIBLE &&
+                            status != GameCompatibilityStatus.GPU_COMPATIBLE &&
+                            status != GameCompatibilityStatus.UNKNOWN,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(top = topOverlayPadding, start = topOverlayPadding),
