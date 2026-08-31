@@ -1833,6 +1833,13 @@
     <string name="option_manage_dlc">Manage DLC</string>
     <string name="option_manage_workshop">Manage Workshop</string>
     <string name="option_manage_mods">Manage Nexus Mods</string>
+    <string name="option_install_thunderstore_mod">Install Thunderstore / r2modman ZIP</string>
+    <string name="thunderstore_install_title">Install Thunderstore / r2modman ZIP</string>
+    <string name="thunderstore_install_choose_zip">Choose ZIP file</string>
+    <string name="thunderstore_install_installing">Installing mod…</string>
+    <string name="thunderstore_install_success">Mod installed successfully</string>
+    <string name="thunderstore_install_error">Failed to install mod: %1$s</string>
+    <string name="thunderstore_install_unity_no_bepinex_warning">This looks like a Unity game and BepInEx does not appear to be installed yet. The mod was installed, but it may not load until a BepInExPack is installed.</string>
     <string name="nexus_search_clear">Clear search</string>
     <string name="nexus_filter_all">All</string>
     <string name="nexus_filter_downloadable">Downloadable</string>
