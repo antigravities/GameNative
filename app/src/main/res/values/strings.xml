@@ -1553,6 +1553,7 @@
     <string name="sort_reviews">5-star reviews (device)</string>
     <string name="sort_reviews_gpu">5-star reviews (GPU)</string>
     <string name="sort_purchase_date">Purchase Date</string>
+    <string name="sort_rating">Highest Rated</string>
 
     <!-- Game Options Panel -->
     <string name="game_options_title">Options</string>

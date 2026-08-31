@@ -165,6 +165,11 @@ class LibraryViewModel @Inject constructor(
         // Unix timestamp (ms) from steam_license.time_created for the PURCHASE_DATE sort.
         // Non-Steam sources have no license data → 0, sinking them to the bottom.
         abstract val purchaseDateEpoch: Long
+        // Packed Steam review rank for the RATING sort: review_score * 1000 + review_percentage.
+        // Since percentage < 1000 a single Int comparison reproduces the two-column SQL ORDER BY
+        // (review_score DESC, review_percentage DESC). Non-Steam sources have no rating data → 0,
+        // which sinks them to the bottom alongside unrated Steam apps.
+        abstract val ratingRank: Int
 
         data class Steam(
             val appId: Int,
@@ -172,6 +177,7 @@ class LibraryViewModel @Inject constructor(
             override val sizeBytes: Long,
             override val installedTier: Boolean,
             override val purchaseDateEpoch: Long,
+            override val ratingRank: Int,
         ) : LibraryRef()
 
         // displayInstalled is the badge value (kept verbatim from the prebuilt entry); installedTier is
@@ -183,6 +189,7 @@ class LibraryViewModel @Inject constructor(
             override val sizeBytes: Long,
             override val installedTier: Boolean,
             override val purchaseDateEpoch: Long = 0,
+            override val ratingRank: Int = 0,
         ) : LibraryRef()
     }
 
@@ -922,6 +929,13 @@ class LibraryViewModel @Inject constructor(
                 .filter { item -> passesStatsFilters(currentState, GameSource.STEAM, item.name) }
                 .toList()
 
+            // Packed Steam review rank (score * 1000 + percentage) keyed by composite appId, for the
+            // RATING sort. Same packing as LibraryRef.ratingRank on the SQL path. Non-Steam entries
+            // are absent from the map and default to 0 in the comparator (no rating data → bottom).
+            val ratingOf = filteredSteamApps.associate { summary ->
+                "${GameSource.STEAM.name}_${summary.id}" to (summary.reviewScore * 1000 + summary.reviewPercentage)
+            }
+
             // Map Steam apps to UI items.
             fun lastPlayedFor(appId: String): Long = playHistoryByAppId[appId] ?: 0L
 
@@ -1199,6 +1213,9 @@ class LibraryViewModel @Inject constructor(
                 // to name order (same behaviour as hitting this path for any other non-stats sort
                 // that lacks an in-memory equivalent).
                 SortOption.PURCHASE_DATE -> compareBy { it.item.name.lowercase() }
+
+                SortOption.RATING -> compareByDescending<LibraryEntry> { ratingOf[it.item.appId] ?: 0 }
+                    .thenBy { it.item.name.lowercase() }
             }
 
             // A Steam collection can only contain Steam apps, so when one is selected the non-Steam
@@ -1522,6 +1539,7 @@ class LibraryViewModel @Inject constructor(
                     sizeBytes = stub.sizeBytes,
                     installedTier = stub.isDownloaded,
                     purchaseDateEpoch = stub.timeCreatedEpoch,
+                    ratingRank = stub.reviewScore * 1000 + stub.reviewPercentage,
                 )
             }
         } else {
@@ -1596,6 +1614,7 @@ class LibraryViewModel @Inject constructor(
             SortOption.SIZE_SMALLEST -> compareBy<LibraryRef> { it.sizeBytes }.thenBy { it.sortKey }
             SortOption.SIZE_LARGEST -> compareByDescending<LibraryRef> { it.sizeBytes }.thenBy { it.sortKey }
             SortOption.PURCHASE_DATE -> compareByDescending<LibraryRef> { it.purchaseDateEpoch }.thenBy { it.sortKey }
+            SortOption.RATING -> compareByDescending<LibraryRef> { it.ratingRank }.thenBy { it.sortKey }
             // Stats sorts (FPS_HIGH, RUNS_HIGH, REVIEWS_HIGH, REVIEWS_GPU_HIGH) are routed to
             // filterAppsInMemory before refComparator is called, so this branch is unreachable.
             else -> compareBy { it.sortKey }

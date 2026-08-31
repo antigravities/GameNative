@@ -21,4 +21,10 @@ data class OrderedSteamStub(
     // Zero when the sort is not PURCHASE_DATE (the query projects a literal 0 instead of joining).
     @ColumnInfo("time_created_epoch")
     val timeCreatedEpoch: Long = 0,
+    // Steam review data for the RATING sort: review_score is the 0-9 bucket ("Very Positive" = 8),
+    // review_percentage the % positive. Both are 0 for unrated apps.
+    @ColumnInfo("review_score")
+    val reviewScore: Int = 0,
+    @ColumnInfo("review_percentage")
+    val reviewPercentage: Int = 0,
 )
