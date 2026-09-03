@@ -1259,6 +1259,7 @@ abstract class BaseAppScreen {
         onPlayWithDiagnostics: () -> Unit,
         onAiDebugRun: () -> Unit,
         exportFrontendLauncher: ActivityResultLauncher<String>,
+        onViewScreenshots: () -> Unit,
     ): List<AppMenuOption> {
         val isInstalled = isInstalled(context, libraryItem)
         val menuOptions = mutableListOf<AppMenuOption>()
@@ -1276,6 +1277,8 @@ abstract class BaseAppScreen {
             getResetContainerOption(context, libraryItem)?.let { menuOptions.add(it) }
             getCreateShortcutOption(context, libraryItem)?.let { menuOptions.add(it) }
             getExportContainerOption(context, libraryItem, exportFrontendLauncher)?.let { menuOptions.add(it) }
+            // Screenshots quick action, shown when installed, directly after Export for frontend.
+            menuOptions.add(AppMenuOption(AppOptionMenuType.Screenshots, onClick = onViewScreenshots))
             getCopyLaunchLinkOption(context, libraryItem)?.let { menuOptions.add(it) }
         }
 
@@ -1336,6 +1339,7 @@ abstract class BaseAppScreen {
         onPlayWithDiagnostics: () -> Unit,
         onAiDebugRun: () -> Unit,
         onBack: () -> Unit,
+        onViewScreenshots: () -> Unit = {},
     ) {
         val context = LocalContext.current
         val displayInfoBase = getGameDisplayInfo(context, libraryItem)
@@ -1789,6 +1793,7 @@ abstract class BaseAppScreen {
             onPlayWithDiagnostics,
             onAiDebugRun,
             exportFrontendLauncher,
+            onViewScreenshots,
         )
 
         // Get download info based on game source for progress tracking
@@ -1875,6 +1880,7 @@ abstract class BaseAppScreen {
             },
             onBack = onBack,
             achievements = achievementsState,
+            onViewScreenshots = onViewScreenshots,
             optionsMenu = optionsMenu,
             dialogOpen = showConfigDialog || communityConfigsRequested || manageModsRequested ||
                 importFilesRequested || exportFilesRequested || installThunderstoreModRequested,

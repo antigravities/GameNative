@@ -72,8 +72,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
@@ -128,7 +126,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -167,6 +164,8 @@ import app.gamenative.service.SteamService
 import app.gamenative.ui.component.GamepadAction
 import app.gamenative.ui.component.GamepadActionBar
 import app.gamenative.ui.component.GamepadButton
+import app.gamenative.ui.component.LoadingScreen
+import app.gamenative.ui.component.ScreenshotsPreviewStrip
 import app.gamenative.ui.component.focusRing
 import app.gamenative.ui.data.AppMenuOption
 import app.gamenative.ui.data.DownloadDisplayDetails
@@ -420,11 +419,12 @@ private fun HltbInfoBar(
         stringResource(R.string.hltb_all_styles) to stats.allStylesHours,
     )
     val canOpenHltb = stats.gameId > 0
+    val hltbShape = RoundedCornerShape(16.dp)
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(hltbShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .padding(14.dp),
     ) {
@@ -872,6 +872,7 @@ fun AppScreen(
     onPlayWithDiagnostics: () -> Unit,
     onAiDebugRun: () -> Unit,
     onBack: () -> Unit,
+    onViewScreenshots: () -> Unit = {},
 ) {
     // Get the appropriate screen model based on game source
     val screenModel = remember(libraryItem.gameSource) {
@@ -892,6 +893,7 @@ fun AppScreen(
         onPlayWithDiagnostics = onPlayWithDiagnostics,
         onAiDebugRun = onAiDebugRun,
         onBack = onBack,
+        onViewScreenshots = onViewScreenshots,
     )
 }
 
@@ -982,6 +984,7 @@ internal fun AppScreenContent(
     onUpdateClick: () -> Unit,
     onBack: () -> Unit = {},
     achievements: List<Achievement>? = null,
+    onViewScreenshots: () -> Unit = {},
     optionsMenu: List<AppMenuOption>,
     dialogOpen: Boolean = false,
     immersiveMode: ImmersiveModeUiState = ImmersiveModeUiState(),
@@ -1826,6 +1829,12 @@ internal fun AppScreenContent(
                 if (!achievements.isNullOrEmpty()) {
                     AchievementsRow(achievements = achievements)
                 }
+                // Screenshots preview (hidden when the game has none)
+                Spacer(modifier = Modifier.height(10.dp))
+                ScreenshotsPreviewStrip(
+                    appId = displayInfo.appId,
+                    onClick = onViewScreenshots,
+                )
 
             }
         }

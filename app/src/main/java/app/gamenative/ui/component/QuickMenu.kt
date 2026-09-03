@@ -51,6 +51,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
@@ -146,6 +147,7 @@ object QuickMenuAction {
     const val CONTROL_PROFILES = 12
     const val CONTROL_PROFILE_APPLIED = 13
     const val PHYSICAL_CONTROLLER_SETTINGS = 14
+    const val TAKE_SCREENSHOT = 15
 }
 
 private object QuickMenuTab {
@@ -158,6 +160,7 @@ private object QuickMenuTab {
     const val INVITE = 6
     const val POWER = 7
     const val TRANSLATE = 8
+    const val SCREENSHOTS = 9
 }
 
 private class GyroQuickMenuState(private val container: Container) {
@@ -442,6 +445,10 @@ fun QuickMenu(
     translation: QuickMenuTranslationState = QuickMenuTranslationState(),
     translationCallbacks: QuickMenuTranslationCallbacks = QuickMenuTranslationCallbacks(),
     onAnimationComplete: (Boolean) -> Unit = {},
+    appId: String = "",
+    screenshotRefreshKey: Int = 0,
+    onOpenScreenshotGallery: () -> Unit = {},
+    onOpenScreenshotViewer: (index: Int) -> Unit = {},
     /** Lets the menu open itself when the running game asks for its Steam invite dialog. */
     onRequestOpen: () -> Unit = {},
     immersiveHooks: app.gamenative.ui.screen.xr.ImmersiveSessionHooks? = null,
@@ -612,6 +619,7 @@ fun QuickMenu(
         QuickMenuTab.LSFG -> R.string.lsfg_tab_title
         QuickMenuTab.EFFECTS -> R.string.screen_effects
         QuickMenuTab.TOOLS -> R.string.task_manager
+        QuickMenuTab.SCREENSHOTS -> R.string.screenshots_tab
         QuickMenuTab.INVITE -> R.string.steam_invite_tab_title
         QuickMenuTab.POWER -> R.string.power_control
         QuickMenuTab.IMMERSIVE -> R.string.quick_menu_tab_immersive
@@ -628,11 +636,13 @@ fun QuickMenu(
     val hudTabFocusRequester = remember { FocusRequester() }
     val controllerTabFocusRequester = remember { FocusRequester() }
     val toolsTabFocusRequester = remember { FocusRequester() }
+    val screenshotsTabFocusRequester = remember { FocusRequester() }
     val powerTabFocusRequester = remember { FocusRequester() }
     val hudItemFocusRequester = remember { FocusRequester() }
     val effectsItemFocusRequester = remember { FocusRequester() }
     val controllerItemFocusRequester = remember { FocusRequester() }
     val toolsItemFocusRequester = remember { FocusRequester() }
+    val screenshotsItemFocusRequester = remember { FocusRequester() }
     val lsfgItemFocusRequester = remember { FocusRequester() }
     val inviteTabFocusRequester = remember { FocusRequester() }
     val inviteItemFocusRequester = remember { FocusRequester() }
@@ -976,6 +986,18 @@ fun QuickMenu(
                                     modifier = Modifier.width(56.dp),
                                     focusRequester = translateTabFocusRequester,
                                 )
+                                QuickMenuTabButton(
+                                    icon = Icons.Default.PhotoCamera,
+                                    contentDescriptionResId = R.string.screenshots_tab,
+                                    selected = selectedTab == QuickMenuTab.SCREENSHOTS,
+                                    accentColor = PluviaTheme.colors.accentPurple,
+                                    onSelected = {
+                                        selectedTab = QuickMenuTab.SCREENSHOTS
+                                        PrefManager.quickMenuLastTab = selectedTab
+                                    },
+                                    modifier = Modifier.width(56.dp),
+                                    focusRequester = screenshotsTabFocusRequester,
+                                )
                             }
 
                             Box(
@@ -1187,6 +1209,18 @@ fun QuickMenu(
                                         )
                                     }
 
+                                    QuickMenuTab.SCREENSHOTS -> {
+                                        ScreenshotsQuickMenuTab(
+                                            appId = appId,
+                                            refreshKey = screenshotRefreshKey,
+                                            onTakeScreenshot = { onItemSelected(QuickMenuAction.TAKE_SCREENSHOT) },
+                                            onOpenGallery = onOpenScreenshotGallery,
+                                            onOpenViewer = onOpenScreenshotViewer,
+                                            firstItemFocusRequester = screenshotsItemFocusRequester,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
+
                                     QuickMenuTab.CONTROLLER -> {
                                         Column(
                                             modifier = Modifier
@@ -1345,6 +1379,7 @@ fun QuickMenu(
                         QuickMenuTab.TOOLS -> toolsItemFocusRequester.requestFocus()
                         QuickMenuTab.IMMERSIVE -> immersiveItemFocusRequester.requestFocus()
                         QuickMenuTab.TRANSLATE -> Unit
+                        QuickMenuTab.SCREENSHOTS -> screenshotsItemFocusRequester.requestFocus()
                         else -> controllerItemFocusRequester.requestFocus()
                     }
                     Timber.i("QuickMenu: requestFocus succeeded for tab=%d on attempt=%d", selectedTab, attempt)
