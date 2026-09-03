@@ -17,6 +17,7 @@ import app.gamenative.data.RecommendationRepository
 import app.gamenative.data.RecommendedGame
 import app.gamenative.ui.data.LibraryState
 import app.gamenative.ui.enums.AppFilter
+import app.gamenative.ui.screen.PluviaScreen
 import app.gamenative.ui.screen.library.AppScreen
 import app.gamenative.ui.screen.library.RecommendedGameScreen
 import app.gamenative.ui.theme.PluviaTheme
@@ -31,6 +32,7 @@ internal fun LibraryDetailPane(
     onPlayWithDiagnostics: () -> Unit,
     onAiDebugRun: () -> Unit,
     onBack: () -> Unit,
+    onNavigateRoute: (String) -> Unit,
 ) {
     Surface {
         if (libraryItem == null) {
@@ -81,6 +83,9 @@ internal fun LibraryDetailPane(
                 onPlayWithDiagnostics = onPlayWithDiagnostics,
                 onAiDebugRun = onAiDebugRun,
                 onBack = onBack,
+                onViewScreenshots = {
+                    onNavigateRoute(PluviaScreen.ScreenshotGallery.route(libraryItem.appId))
+                },
             )
         }
     }
@@ -108,6 +113,7 @@ private fun Preview_LibraryDetailPane() {
             onPlayWithDiagnostics = { },
             onAiDebugRun = { },
             onBack = { },
+            onNavigateRoute = { },
         )
     }
 }
