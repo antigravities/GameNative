@@ -35,6 +35,19 @@ public class ImageFs {
     }
 
     /** Shared Proton directory; opt/<version> in each variant symlinks here. */
+    /**
+     * Store for prefix content that is byte-identical across containers (Wine-Mono, Fonts), so each
+     * container can symlink to one copy instead of holding its own. Lives outside the imagefs root,
+     * like the shared Proton dir, so it survives an imagefs reinstall.
+     */
+    public static File getPrefixCacheDir(Context context) {
+        File prefixCacheDir = new File(context.getFilesDir(), "imagefs_shared/prefix_cache");
+        if (!prefixCacheDir.exists()) {
+            prefixCacheDir.mkdirs();
+        }
+        return prefixCacheDir;
+    }
+
     public static File getSharedProtonDir(Context context) {
         File sharedProtonDir = new File(context.getFilesDir(), "imagefs_shared/proton");
         if (!sharedProtonDir.exists()) {
