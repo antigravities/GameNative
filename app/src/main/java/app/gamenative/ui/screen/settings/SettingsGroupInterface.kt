@@ -363,7 +363,7 @@ fun SettingsGroupInterface(
                 PrefManager.showRecommendations = enabled
                 PluviaApp.events.emit(
                     AndroidEvent.LibraryTabsChanged(
-                        libraryTabs.filter { tab -> tab != LibraryTab.RECOMMENDED || enabled },
+                        libraryTabs,
                     ),
                 )
                 PluviaApp.events.emit(AndroidEvent.RecommendationToggleChanged)
@@ -423,7 +423,7 @@ fun SettingsGroupInterface(
                 PrefManager.libraryTabs = libraryTabs
                 PluviaApp.events.emit(
                     AndroidEvent.LibraryTabsChanged(
-                        libraryTabs.filter { it != LibraryTab.RECOMMENDED || showRecommendations },
+                        libraryTabs,
                     ),
                 )
             },

@@ -1299,13 +1299,6 @@ object PrefManager {
             setPref(SHOW_HIDDEN_GAMES_BY_DEFAULT, value)
         }
 
-    private val REC_DISCLOSURE_SHOWN = booleanPreferencesKey("rec_disclosure_shown")
-    var recDisclosureShown: Boolean
-        get() = getPref(REC_DISCLOSURE_SHOWN, false)
-        set(value) {
-            setPref(REC_DISCLOSURE_SHOWN, value)
-        }
-
     // Show dialog when adding custom game folder
     private val SHOW_ADD_CUSTOM_GAME_DIALOG = booleanPreferencesKey("show_add_custom_game_dialog")
     var showAddCustomGameDialog: Boolean
