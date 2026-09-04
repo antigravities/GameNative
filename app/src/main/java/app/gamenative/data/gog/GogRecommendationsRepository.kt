@@ -162,7 +162,6 @@ object GogRecommendationsRepository {
                 reviewScore = rating?.let { Math.round(it.value * 20).toInt() },
                 reviewCount = rating?.count,
                 affiliateUrl = card.affiliateUrl,
-                priceLabel = card.priceLabel,
                 tags = tags,
                 screenshots = screenshots,
                 videos = videos,
