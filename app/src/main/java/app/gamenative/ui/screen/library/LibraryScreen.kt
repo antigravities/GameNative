@@ -101,7 +101,6 @@ import app.gamenative.ui.screen.library.components.LibraryCarouselPane
 import app.gamenative.ui.screen.library.components.LibraryDetailPane
 import app.gamenative.ui.screen.library.components.LibraryListPane
 import app.gamenative.ui.screen.library.components.LibraryFavoritesEmptyState
-import app.gamenative.ui.screen.library.components.RecommendationDisclosureDialog
 import app.gamenative.ui.screen.library.components.LibraryOptionsPanel
 import app.gamenative.ui.screen.library.components.LibrarySearchBar
 import app.gamenative.ui.screen.library.components.LibrarySourceNotLoggedInSplash
@@ -334,7 +333,6 @@ private fun LibraryScreenContent(
     val carouselListState = rememberLazyListState()
     val isViewWide = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var currentPaneType by remember { mutableStateOf(PrefManager.libraryLayout) }
-    var recDisclosureShown by remember { mutableStateOf(PrefManager.recDisclosureShown) }
 
     // Initialize layout if undecided
     LaunchedEffect(Unit) {
@@ -351,8 +349,6 @@ private fun LibraryScreenContent(
     var carouselFocusTargetListIndex by remember { mutableIntStateOf(0) }
     var pendingGridFocusRequest by remember { mutableStateOf(false) }
     var pendingCarouselFocusRequest by remember { mutableStateOf(false) }
-
-    var recommendationItemCount by remember { mutableIntStateOf(0) }
 
     var isSystemMenuOpen by remember { mutableStateOf(false) }
     // Track previous overlay states to detect when they close
@@ -385,11 +381,7 @@ private fun LibraryScreenContent(
     var lastBootstrapAtMs by remember { mutableLongStateOf(0L) }
 
     fun getContentLastIndex(): Int {
-        return if (state.currentTab == LibraryTab.RECOMMENDED) {
-            (recommendationItemCount - 1).coerceAtLeast(0)
-        } else {
-            state.appInfoList.lastIndex.coerceAtLeast(0)
-        }
+        return state.appInfoList.lastIndex.coerceAtLeast(0)
     }
 
     fun firstVisibleContentIndex(): Int {
@@ -423,7 +415,7 @@ private fun LibraryScreenContent(
     }
 
     // Moved all state.appInfoList.isNotEmpty() checking to this function
-    fun isListFocusable(): Boolean = state.appInfoList.isNotEmpty() || state.currentTab == LibraryTab.RECOMMENDED
+    fun isListFocusable(): Boolean = state.appInfoList.isNotEmpty()
 
     fun requestGridFocusOrDefer() {
         if (!isListFocusable()) return
@@ -468,7 +460,6 @@ private fun LibraryScreenContent(
     }
 
     fun focusedLibraryItem(): LibraryItem? {
-        if (state.currentTab == LibraryTab.RECOMMENDED) return null
         val focusedIndex = if (currentPaneType == PaneType.CAROUSEL) {
             currentCarouselFocusTargetIndex()
         } else {
@@ -971,33 +962,6 @@ private fun LibraryScreenContent(
             // Use Box to allow content to scroll behind the tab bar
             Box(modifier = Modifier.fillMaxSize()) {
                 // When on Steam/GOG/Epic/Amazon tab and not logged in, or LOCAL tab with no custom games, show splash
-                if (state.currentTab == LibraryTab.RECOMMENDED) {
-                    if (recDisclosureShown) {
-                        RecommendedTabPane(
-                            currentPaneType = currentPaneType,
-                            onNavigate = { item ->
-                                selectedAppId = item.appId
-                                selectedLibraryItem = item
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                            firstCarouselItemFocusRequester = carouselFocusRequester,
-                            firstGridItemFocusRequester = gridFirstItemFocusRequester,
-                            focusTargetListIndex = if (currentPaneType == PaneType.CAROUSEL) currentCarouselFocusTargetIndex() else gridFocusTargetListIndex,
-                            onFocusedIndexChanged = { carouselFocusTargetListIndex = it },
-                            onItemCountChanged = { recommendationItemCount = it },
-                        )
-                    } else {
-                        Box(modifier = Modifier.fillMaxSize())
-                        RecommendationDisclosureDialog(
-                            onContinue = {
-                                PrefManager.recDisclosureShown = true
-                                recDisclosureShown = true
-                                PluviaApp.events.emit(AndroidEvent.RecommendationToggleChanged)
-                            },
-                            onDismiss = { onTabChanged(LibraryTab.ALL) },
-                        )
-                    }
-                } else {
                 val showEmptyStateSplash = when (state.currentTab) {
                     LibraryTab.STEAM -> !SteamUtils.hasStoredCredentials() && !state.isLoading
                     LibraryTab.GOG -> !GOGService.hasStoredCredentials(context)
@@ -1098,7 +1062,6 @@ private fun LibraryScreenContent(
                             onFocusedIndexChanged = { gridFocusTargetListIndex = it },
                         )
                     }
-                }
                 }
 
                 // Top overlay: Tab bar OR Search bar
