@@ -1337,6 +1337,14 @@ object PrefManager {
             setPref(AMAZON_INSTALLED_GAMES_COUNT, value)
         }
 
+    // Symlink the ~676 common Wine DLLs into new containers instead of copying them, so every
+    // container shares one on-disk set. Only safe because libcowbase.so copies a DLL back into the
+    // container before anything writes to it; see app/src/main/cpp/cowbase/cowbase.c.
+    private val SHARED_CONTAINER_BASE = booleanPreferencesKey("shared_container_base")
+    var sharedContainerBase: Boolean
+        get() = getPref(SHARED_CONTAINER_BASE, false)
+        set(value) = setPref(SHARED_CONTAINER_BASE, value)
+
     // Cached recommendation JSON (single game) and timestamp
     private val RECOMMENDATION_CACHE_JSON = stringPreferencesKey("recommendation_cache_json")
     var recommendationCacheJson: String

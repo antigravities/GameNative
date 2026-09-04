@@ -1099,6 +1099,8 @@
     <string name="settings_emulation_default_config_dialog_title">Default Container Config</string>
     <string name="settings_emulation_auto_apply_known_config_title">Auto-apply known config</string>
     <string name="settings_emulation_auto_apply_known_config_subtitle">Automatically apply recommended settings for Steam games on first launch</string>
+    <string name="settings_emulation_shared_container_base_title">Share container system files</string>
+    <string name="settings_emulation_shared_container_base_subtitle">Link new containers to one shared copy of the Windows system files instead of duplicating them, saving around 1.5 GB per container. Affects newly created containers only.</string>
     <string name="settings_emulation_box64_presets_title">Box64 Presets</string>
     <string name="settings_emulation_box64_presets_subtitle">View, modify, and create Box64 presets</string>
     <string name="settings_emulation_driver_manager_title">Driver Manager</string>

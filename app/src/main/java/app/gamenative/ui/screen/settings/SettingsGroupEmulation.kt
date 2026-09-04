@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import app.gamenative.BuildConfig
 import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.ui.component.dialog.Box64PresetsDialog
@@ -102,6 +103,21 @@ fun SettingsGroupEmulation() {
                 PrefManager.autoApplyKnownConfig = it
             },
         )
+        if (BuildConfig.MODERN_ANDROID) {
+            // Legacy runs Wine under PRoot against a glibc rootfs, where libcowbase (a bionic .so)
+            // cannot be preloaded — without it, writes would reach the shared Wine tree.
+            var sharedContainerBase by rememberSaveable { mutableStateOf(PrefManager.sharedContainerBase) }
+            SettingsSwitch(
+                colors = settingsTileColorsAlt(),
+                state = sharedContainerBase,
+                title = { Text(text = stringResource(R.string.settings_emulation_shared_container_base_title)) },
+                subtitle = { Text(text = stringResource(R.string.settings_emulation_shared_container_base_subtitle)) },
+                onCheckedChange = {
+                    sharedContainerBase = it
+                    PrefManager.sharedContainerBase = it
+                },
+            )
+        }
         SettingsMenuLink(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.settings_emulation_box64_presets_title)) },

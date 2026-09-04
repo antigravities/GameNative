@@ -184,7 +184,20 @@ public abstract class FileUtils {
     }
 
     public static boolean copy(File srcFile, File dstFile, Callback<File> callback) {
-        if (isSymlink(srcFile)) return true;
+        if (isSymlink(srcFile)) {
+            // Recreate the link rather than skipping it. Shared-base containers hold their
+            // system32/syswow64 DLLs as symlinks, so silently dropping them here would make a
+            // duplicated container come out with no system DLLs at all.
+            try {
+                File parent = dstFile.getParentFile();
+                if (parent != null && !parent.exists() && !parent.mkdirs()) return false;
+                symlink(Os.readlink(srcFile.getPath()), dstFile.getPath());
+            }
+            catch (ErrnoException e) {
+                Log.e("FileUtils", "Failed to read link " + srcFile + ": " + e);
+            }
+            return true;
+        }
         if (srcFile.isDirectory()) {
             if (!dstFile.exists() && !dstFile.mkdirs()) return false;
             if (callback != null) callback.call(dstFile);
@@ -201,6 +214,11 @@ public abstract class FileUtils {
         else {
             File parent = dstFile.getParentFile();
             if (!srcFile.exists() || (parent != null && !parent.exists() && !parent.mkdirs())) return false;
+
+            // A FileOutputStream on a symlink writes through to the target. Callers mean "put a
+            // copy at this path", so replace the link rather than overwriting what it points at
+            // (in shared-base containers that would be the shared Wine tree).
+            if (isSymlink(dstFile)) dstFile.delete();
 
             try {
                 FileChannel inChannel = (new FileInputStream(srcFile)).getChannel();

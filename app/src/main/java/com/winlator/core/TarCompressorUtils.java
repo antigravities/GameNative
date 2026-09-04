@@ -193,6 +193,11 @@ public abstract class TarCompressorUtils {
                         FileUtils.symlink(entry.getLinkName(), file.getAbsolutePath());
                     }
                     else {
+                        // Writing to a symlink follows it and truncates the target. In shared-base
+                        // containers system32 DLLs are symlinks into the shared Wine tree, so
+                        // extracting e.g. DXVK over one would corrupt it for every container.
+                        // Replace the link with a private file instead.
+                        if (FileUtils.isSymlink(file)) file.delete();
                         try (BufferedOutputStream outStream = new BufferedOutputStream(new FileOutputStream(file), StreamUtils.BUFFER_SIZE)) {
                             if (!StreamUtils.copy(tar, outStream)) return false;
                         }

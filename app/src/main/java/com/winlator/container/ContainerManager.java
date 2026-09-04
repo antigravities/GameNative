@@ -5,6 +5,8 @@ import android.os.Handler;
 import android.util.Log;
 
 // import com.winlator.R;
+import app.gamenative.BuildConfig;
+import app.gamenative.PrefManager;
 import app.gamenative.R;
 import app.gamenative.utils.downloader.ContainerFilesDownloaderKt;
 import app.gamenative.utils.downloader.ProgressCallback;
@@ -133,6 +135,12 @@ public class ContainerManager {
                 return null;
             }
 
+            // Record how this container was built. Launch-time behaviour must key off what the
+            // container actually contains, not off the current preference — the user can create
+            // containers with shared base on and later turn it off, and those containers still
+            // hold symlinks and still need libcowbase.
+            if (useSharedContainerBase()) container.putExtra(Container.EXTRA_SHARED_BASE, "1");
+
             container.saveData();
             containers.add(container);
             return container;
@@ -179,6 +187,9 @@ public class ContainerManager {
         dstContainer.setDesktopTheme(srcContainer.getDesktopTheme());
         dstContainer.setRcfileId(srcContainer.getRCFileId());
         dstContainer.setWineVersion(srcContainer.getWineVersion());
+        // The copy inherits the source's symlinked DLLs, so it inherits the marker too.
+        dstContainer.putExtra(Container.EXTRA_SHARED_BASE,
+                srcContainer.getExtra(Container.EXTRA_SHARED_BASE).isEmpty() ? null : "1");
         dstContainer.saveData();
 
         containers.add(dstContainer);
@@ -280,9 +291,47 @@ public class ContainerManager {
         }
     }
 
+    /**
+     * True when new containers should symlink their common DLLs into the shared Wine tree rather
+     * than getting private copies (~1.5 GB saved per container).
+     *
+     * Modern-only: the safety net that makes this viable is libcowbase.so, which is LD_PRELOADed
+     * into the bionic Wine process. The legacy flavor runs Wine under PRoot against a glibc rootfs,
+     * where a bionic .so cannot be preloaded, so writes there would follow the symlinks straight
+     * into the shared tree.
+     */
+    private boolean useSharedContainerBase() {
+        if (!BuildConfig.MODERN_ANDROID) return false;
+        // PrefManager is a Kotlin object, so from Java it is reached through INSTANCE.
+        PrefManager.INSTANCE.init(context);
+        return PrefManager.INSTANCE.getSharedContainerBase();
+    }
+
+    /**
+     * Places one common DLL in the container, either as a private copy or as a symlink into the
+     * shared Wine tree.
+     *
+     * Unlike FileUtils.copy, FileUtils.symlink neither creates parent directories nor reports
+     * failure (it swallows ErrnoException into a log line), so we do both here — otherwise a failed
+     * link would leave the container quietly missing a DLL.
+     */
+    private static void placeCommonDll(File srcFile, File dstFile, boolean useSharedBase) {
+        if (useSharedBase) {
+            File parent = dstFile.getParentFile();
+            if (parent == null || parent.isDirectory() || parent.mkdirs()) {
+                FileUtils.symlink(srcFile, dstFile);
+                if (FileUtils.isSymlink(dstFile)) return;
+            }
+            Log.w("Extraction", "Could not symlink " + dstFile + ", copying instead");
+        }
+        FileUtils.copy(srcFile, dstFile);
+    }
+
     private void extractCommonDlls(String srcName, String dstName, JSONObject commonDlls, File containerDir, OnExtractFileListener onExtractFileListener) throws JSONException {
         File srcDir = new File(ImageFs.find(context).getRootDir(), "/opt/wine/lib/wine/"+srcName);
         JSONArray dlnames = commonDlls.getJSONArray(dstName);
+        // Read the preference once, not once per DLL — there are 676 of them.
+        boolean useSharedBase = useSharedContainerBase();
 
         for (int i = 0; i < dlnames.length(); i++) {
             String dlname = dlnames.getString(i);
@@ -291,13 +340,15 @@ public class ContainerManager {
                 dstFile = onExtractFileListener.onExtractFile(dstFile, 0);
                 if (dstFile == null) continue;
             }
-            FileUtils.copy(new File(srcDir, dlname), dstFile);
+            placeCommonDll(new File(srcDir, dlname), dstFile, useSharedBase);
         }
     }
 
     private void extractCommonDlls(WineInfo wineInfo, String srcName, String dstName, File containerDir, OnExtractFileListener onExtractFileListener) throws JSONException {
         Log.d("Extraction", "extracting common dlls for bionic: " + srcName);
         File srcDir = new File(wineInfo.path + "/lib/wine/" + srcName);
+
+        boolean useSharedBase = useSharedContainerBase();
 
         File[] srcfiles = srcDir.listFiles(file -> file.isFile());
 
@@ -312,8 +363,8 @@ public class ContainerManager {
                 dstFile = onExtractFileListener.onExtractFile(dstFile, 0);
                 if (dstFile == null) continue;
             }
-            Log.d("Extraction", "copying " + file + " to " + dstFile);
-            FileUtils.copy(file, dstFile);
+            Log.d("Extraction", (useSharedBase ? "linking " : "copying ") + file + " to " + dstFile);
+            placeCommonDll(file, dstFile, useSharedBase);
         }
     }
 

@@ -74,6 +74,9 @@ public class Container {
     public static final String STEAM_TYPE_ULTRALIGHT = "ultralight";
     public static final String GLIBC = "glibc";
     public static final String BIONIC = "bionic";
+    /** Extra set at creation when this container's system DLLs are symlinks into the shared Wine
+     *  tree rather than private copies. Gates the libcowbase preload at launch. */
+    public static final String EXTRA_SHARED_BASE = "sharedContainerBase";
     public static final byte MAX_DRIVE_LETTERS = 8;
     public final String id;
     private String name;

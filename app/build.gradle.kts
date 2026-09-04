@@ -331,6 +331,18 @@ android {
     //     }
     // }
 
+    // Copy-on-write shim for shared-base containers, LD_PRELOADed into the bionic Wine
+    // process. Same convention as the other native modules above: ships prebuilt in
+    // jniLibs/arm64-v8a/ — uncomment to build locally, copy libcowbase.so into
+    // jniLibs/arm64-v8a/ and re-comment. It is a single dependency-free C file, so the
+    // direct clang invocation documented in its CMakeLists.txt is usually easier.
+    // externalNativeBuild {
+    //     cmake {
+    //         path = file("src/main/cpp/cowbase/CMakeLists.txt")
+    //         version = "3.22.1"
+    //     }
+    // }
+
     // (For now) Uncomment for LeakCanary to work.
     // configurations {
     //     debugImplementation {
