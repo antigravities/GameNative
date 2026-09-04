@@ -323,6 +323,27 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         ld_preload += ":" + evshimPath;
         if (replacePath != null) ld_preload += ":" + replacePath;
 
+        // Shared-base containers hold their system32/syswow64 DLLs as symlinks into the shared Wine
+        // tree. Writing to a symlink follows it and truncates the target, so a game installing a
+        // redistributable would corrupt that tree for every container on the device. libcowbase
+        // intercepts such writes and swaps the symlink for a private copy first.
+        //
+        // Keyed off the container's own marker, not the current preference: containers created
+        // while the preference was on still contain symlinks after it is turned off.
+        //
+        // Prepended, ahead of libredirect: our hooks forward via dlsym(RTLD_NEXT, ...) so the chain
+        // stays intact either way, but going first keeps us independent of how libredirect resolves
+        // its own "real" functions. The DLL paths we watch are not touched by its rewrite rules.
+        if (container != null && !container.getExtra(Container.EXTRA_SHARED_BASE).isEmpty()) {
+            String cowbasePath = context.getApplicationInfo().nativeLibraryDir + "/libcowbase.so";
+            if (new File(cowbasePath).exists()) {
+                ld_preload = cowbasePath + (ld_preload.isEmpty() ? "" : ":" + ld_preload);
+                envVars.put("COWBASE_ROOTS", imageFs.getWinePath() + "/lib/wine");
+            }
+            else Log.w("BionicProgramLauncherComponent",
+                    "Container uses a shared base but libcowbase.so is missing; writes to system DLLs will reach the shared Wine tree");
+        }
+
         envVars.put("LD_PRELOAD", ld_preload);
         envVars.put("EVSHIM_WINE", 1);
         envVars.put("EVSHIM_SHM_NAME", "controller-shm0");
