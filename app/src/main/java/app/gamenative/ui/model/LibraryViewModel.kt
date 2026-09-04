@@ -116,12 +116,6 @@ class LibraryViewModel @Inject constructor(
     }
 
     private val onRecommendationToggleChanged: (AndroidEvent.RecommendationToggleChanged) -> Unit = {
-        // Consent granted from the frosted teaser: show a loading spinner on the card
-        // until the refresh below swaps in the personalized pick.
-        if (cachedRecTeaser && PrefManager.recDisclosureShown) {
-            cachedRecLoading = true
-            onFilterApps(paginationCurrentPage)
-        }
         refreshRecommendationHero()
     }
 
@@ -152,8 +146,6 @@ class LibraryViewModel @Inject constructor(
     // Cached recommendation (fetched once at startup)
     @Volatile private var cachedRecommendation: RecommendedGame? = null
     @Volatile private var cachedFeatured: app.gamenative.data.FeaturedItem? = null
-    @Volatile private var cachedRecTeaser: Boolean = false
-    @Volatile private var cachedRecLoading: Boolean = false
 
     // Track debounce job for search
     private var searchDebounceJob: Job? = null
@@ -365,7 +357,6 @@ class LibraryViewModel @Inject constructor(
     private fun refreshRecommendationHero() {
         viewModelScope.launch(Dispatchers.IO) {
             val hero = RecommendationRepository.getHero(context)
-            val daySeed = System.currentTimeMillis() / (24L * 60 * 60 * 1000)
             cachedFeatured = hero.featured
             cachedRecommendation = when {
                 // A live featured takes the slot (still gated by the showRecommendations
@@ -380,19 +371,11 @@ class LibraryViewModel @Inject constructor(
                         amazonGameDao,
                     )
                     val userId = GOGAuthManager.getStoredCredentials(context).getOrNull()?.userId
+                    val daySeed = System.currentTimeMillis() / (24L * 60 * 60 * 1000)
                     GogRecommendationsRepository.getDailyHero(context, owned, userId, daySeed)
                 }.getOrNull() ?: hero.recommendation
                 else -> hero.recommendation
             }
-            // Frosted teaser: pre-consent only, never over a featured slot. Shows every day
-            // until the first "Not now", then one day in three. A frosted day stays frosted
-            // all day, dismissed or not.
-            val dismissedDay = PrefManager.recTeaserDismissedDay
-            cachedRecTeaser = hero.featured == null &&
-                PrefManager.showRecommendations &&
-                !PrefManager.recDisclosureShown &&
-                (dismissedDay == 0L || dismissedDay == daySeed || daySeed % 3 == 0L)
-            cachedRecLoading = false
             onFilterApps(paginationCurrentPage)
         }
     }
@@ -1173,8 +1156,6 @@ class LibraryViewModel @Inject constructor(
                         recommendedGameId = rec.id,
                         recSource = "hero",
                         gameSource = GameSource.STEAM,
-                        isRecTeaser = cachedRecTeaser || cachedRecLoading,
-                        isRecLoading = cachedRecLoading,
                     )
                     else -> null
                 }
