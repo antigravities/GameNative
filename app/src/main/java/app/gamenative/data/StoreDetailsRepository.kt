@@ -1,6 +1,5 @@
 package app.gamenative.data
 
-import app.gamenative.data.gog.GogMapRepository
 import app.gamenative.utils.Net
 import app.gamenative.utils.SteamUtils
 import java.net.URLEncoder
@@ -18,6 +17,29 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
+
+private val ROMAN_NUMERALS = mapOf(
+    "ii" to "2", "iii" to "3", "iv" to "4", "vi" to "6", "vii" to "7",
+    "viii" to "8", "ix" to "9", "xi" to "11", "xii" to "12", "xiii" to "13",
+)
+
+// Normalizes a title for cross-store matching: lowercases, strips trademark symbols,
+// collapses edition suffixes (goty/complete/deluxe/...) and converts roman numerals.
+// File-scope (not a member of StoreDetailsRepository) so the top-level parse helpers
+// below can use it too.
+private fun normalizeTitle(title: String): String {
+    var s = title.lowercase()
+    s = s.replace(Regex("[™®©]"), "")
+    s = s.replace("&", " and ")
+    s = s.replace(Regex("[^a-z0-9]+"), " ")
+    s = s.replace(
+        Regex("\\b(goty|game of the year|complete|definitive|enhanced|deluxe|ultimate|remastered|collection|bundle)\\b"),
+        "",
+    )
+    s = s.replace(Regex("\\bedition\\b"), "")
+    s = s.split(" ").joinToString(" ") { ROMAN_NUMERALS[it] ?: it }
+    return s.replace(Regex("\\s+"), " ").trim()
+}
 
 /**
  * Loads the richer, public metadata exposed by supported storefronts when a game page is opened.
@@ -64,7 +86,7 @@ object StoreDetailsRepository {
             append(localeKey)
             if (libraryItem.gameSource == GameSource.EPIC || libraryItem.gameSource == GameSource.AMAZON) {
                 append(':')
-                append(GogMapRepository.normalizeTitle(libraryItem.name))
+                append(normalizeTitle(libraryItem.name))
             }
         }
         cache[cacheKey]
@@ -329,19 +351,19 @@ internal fun parseSteamSearchAppId(
     searchJson: String?,
     allowReplacementBundleMatch: Boolean = false,
 ): Int? {
-    val normalizedTitle = GogMapRepository.normalizeTitle(title)
+    val normalizedTitle = normalizeTitle(title)
     if (normalizedTitle.isBlank()) return null
     val items = parseObject(searchJson)
         ?.optJSONArray("items")
         .objects()
     items.firstOrNull {
-        GogMapRepository.normalizeTitle(it.optString("name")) == normalizedTitle
+        normalizeTitle(it.optString("name")) == normalizedTitle
     }?.let { return it.optInt("id", 0).takeIf { appId -> appId > 0 } }
 
     if (!allowReplacementBundleMatch) return null
     val firstWord = normalizedTitle.substringBefore(' ')
     return items.firstOrNull {
-        val candidate = GogMapRepository.normalizeTitle(it.optString("name"))
+        val candidate = normalizeTitle(it.optString("name"))
         candidate.startsWith("$firstWord ") && candidate.endsWith(" $normalizedTitle")
     }
         ?.optInt("id", 0)
@@ -350,8 +372,8 @@ internal fun parseSteamSearchAppId(
 
 internal fun StoreGameDetails.withoutTitleOnlyDescription(title: String): StoreGameDetails {
     if (description.isBlank()) return this
-    val normalizedDescription = GogMapRepository.normalizeTitle(description)
-    val normalizedTitle = GogMapRepository.normalizeTitle(title)
+    val normalizedDescription = normalizeTitle(description)
+    val normalizedTitle = normalizeTitle(title)
     return if (normalizedDescription.isNotBlank() && normalizedDescription == normalizedTitle) {
         copy(description = "")
     } else {
