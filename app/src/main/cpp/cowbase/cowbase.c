@@ -94,7 +94,8 @@ static int g_enabled = 0;
 static int g_debug = 0;
 static int g_diag_fd = -1;
 
-static pid_t g_pid = 0;
+// Deliberately not cached: the Wine process forks, and children would inherit a
+// stale pid. getpid() is only called on the copy-up path, which is rare.
 static char g_comm[64] = "?";
 
 // Reentrancy guard. Everything we do internally -- the copy itself, liblog's
@@ -164,20 +165,39 @@ static int split_list(const char *value, char table[][PATH_MAX], int *lens, int 
 }
 
 static void cache_process_identity(void) {
-    g_pid = getpid();
-
     // Read once, here, and cache it: doing this lazily inside a hook would be
     // another reentrant open() on every copy-up.
-    int fd = real_open ? real_open("/proc/self/comm", O_RDONLY) : -1;
-    if (fd >= 0) {
-        ssize_t n = read(fd, g_comm, sizeof(g_comm) - 1);
-        close(fd);
-        if (n > 0) {
-            g_comm[n] = '\0';
-            char *nl = strchr(g_comm, '\n');
-            if (nl) *nl = '\0';
+    //
+    // /proc/self/cmdline rather than comm: commands are launched as
+    // "/system/bin/linker64 <real binary> ...", so comm reports "linker64" for
+    // every process in the container and tells us nothing. cmdline holds the
+    // arguments NUL-separated, so skipping the first one lands on the binary
+    // that actually did the write.
+    char buf[512];
+    int fd = real_open ? real_open("/proc/self/cmdline", O_RDONLY) : -1;
+    if (fd < 0) return;
+
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return;
+    buf[n] = '\0';
+
+    const char *argv0 = buf;
+    const char *pick = argv0;
+    size_t argv0_len = strlen(argv0);
+    if (strstr(argv0, "linker64") || strstr(argv0, "linker")) {
+        // Step past argv[0] to the binary it was asked to run, if there is one.
+        if ((ssize_t)(argv0_len + 1) < n && buf[argv0_len + 1] != '\0') {
+            pick = argv0 + argv0_len + 1;
         }
     }
+
+    // Keep just the basename; full guest paths are long and add nothing here.
+    const char *slash = strrchr(pick, '/');
+    if (slash && slash[1] != '\0') pick = slash + 1;
+
+    strncpy(g_comm, pick, sizeof(g_comm) - 1);
+    g_comm[sizeof(g_comm) - 1] = '\0';
 }
 
 __attribute__((constructor)) static void cowbase_init(void) {
@@ -219,7 +239,7 @@ __attribute__((constructor)) static void cowbase_init(void) {
     g_enabled = 1;
 
     cowbase_log(ANDROID_LOG_INFO, "cowbase: armed for %s[%d] (%d root(s), first=%s)", g_comm,
-                (int)g_pid, g_nroots, g_roots[0]);
+                (int)getpid(), g_nroots, g_roots[0]);
     in_cowbase = 0;
 }
 
@@ -355,8 +375,8 @@ static int do_copy_up(const char *path, int skip_contents, int flags) {
     // atomic. The name carries pid *and* tid: two threads copying up the same DLL at once would
     // otherwise share a temp path and interleave their writes into it.
     char tmp[PATH_MAX];
-    snprintf(tmp, sizeof(tmp), "%.*s/.cowbase-%s-%d-%d", dir_len, path, slash + 1, (int)g_pid,
-             (int)gettid());
+    snprintf(tmp, sizeof(tmp), "%.*s/.cowbase-%s-%d-%d", dir_len, path, slash + 1,
+             (int)getpid(), (int)gettid());
 
     int dst_fd = real_open(tmp, O_WRONLY | O_CREAT | O_TRUNC, st.st_mode & 07777);
     if (dst_fd < 0) {
@@ -403,7 +423,7 @@ static int do_copy_up(const char *path, int skip_contents, int flags) {
     char size_str[32];
     format_size(skip_contents ? 0 : st.st_size, size_str, sizeof(size_str));
     cowbase_log(ANDROID_LOG_INFO, "cowbase: copy-up %s <- %s (%s%s, flags=0x%x, by=%s[%d])", path,
-                resolved, size_str, skip_contents ? ", truncating" : "", flags, g_comm, (int)g_pid);
+                resolved, size_str, skip_contents ? ", truncating" : "", flags, g_comm, (int)getpid());
     return 1;
 }
 
