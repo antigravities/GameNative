@@ -1,11 +1,7 @@
 package app.gamenative.ui.enums
 
 import androidx.annotation.StringRes
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Explore
-import androidx.compose.material.icons.rounded.Star
-import androidx.compose.ui.graphics.vector.ImageVector
-import app.gamenative.PrefManager
+import app.gamenative.BuildConfig
 import app.gamenative.R
 
 enum class LibraryTab(
@@ -16,18 +12,7 @@ enum class LibraryTab(
     val showEpic: Boolean,
     val showAmazon: Boolean,
     val installedOnly: Boolean,
-    val icon: ImageVector? = null,
 ) {
-    RECOMMENDED(
-        labelResId = R.string.tab_recommended,
-        showCustom = false,
-        showSteam = false,
-        showGoG = false,
-        showEpic = false,
-        showAmazon = false,
-        installedOnly = false,
-        icon = Icons.Rounded.Explore,
-    ),
     ALL(
         labelResId = R.string.tab_all,
         showCustom = true,
@@ -45,7 +30,6 @@ enum class LibraryTab(
         showEpic = true,
         showAmazon = true,
         installedOnly = false,
-        icon = Icons.Rounded.Star,
     ),
     STEAM(
         labelResId = R.string.tab_steam,
@@ -99,11 +83,7 @@ enum class LibraryTab(
          * in place via all-files access, modern imports them into app-owned storage.
          */
         val visibleEntries: List<LibraryTab>
-            get() {
-                var result = entries.toList()
-                if (!PrefManager.showRecommendations) result = result.filter { it != RECOMMENDED }
-                return result
-            }
+            get() = if (BuildConfig.MODERN_ANDROID) entries.filter { it != LOCAL } else entries
 
         fun LibraryTab.next(): LibraryTab {
             val values = visibleEntries

@@ -17,9 +17,6 @@ import app.gamenative.data.FavoritesUtils
 import app.gamenative.data.GameCompatibilityStatus
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
-import app.gamenative.data.gog.GogRecommendationsRepository
-import app.gamenative.data.gog.GogSeedCollector
-import app.gamenative.service.gog.GOGAuthManager
 import app.gamenative.data.LibraryPlayHistory
 import app.gamenative.data.SteamApp
 import app.gamenative.data.SteamCollection
@@ -116,7 +113,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     private val onRecommendationToggleChanged: (AndroidEvent.RecommendationToggleChanged) -> Unit = {
-        refreshRecommendationHero()
+        onFilterApps(paginationCurrentPage)
     }
 
     // How many items loaded on one page of results
@@ -145,7 +142,6 @@ class LibraryViewModel @Inject constructor(
 
     // Cached recommendation (fetched once at startup)
     @Volatile private var cachedRecommendation: RecommendedGame? = null
-    @Volatile private var cachedFeatured: app.gamenative.data.FeaturedItem? = null
 
     // Track debounce job for search
     private var searchDebounceJob: Job? = null
@@ -356,27 +352,10 @@ class LibraryViewModel @Inject constructor(
 
     private fun refreshRecommendationHero() {
         viewModelScope.launch(Dispatchers.IO) {
-            val hero = RecommendationRepository.getHero(context)
-            cachedFeatured = hero.featured
-            cachedRecommendation = when {
-                // A live featured takes the slot (still gated by the showRecommendations
-                // toggle at display time), regardless of GOG consent.
-                hero.featured != null -> null
-                PrefManager.showRecommendations && PrefManager.recDisclosureShown -> runCatching {
-                    val owned = GogSeedCollector.collect(
-                        context,
-                        libraryPlayHistoryDao,
-                        gogGameDao,
-                        epicGameDao,
-                        amazonGameDao,
-                    )
-                    val userId = GOGAuthManager.getStoredCredentials(context).getOrNull()?.userId
-                    val daySeed = System.currentTimeMillis() / (24L * 60 * 60 * 1000)
-                    GogRecommendationsRepository.getDailyHero(context, owned, userId, daySeed)
-                }.getOrNull() ?: hero.recommendation
-                else -> hero.recommendation
+            cachedRecommendation = RecommendationRepository.getCurrentRecommendation(context)
+            if (cachedRecommendation != null) {
+                onFilterApps(paginationCurrentPage)
             }
-            onFilterApps(paginationCurrentPage)
         }
     }
 
@@ -1122,46 +1101,25 @@ class LibraryViewModel @Inject constructor(
             val endIndex = min((clampedPage + 1) * pageSize, totalFound)
             var pagedList = combined.take(endIndex)
 
-            // Prepend the hero (featured > recommendation) as first item on ALL tab when
-            // enabled and not searching.
-            val featured = cachedFeatured
+            // Prepend recommendation as first item on ALL tab when enabled and not searching
             val rec = cachedRecommendation
-            if (PrefManager.showRecommendations
+            if (rec != null
+                && PrefManager.showRecommendations
                 && currentTab == LibraryTab.ALL
                 && currentState.searchQuery.isEmpty()
             ) {
-                val heroItem = when {
-                    featured != null -> LibraryItem(
-                        index = -1,
-                        appId = "FEATURED_${featured.campaignId}",
-                        name = featured.title,
-                        heroImageUrl = featured.heroImageUrl,
-                        headerImageUrl = featured.heroImageUrl,
-                        capsuleImageUrl = featured.capsuleImageUrl ?: featured.heroImageUrl,
-                        iconHash = featured.iconUrl ?: featured.capsuleImageUrl ?: featured.heroImageUrl,
-                        isRecommended = true,
-                        isFeatured = true,
-                        recommendedGameId = featured.campaignId,
-                        recSource = "hero",
-                        gameSource = GameSource.STEAM,
-                    )
-                    rec != null -> LibraryItem(
-                        index = -1,
-                        appId = "RECOMMENDED_${rec.id}",
-                        name = rec.name,
-                        heroImageUrl = rec.heroImageUrl,
-                        capsuleImageUrl = rec.capsuleImageUrl,
-                        iconHash = rec.iconUrl ?: rec.capsuleImageUrl,
-                        isRecommended = true,
-                        recommendedGameId = rec.id,
-                        recSource = "hero",
-                        gameSource = GameSource.STEAM,
-                    )
-                    else -> null
-                }
-                if (heroItem != null) {
-                    pagedList = listOf(heroItem) + pagedList.map { it.copy(index = it.index + 1) }
-                }
+                val recItem = LibraryItem(
+                    index = -1,
+                    appId = "RECOMMENDED_${rec.id}",
+                    name = rec.name,
+                    heroImageUrl = rec.heroImageUrl,
+                    capsuleImageUrl = rec.capsuleImageUrl,
+                    iconHash = rec.iconUrl ?: rec.capsuleImageUrl,
+                    isRecommended = true,
+                    recommendedGameId = rec.id,
+                    gameSource = GameSource.STEAM,
+                )
+                pagedList = listOf(recItem) + pagedList.map { it.copy(index = it.index + 1) }
             }
 
             Timber.tag("LibraryViewModel").d("Filtered list size (with Custom Games): $totalFound")
