@@ -145,6 +145,7 @@ import app.gamenative.utils.launchdependencies.BionicSteamAssetsDependency
 import app.gamenative.utils.downloader.DXWrapperDownloader
 import app.gamenative.utils.downloader.GraphicsDriverDownloader
 import app.gamenative.utils.PreInstallSteps
+import app.gamenative.utils.PrefixDedupe
 import app.gamenative.utils.BrightnessManager
 import app.gamenative.utils.SteamTokenLogin
 import app.gamenative.utils.SteamUtils
@@ -5182,6 +5183,49 @@ private fun installRedistributables(
     }
 }
 
+/** The Wine-Mono package installed into every prefix; also the key for its shared store entry. */
+private const val WINE_MONO_MSI = "wine-mono-11.0.0-x86.msi"
+
+/**
+ * Collapses the parts of a freshly installed prefix that are identical in every container --
+ * Wine-Mono (~235 MB), the Fonts directory (~75 MB), and msiexec's cached copy of the Mono MSI
+ * (~83 MB) -- into symlinks against a shared store.
+ *
+ * Runs after the Mono install rather than replacing it, so the registry keys msiexec writes into
+ * this container are untouched. Only meaningful for shared-base containers, where libcowbase is
+ * preloaded to copy a file back before anything writes to it.
+ */
+private fun dedupeSharedPrefixContent(context: Context, container: Container) {
+    if (container.getExtra(Container.EXTRA_SHARED_BASE).isEmpty()) return
+
+    try {
+        val imageFs = ImageFs.find(context)
+        val windowsDir = File(imageFs.rootDir, ImageFs.WINEPREFIX + "/drive_c/windows")
+
+        // Mono comes from one fixed MSI, so its key is version-pinned but Proton-independent.
+        PrefixDedupe.shareDirectory(
+            context,
+            "mono-" + WINE_MONO_MSI.removeSuffix(".msi"),
+            File(windowsDir, "mono"),
+        )
+
+        // Fonts ship with the Proton container pattern, so they are keyed per Wine version.
+        PrefixDedupe.shareDirectory(
+            context,
+            "fonts-" + container.wineVersion,
+            File(windowsDir, "Fonts"),
+        )
+
+        PrefixDedupe.shareInstallerMsiCache(
+            File(windowsDir, "Installer"),
+            File(imageFs.rootDir, "opt/mono-gecko-offline/$WINE_MONO_MSI"),
+        )
+    } catch (e: Exception) {
+        // Never fail a launch over a space optimisation.
+        Timber.tag("PrefixDedupe").e(e, "Failed to deduplicate shared prefix content")
+    }
+}
+
 private fun unpackExecutableFile(
     context: Context,
     needsUnpacking: Boolean,
@@ -5197,7 +5241,7 @@ private fun unpackExecutableFile(
     if (needsUnpacking || containerVariantChanged){
         try {
             PluviaApp.events.emit(AndroidEvent.SetBootingSplashText("Installing Mono..."))
-            val monoCmd = "wine msiexec /i Z:\\opt\\mono-gecko-offline\\wine-mono-11.0.0-x86.msi && wineserver -k"
+            val monoCmd = "wine msiexec /i Z:\\opt\\mono-gecko-offline\\$WINE_MONO_MSI && wineserver -k"
             Timber.i("Install mono command $monoCmd")
             val monoOutput = guestProgramLauncherComponent.execShellCommand(monoCmd)
             output.append(monoOutput)
@@ -5212,6 +5256,8 @@ private fun unpackExecutableFile(
         } catch (e: Exception) {
             Timber.tag("installRedist").e(e, "Error installing redistributables: ${e.message}")
         }
+
+        dedupeSharedPrefixContent(context, container)
     }
     if (!needsUnpacking || ContainerUtils.extractGameSourceFromContainerId(appId) != GameSource.STEAM){
         // We need to clear the flag here, otherwise Mono installs every boot for non-steam games

@@ -96,6 +96,49 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         return imageFs.getLibDir() + "/" + BuildConfig.PRELOAD_BIONIC_SO;
     }
 
+    /**
+     * Prepends libcowbase.so to an LD_PRELOAD chain and configures it, for containers whose system
+     * files are symlinks into shared trees.
+     *
+     * Those symlinks are transparent to writes: opening one for writing follows it and truncates the
+     * shared file, corrupting it for every container on the device. libcowbase intercepts such a
+     * write and swaps the symlink for a private copy first.
+     *
+     * This must be applied on BOTH exec paths. execGuestProgram runs the game and its pre-install
+     * steps, but execShellCommand runs the Wine-Mono installer, which writes mscoree.dll -- itself
+     * one of the symlinked DLLs. Keeping the construction here is what stops the two paths drifting
+     * apart again.
+     *
+     * Keyed off the container's own marker rather than the current preference: containers created
+     * while the preference was on still contain symlinks after it is turned off.
+     *
+     * @return the LD_PRELOAD chain to use, unchanged when this container has no shared content.
+     */
+    private String applySharedBaseShim(Context context, ImageFs imageFs, EnvVars envVars, String ldPreload) {
+        if (container == null || container.getExtra(Container.EXTRA_SHARED_BASE).isEmpty()) return ldPreload;
+
+        String cowbasePath = context.getApplicationInfo().nativeLibraryDir + "/libcowbase.so";
+        if (!new File(cowbasePath).exists()) {
+            Log.w("BionicProgramLauncherComponent",
+                    "Container uses a shared base but libcowbase.so is missing; writes to shared system files will not be redirected");
+            return ldPreload;
+        }
+
+        // Every tree a container may symlink into: the Wine/Proton DLLs, the shared prefix content
+        // store (Mono, Fonts), and the Mono MSI that the Installer cache links back to.
+        String roots = imageFs.getWinePath() + "/lib/wine"
+                + ":" + ImageFs.getPrefixCacheDir(context).getAbsolutePath()
+                + ":" + new File(imageFs.getRootDir(), "opt/mono-gecko-offline").getAbsolutePath();
+        envVars.put("COWBASE_ROOTS", roots);
+        envVars.put("COWBASE_MARKERS",
+                "/windows/system32/:/windows/syswow64/:/windows/mono/:/windows/fonts/:/windows/installer/");
+
+        // Prepended, ahead of libredirect: our hooks forward via dlsym(RTLD_NEXT, ...) so the chain
+        // stays intact either way, but going first keeps us independent of how libredirect resolves
+        // its own "real" functions. The paths we watch are not touched by its rewrite rules.
+        return cowbasePath + (ldPreload.isEmpty() ? "" : ":" + ldPreload);
+    }
+
     /** Numeric Steam appid for the game in this container (e.g. "221380").
      *  Set from XServerScreen before start(); only consumed in real-Steam mode
      *  to publish SteamGameId / SteamAppId for the steam_helper handshake. */
@@ -323,26 +366,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         ld_preload += ":" + evshimPath;
         if (replacePath != null) ld_preload += ":" + replacePath;
 
-        // Shared-base containers hold their system32/syswow64 DLLs as symlinks into the shared Wine
-        // tree. Writing to a symlink follows it and truncates the target, so a game installing a
-        // redistributable would corrupt that tree for every container on the device. libcowbase
-        // intercepts such writes and swaps the symlink for a private copy first.
-        //
-        // Keyed off the container's own marker, not the current preference: containers created
-        // while the preference was on still contain symlinks after it is turned off.
-        //
-        // Prepended, ahead of libredirect: our hooks forward via dlsym(RTLD_NEXT, ...) so the chain
-        // stays intact either way, but going first keeps us independent of how libredirect resolves
-        // its own "real" functions. The DLL paths we watch are not touched by its rewrite rules.
-        if (container != null && !container.getExtra(Container.EXTRA_SHARED_BASE).isEmpty()) {
-            String cowbasePath = context.getApplicationInfo().nativeLibraryDir + "/libcowbase.so";
-            if (new File(cowbasePath).exists()) {
-                ld_preload = cowbasePath + (ld_preload.isEmpty() ? "" : ":" + ld_preload);
-                envVars.put("COWBASE_ROOTS", imageFs.getWinePath() + "/lib/wine");
-            }
-            else Log.w("BionicProgramLauncherComponent",
-                    "Container uses a shared base but libcowbase.so is missing; writes to system DLLs will reach the shared Wine tree");
-        }
+        ld_preload = applySharedBaseShim(context, imageFs, envVars, ld_preload);
 
         envVars.put("LD_PRELOAD", ld_preload);
         envVars.put("EVSHIM_WINE", 1);
@@ -731,6 +755,10 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (new File(sysvPath).exists()) ld_preload += sysvPath;
 
         if (replacePath != null) ld_preload += ":" + replacePath;
+
+        // The Mono installer runs through here and writes mscoree.dll, which is one of the
+        // symlinked DLLs -- without this it would overwrite the shared Wine tree.
+        ld_preload = applySharedBaseShim(context, imageFs, envVars, ld_preload);
 
         envVars.put("LD_PRELOAD", ld_preload);
 
