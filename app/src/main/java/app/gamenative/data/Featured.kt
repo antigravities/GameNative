@@ -15,7 +15,6 @@ data class HeroResponse(
 data class FeaturedItem(
     val campaignId: String,
     val title: String,
-    val appId: Int? = null,
     val developer: String? = null,
     val heroImageUrl: String = "",
     val capsuleImageUrl: String? = null,
@@ -35,7 +34,6 @@ data class FeaturedItem(
 data class FeaturedAction(
     val type: String,
     val url: String,
-    val appId: Int? = null,
     val store: String? = null,
     val style: String? = null,
     // Only for type CUSTOM: advertiser-supplied locale -> label map.
@@ -63,7 +61,6 @@ fun FeaturedAction.localizedLabel(context: Context): String = when (type.upperca
     "BUY" -> store?.let { context.getString(R.string.featured_action_buy_on, it) }
         ?: context.getString(R.string.featured_action_buy)
     "NOTIFY" -> context.getString(R.string.featured_action_notify)
-    "GET_DEMO" -> context.getString(R.string.featured_action_get_demo)
     "VISIT" -> context.getString(R.string.featured_action_visit)
     else -> label.forLocale(context) ?: context.getString(R.string.featured_action_visit)
 }
@@ -94,8 +91,6 @@ fun FeaturedItem.toRecommendedGame(context: Context): RecommendedGame = Recommen
             label = a.localizedLabel(context),
             url = a.url,
             primary = a.style?.equals("primary", ignoreCase = true) ?: (index == 0),
-            type = a.type.uppercase(),
-            appId = a.appId ?: appId,
         )
     },
 )

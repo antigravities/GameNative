@@ -33,6 +33,4 @@ data class FeaturedCta(
     val label: String,
     val url: String,
     val primary: Boolean = false,
-    val type: String = "",
-    val appId: Int? = null,
 )
