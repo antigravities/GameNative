@@ -135,11 +135,8 @@ public class ContainerManager {
                 return null;
             }
 
-            // Record how this container was built. Launch-time behaviour must key off what the
-            // container actually contains, not off the current preference — the user can create
-            // containers with shared base on and later turn it off, and those containers still
-            // hold symlinks and still need libcowbase.
-            if (useSharedContainerBase()) container.putExtra(Container.EXTRA_SHARED_BASE, "1");
+            container.putExtra(Container.EXTRA_SHARED_BASE,
+                    hasSharedBaseSymlinks(containerDir) ? "1" : null);
 
             container.saveData();
             containers.add(container);
@@ -187,9 +184,10 @@ public class ContainerManager {
         dstContainer.setDesktopTheme(srcContainer.getDesktopTheme());
         dstContainer.setRcfileId(srcContainer.getRCFileId());
         dstContainer.setWineVersion(srcContainer.getWineVersion());
-        // The copy inherits the source's symlinked DLLs, so it inherits the marker too.
+        // FileUtils.copy recreates symlinks rather than dereferencing them, so the copy genuinely
+        // holds whatever the source held; ask the directory rather than the source's marker.
         dstContainer.putExtra(Container.EXTRA_SHARED_BASE,
-                srcContainer.getExtra(Container.EXTRA_SHARED_BASE).isEmpty() ? null : "1");
+                hasSharedBaseSymlinks(dstDir) ? "1" : null);
         dstContainer.saveData();
 
         containers.add(dstContainer);
@@ -289,6 +287,32 @@ public class ContainerManager {
                 targetFile.delete();
             }
         }
+    }
+
+    /**
+     * True when this container's system DLLs are symlinks into a shared tree rather than private
+     * copies, so it needs libcowbase preloaded to keep writes from reaching that tree.
+     *
+     * Derived from the directory rather than from the preference, because the two can disagree.
+     * extractContainerPatternFile runs again whenever the Wine version, container variant, or
+     * imagefs version changes (see applyGeneralPatches), so a container created before the
+     * preference was enabled can acquire symlinks later. In the other direction, the bionic overload
+     * of extractCommonDlls skips destinations that already exist, so turning the preference off does
+     * not convert existing symlinks back into copies.
+     *
+     * Looks for any symlink rather than probing one known DLL: mscoree.dll (written by the Mono
+     * installer) and the DXVK DLLs are copied up to real files during normal operation, so a
+     * single-file check would report the wrong answer for a container that is still almost entirely
+     * symlinked.
+     */
+    public static boolean hasSharedBaseSymlinks(File containerDir) {
+        String[] dirnames = {"system32", "syswow64"};
+        for (String dirname : dirnames) {
+            File[] files = new File(containerDir, ".wine/drive_c/windows/" + dirname).listFiles();
+            if (files == null) continue;
+            for (File file : files) if (FileUtils.isSymlink(file)) return true;
+        }
+        return false;
     }
 
     /**

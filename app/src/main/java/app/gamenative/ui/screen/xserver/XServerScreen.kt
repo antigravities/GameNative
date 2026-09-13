@@ -5556,6 +5556,14 @@ private suspend fun setupWineSystemFiles(
         container.putExtra("appliedWineVersion", container.wineVersion)
         container.putExtra("appVersion", appVersion)
         container.putExtra("imgVersion", imgVersion)
+        // applyGeneralPatches re-extracts the container pattern, which can add or remove the
+        // symlinked system DLLs, so re-derive the marker that gates the libcowbase preload. Without
+        // this an existing container converted to symlinks by a Wine version or imagefs change would
+        // run unprotected, and its writes would follow the symlinks into the shared Wine tree.
+        container.putExtra(
+            Container.EXTRA_SHARED_BASE,
+            if (ContainerManager.hasSharedBaseSymlinks(container.rootDir)) "1" else null,
+        )
         containerDataChanged = true
     } else if (markersMissing) {
         // Pre-existing container: trust the on-disk prefix and adopt it as-is.
