@@ -1859,6 +1859,61 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         }
 
+        // One-time reconciliation of app_info.isDownloaded against what's actually on disk.
+        // Unlike size_bytes/name_sort_key, nothing else recomputes this column from real install
+        // state — it's only ever set by completeAppDownload() when a download finishes through
+        // this app's own downloader. A game already installed before this backfill ever ran (or
+        // whose app_info row was lost, e.g. to a destructive DB migration) would otherwise never
+        // pick the flag back up. Mirrors backfillSortKeysOnce: id-cursor paging (persisted so a
+        // restart resumes), per-page transaction, inter-page yields to stay off the hot path.
+        suspend fun backfillInstalledFlagOnce() {
+            if (PrefManager.libraryInstalledFlagBackfillDone) {
+                Timber.i("isDownloaded backfill: already done, skipping")
+                return
+            }
+            val svc = instance ?: run {
+                Timber.w("isDownloaded backfill: no SteamService instance, skipping")
+                return
+            }
+            withContext(Dispatchers.IO) {
+                try {
+                    val downloadDirectorySet = (DownloadService.getDownloadDirectoryApps() + getImportedAppDirs()).toHashSet()
+                    var afterId = PrefManager.libraryInstalledFlagBackfillCursor
+                    Timber.i("isDownloaded backfill: starting from afterId=$afterId")
+                    var updated = 0
+                    while (true) {
+                        val page = svc.appDao._getInstalledBackfillRowsAfter(afterId, 500)
+                        if (page.isEmpty()) break
+
+                        // Batch each page's writes into one transaction instead of 500 commits.
+                        svc.db.withTransaction {
+                            for (row in page) {
+                                val dirName = row.installDir.ifEmpty { row.name }
+                                if (dirName.isNotEmpty() && downloadDirectorySet.contains(dirName)) {
+                                    val existing = svc.appInfoDao.get(row.id)
+                                    if (existing?.isDownloaded != true) {
+                                        svc.appInfoDao.insert((existing ?: AppInfo(row.id)).copy(isDownloaded = true))
+                                    }
+                                }
+                            }
+                        }
+                        updated += page.size
+                        afterId = page.last().id
+                        // Persist the high-water mark so a restart resumes here.
+                        PrefManager.libraryInstalledFlagBackfillCursor = afterId
+                        Timber.d("isDownloaded backfill: processed $updated apps so far (afterId=$afterId)")
+                        yield()
+                        delay(75L)
+                    }
+
+                    PrefManager.libraryInstalledFlagBackfillDone = true
+                    Timber.i("isDownloaded backfill complete: scanned $updated apps")
+                } catch (e: Exception) {
+                    Timber.e(e, "isDownloaded backfill failed; will retry on next launch")
+                }
+            }
+        }
+
         fun getMainAppDepots(appId: Int, containerLanguage: String): Map<Int, DepotInfo> {
             val ownedDlc = runBlocking { getOwnedAppDlc(appId) }
             val hasSteamUnlockedBranch = runBlocking { getSteamUnlockedBranches(appId).isNotEmpty() }

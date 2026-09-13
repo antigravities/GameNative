@@ -200,6 +200,23 @@ object PrefManager {
         get() = getPref(LIBRARY_SORT_KEY_BACKFILL_CURSOR, 0)
         set(value) { setPref(LIBRARY_SORT_KEY_BACKFILL_CURSOR, value) }
 
+    // One-shot guard for the app_info.isDownloaded backfill (SteamService.backfillInstalledFlagOnce).
+    // Nothing else recomputes isDownloaded from actual on-disk install state (it's only set when a
+    // download completes through this app's own downloader), so unlike the two backfills above this
+    // one doesn't self-heal via ordinary PICS sync — it's reset by DatabaseModule's
+    // onDestructiveMigration callback so a future destructive DB rebuild re-runs it too.
+    private val LIBRARY_INSTALLED_FLAG_BACKFILL_DONE = booleanPreferencesKey("library_installed_flag_backfill_done")
+    var libraryInstalledFlagBackfillDone: Boolean
+        get() = getPref(LIBRARY_INSTALLED_FLAG_BACKFILL_DONE, false)
+        set(value) { setPref(LIBRARY_INSTALLED_FLAG_BACKFILL_DONE, value) }
+
+    // Resume cursor (highest processed app id) for the isDownloaded backfill. Persisted per page so a
+    // restart continues forward instead of re-walking. Irrelevant once *Done is set.
+    private val LIBRARY_INSTALLED_FLAG_BACKFILL_CURSOR = intPreferencesKey("library_installed_flag_backfill_cursor")
+    var libraryInstalledFlagBackfillCursor: Int
+        get() = getPref(LIBRARY_INSTALLED_FLAG_BACKFILL_CURSOR, 0)
+        set(value) { setPref(LIBRARY_INSTALLED_FLAG_BACKFILL_CURSOR, value) }
+
     // How many apps have been successfully sent to the PICS channel in the current refresh run.
     // On resume after crash, refreshAllApps() drops this many IDs from the front of the list.
     private val REFRESH_ALL_APPS_OFFSET = intPreferencesKey("refresh_all_apps_offset")
