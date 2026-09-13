@@ -361,7 +361,11 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             SteamService.picsSyncPending.first { it == 0 }
             delay(5_000L)
-            // Sort-key backfill first: it drives the library's visible ordering, so existing
+            // Installed-flag backfill first: it also drives visible ordering (INSTALLED_FIRST
+            // sort), same reasoning as putting the sort-key backfill ahead of the size one below.
+            // No-op after its first successful run.
+            SteamService.backfillInstalledFlagOnce()
+            // Sort-key backfill next: it drives the library's visible ordering, so existing
             // installs upgrading to v24 get correct ordering before the (informational) size
             // backfill runs. Both are no-ops after their first successful run.
             SteamService.backfillSortKeysOnce()
