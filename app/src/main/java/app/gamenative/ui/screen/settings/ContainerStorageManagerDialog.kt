@@ -72,6 +72,7 @@ import app.gamenative.R
 import com.skydoves.landscapist.ImageOptions
 import com.skydoves.landscapist.coil.CoilImage
 import app.gamenative.data.GameSource
+import app.gamenative.service.SteamService
 import app.gamenative.ui.screen.library.GameMigrationDialog
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.SnackbarManager
@@ -412,6 +413,14 @@ fun ContainerStorageManagerContent(
 ) {
     LaunchedEffect(state) {
         state.ensureLoaded()
+    }
+
+    // Force a fresh reconciliation every time this content is composed — the on-disk install
+    // state may have changed (games moved/deleted outside the app) since the last pass, and this
+    // is exactly the screen where showing accurate installed state matters most. Shared by both
+    // entry points: the Downloads screen's Storage tab and ContainerStorageManagerDialog below.
+    LaunchedEffect(Unit) {
+        SteamService.backfillInstalledFlagOnce(force = true)
     }
 
     Column(
