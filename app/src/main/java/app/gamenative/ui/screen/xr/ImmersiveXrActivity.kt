@@ -54,7 +54,6 @@ import app.gamenative.ui.model.MainViewModel
 import app.gamenative.ui.screen.xserver.XServerScreen
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.utils.ContainerUtils
-import app.gamenative.utils.WineProcessSnapshotHelper
 import com.winlator.container.Container
 import com.winlator.core.AppUtils
 import com.winlator.renderer.GLRenderer
@@ -289,15 +288,12 @@ class ImmersiveXrActivity : androidx.activity.ComponentActivity() {
                         }
                     },
                     onWindowMapped = { ctx, window ->
-                        // Same gate as MainViewModel: Wine's shell windows must not end the splash.
-                        if (!WineProcessSnapshotHelper.isSystemProcessName(window.className)) mappedWindowCount++
+                        mappedWindowCount++
                         viewModel.onWindowMapped(ctx, window, appId)
                         showControlsOnboarding = true
                     },
-                    onWindowUnmapped = { window ->
-                        if (!WineProcessSnapshotHelper.isSystemProcessName(window.className)) {
-                            mappedWindowCount = (mappedWindowCount - 1).coerceAtLeast(0)
-                        }
+                    onWindowUnmapped = {
+                        mappedWindowCount = (mappedWindowCount - 1).coerceAtLeast(0)
                     },
                     onGameLaunchError = { error ->
                         viewModel.onGameLaunchError(error)
@@ -393,7 +389,6 @@ class ImmersiveXrActivity : androidx.activity.ComponentActivity() {
                     visible = splashVisible,
                     text = mainState.bootingSplashText,
                     heroImageUrl = mainState.bootingSplashHeroImageUrl,
-                    bootAd = mainState.bootAd,
                 )
 
                 ImmersiveControlsOnboarding(
