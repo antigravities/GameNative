@@ -1859,15 +1859,21 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         }
 
-        // One-time reconciliation of app_info.isDownloaded against what's actually on disk.
-        // Unlike size_bytes/name_sort_key, nothing else recomputes this column from real install
-        // state — it's only ever set by completeAppDownload() when a download finishes through
-        // this app's own downloader. A game already installed before this backfill ever ran (or
-        // whose app_info row was lost, e.g. to a destructive DB migration) would otherwise never
-        // pick the flag back up. Mirrors backfillSortKeysOnce: id-cursor paging (persisted so a
-        // restart resumes), per-page transaction, inter-page yields to stay off the hot path.
-        suspend fun backfillInstalledFlagOnce() {
-            if (PrefManager.libraryInstalledFlagBackfillDone) {
+        // Reconciles app_info.isDownloaded against what's actually on disk. Unlike
+        // size_bytes/name_sort_key, nothing else recomputes this column from real install state —
+        // it's only ever set by completeAppDownload() when a download finishes through this app's
+        // own downloader. A game already installed before this backfill ever ran (or whose
+        // app_info row was lost, e.g. to a destructive DB migration, or a file moved/deleted
+        // outside the app since the last pass) would otherwise never pick the flag back up.
+        //
+        // By default this is a one-time pass, gated by PrefManager.libraryInstalledFlagBackfillDone
+        // and resumable via a persisted id-cursor, mirroring backfillSortKeysOnce (per-page
+        // transaction, inter-page yields to stay off the hot path). Pass force = true (used when
+        // the storage manager screen opens, where accuracy matters most and the on-disk state may
+        // have changed since the last pass) to always run a fresh full scan regardless of the
+        // done flag or any prior cursor.
+        suspend fun backfillInstalledFlagOnce(force: Boolean = false) {
+            if (!force && PrefManager.libraryInstalledFlagBackfillDone) {
                 Timber.i("isDownloaded backfill: already done, skipping")
                 return
             }
@@ -1878,9 +1884,17 @@ class SteamService : Service(), IChallengeUrlChanged {
             withContext(Dispatchers.IO) {
                 try {
                     val downloadDirectorySet = (DownloadService.getDownloadDirectoryApps() + getImportedAppDirs()).toHashSet()
-                    var afterId = PrefManager.libraryInstalledFlagBackfillCursor
-                    Timber.i("isDownloaded backfill: starting from afterId=$afterId")
+                    Timber.i(
+                        "isDownloaded backfill: allInstallPaths=%s downloadDirectorySet(%d)=%s",
+                        allInstallPaths,
+                        downloadDirectorySet.size,
+                        downloadDirectorySet.take(50),
+                    )
+                    var afterId = if (force) 0 else PrefManager.libraryInstalledFlagBackfillCursor
+                    Timber.i("isDownloaded backfill: starting from afterId=$afterId (force=$force)")
                     var updated = 0
+                    var matched = 0
+                    var written = 0
                     while (true) {
                         val page = svc.appDao._getInstalledBackfillRowsAfter(afterId, 500)
                         if (page.isEmpty()) break
@@ -1888,10 +1902,23 @@ class SteamService : Service(), IChallengeUrlChanged {
                         // Batch each page's writes into one transaction instead of 500 commits.
                         svc.db.withTransaction {
                             for (row in page) {
-                                val dirName = row.installDir.ifEmpty { row.name }
-                                if (dirName.isNotEmpty() && downloadDirectorySet.contains(dirName)) {
+                                // Two name candidates, matching LibraryViewModel's
+                                // isInDownloadDirectory: the primary (install_dir, falling back to
+                                // name) and — for folders created under an older naming convention —
+                                // the plain app name, when it differs from the primary.
+                                val primaryName = row.installDir.ifEmpty { row.name }
+                                val altName = row.name
+                                val isInstalled = (primaryName.isNotEmpty() && downloadDirectorySet.contains(primaryName)) ||
+                                    (altName.isNotEmpty() && altName != primaryName && downloadDirectorySet.contains(altName))
+                                if (isInstalled) {
+                                    matched++
                                     val existing = svc.appInfoDao.get(row.id)
                                     if (existing?.isDownloaded != true) {
+                                        written++
+                                        Timber.d(
+                                            "isDownloaded backfill: match id=%d name=%s primaryName=%s",
+                                            row.id, row.name, primaryName,
+                                        )
                                         svc.appInfoDao.insert((existing ?: AppInfo(row.id)).copy(isDownloaded = true))
                                     }
                                 }
@@ -1907,7 +1934,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                     }
 
                     PrefManager.libraryInstalledFlagBackfillDone = true
-                    Timber.i("isDownloaded backfill complete: scanned $updated apps")
+                    Timber.i("isDownloaded backfill complete: scanned $updated apps, matched=$matched, written=$written")
                 } catch (e: Exception) {
                     Timber.e(e, "isDownloaded backfill failed; will retry on next launch")
                 }
