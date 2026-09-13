@@ -2329,13 +2329,6 @@
     <string name="xr_render_scale">Escala de renderização de VR</string>
     <string name="settings_hide_ai_title">Ocultar recursos de IA</string>
     <string name="settings_hide_ai_subtitle">Oculta a ajuda opcional de depuração por IA</string>
-    <string name="settings_info_boot_ads_title">Telas de carregamento patrocinadas</string>
-    <string name="settings_info_boot_ads_subtitle">Manter isso ativado ajuda a apoiar o desenvolvimento do GameNative. Nunca deixa o início dos jogos mais lento nem afeta você de forma alguma.</string>
-    <string name="settings_info_boot_recs_title">Recomendações de jogos nas telas de carregamento</string>
-    <string name="settings_info_boot_recs_subtitle">Mostrar um jogo que você pode gostar enquanto um jogo inicia, quando não há card de patrocinador.</string>
-    <string name="boot_rec_badge">Recomendado para você</string>
-    <string name="boot_quiz_win_default">Correto!</string>
-    <string name="boot_quiz_lose_default">A resposta era %1$s</string>
     <string name="gyro_aiming">Mira por giroscópio</string>
     <string name="gyro_settings_title">Configurações do giroscópio</string>
     <string name="gyro_section_output">Saída e movimento</string>

@@ -2399,13 +2399,6 @@
     <string name="xr_render_scale">VR-Renderskalierung</string>
     <string name="settings_hide_ai_title">KI-Funktionen ausblenden</string>
     <string name="settings_hide_ai_subtitle">Blendet die optionale KI-Debughilfe aus</string>
-    <string name="settings_info_boot_ads_title">Gesponserte Ladebildschirme</string>
-    <string name="settings_info_boot_ads_subtitle">Wenn du das aktiviert lässt, unterstützt du die Entwicklung von GameNative. Es verlangsamt niemals den Spielstart und beeinträchtigt dich in keiner Weise.</string>
-    <string name="settings_info_boot_recs_title">Spielempfehlungen auf Ladebildschirmen</string>
-    <string name="settings_info_boot_recs_subtitle">Zeigt beim Start eines Spiels ein Spiel, das dir gefallen könnte – wenn keine Sponsorkarte vorliegt.</string>
-    <string name="boot_rec_badge">Für dich empfohlen</string>
-    <string name="boot_quiz_win_default">Richtig!</string>
-    <string name="boot_quiz_lose_default">Die Antwort war %1$s</string>
     <string name="gyro_aiming">Gyro-Zielen</string>
     <string name="gyro_settings_title">Gyro-Einstellungen</string>
     <string name="gyro_section_output">Ausgabe und Bewegung</string>
