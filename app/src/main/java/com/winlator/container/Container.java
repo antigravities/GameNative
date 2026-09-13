@@ -94,6 +94,7 @@ public class Container {
     private String wincomponents = DEFAULT_WINCOMPONENTS;
     private String audioDriver = DEFAULT_AUDIO_DRIVER;
     private boolean pulseaudioLowLatency = false;
+    private boolean xaliaEnabled = false;
     private String drives = DEFAULT_DRIVES;
     private String wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
     private boolean showFPS;
@@ -318,6 +319,14 @@ public class Container {
 
     public void setPulseaudioLowLatency(boolean pulseaudioLowLatency) {
         this.pulseaudioLowLatency = pulseaudioLowLatency;
+    }
+
+    public boolean isXaliaEnabled() {
+        return xaliaEnabled;
+    }
+
+    public void setXaliaEnabled(boolean xaliaEnabled) {
+        this.xaliaEnabled = xaliaEnabled;
     }
 
     public String getWinComponents() {
@@ -745,6 +754,7 @@ public class Container {
             if (!dxwrapperConfig.isEmpty()) data.put("dxwrapperConfig", dxwrapperConfig);
             data.put("audioDriver", audioDriver);
             data.put("pulseaudioLowLatency", pulseaudioLowLatency);
+            data.put("xaliaEnabled", xaliaEnabled);
             data.put("wincomponents", wincomponents);
             data.put("drives", drives);
             data.put("showFPS", showFPS);
@@ -970,6 +980,9 @@ public class Container {
                     break;
                 case "pulseaudioLowLatency" :
                     setPulseaudioLowLatency(data.getBoolean(key));
+                    break;
+                case "xaliaEnabled" :
+                    setXaliaEnabled(data.getBoolean(key));
                     break;
                 case "desktopTheme" :
                     setDesktopTheme(data.getString(key));

@@ -721,10 +721,38 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
     }
 
     public String execShellCommand(String command, boolean includeStderr) {
-        Context context = environment.getContext();
-        ImageFs imageFs = ImageFs.find(context);
+        ImageFs imageFs = ImageFs.find(environment.getContext());
         File rootDir = imageFs.getRootDir();
         EnvVars envVars = new EnvVars();
+        String winePath = buildShellEnvVars(imageFs, envVars);
+        String finalCommand = getFinalCommand(winePath, container.getEmulator(), envVars, imageFs.getBinDir(), command);
+
+        Log.d("BionicProgramLauncherComponent", "Shell command is " + finalCommand);
+        return ProcessHelper.execWithOutput(finalCommand, envVars.toStringArray(),
+                workingDir != null ? workingDir : rootDir, includeStderr);
+    }
+
+    /**
+     * Non-blocking twin of {@link #execShellCommand(String, boolean)}: same environment/command
+     * construction, but fires the process and returns its pid immediately (for a long-running
+     * auxiliary guest program rather than a short shell command whose output you need to read).
+     */
+    public int execShellCommandAsync(String command, Callback<Integer> terminationCallback) {
+        ImageFs imageFs = ImageFs.find(environment.getContext());
+        File rootDir = imageFs.getRootDir();
+        EnvVars envVars = new EnvVars();
+        String winePath = buildShellEnvVars(imageFs, envVars);
+        String finalCommand = getFinalCommand(winePath, container.getEmulator(), envVars, imageFs.getBinDir(), command);
+
+        Log.d("BionicProgramLauncherComponent", "Async shell command is " + finalCommand);
+        return ProcessHelper.exec(finalCommand, envVars.toStringArray(),
+                workingDir != null ? workingDir : rootDir, terminationCallback);
+    }
+
+    /** Populates {@code envVars} and returns the resolved Wine bin path, shared by both shell-command variants above. */
+    private String buildShellEnvVars(ImageFs imageFs, EnvVars envVars) {
+        Context context = environment.getContext();
+        File rootDir = imageFs.getRootDir();
         addBox64EnvVars(envVars, false);
 
         envVars.put("HOME", imageFs.home_path);
@@ -762,19 +790,14 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         envVars.put("LD_PRELOAD", ld_preload);
 
-        String emulator = container.getEmulator();
         if (this.envVars != null) envVars.putAll(this.envVars);
-
-        String finalCommand = getFinalCommand(winePath, emulator, envVars, imageFs.getBinDir(), command);
 
         File box64File = new File(rootDir, "/usr/bin/box64");
         if (box64File.exists()) {
             FileUtils.chmod(box64File, 0755);
         }
 
-        Log.d("BionicProgramLauncherComponent", "Shell command is " + finalCommand);
-        return ProcessHelper.execWithOutput(finalCommand, envVars.toStringArray(),
-                workingDir != null ? workingDir : imageFs.getRootDir(), includeStderr);
+        return winePath;
     }
 
     public void restartWineServer() {

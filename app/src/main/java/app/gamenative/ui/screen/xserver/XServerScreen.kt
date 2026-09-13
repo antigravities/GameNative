@@ -211,6 +211,7 @@ import com.winlator.xenvironment.components.GuestProgramLauncherComponent
 import com.winlator.xenvironment.components.NetworkInfoUpdateComponent
 import com.winlator.xenvironment.components.PulseAudioComponent
 import com.winlator.xenvironment.components.SteamClientComponent
+import com.winlator.xenvironment.components.XaliaComponent
 import com.winlator.xenvironment.components.SysVSharedMemoryComponent
 import com.winlator.xenvironment.components.VirGLRendererComponent
 import com.winlator.xenvironment.components.VortekRendererComponent
@@ -4485,6 +4486,15 @@ private fun setupXEnvironment(
     }
 
     environment.addComponent(guestProgramLauncherComponent)
+
+    if (container.isXaliaEnabled) {
+        // Added right after the game's own launcher component, whose start() has just
+        // extracted box64 for this container -- Xalia's launch goes through the same
+        // execShellCommandAsync path and needs that to have already happened. Both starts
+        // are fire-and-forget kicks-off, so this doesn't meaningfully delay Xalia relative
+        // to the game itself.
+        environment.addComponent(XaliaComponent(context, container, guestProgramLauncherComponent))
+    }
 
     environment.addComponent(WineRequestComponent())
 

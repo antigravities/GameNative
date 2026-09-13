@@ -339,6 +339,13 @@ fun GeneralTabContent(
             state = config.forceDlc,
             onCheckedChange = { state.config.value = config.copy(forceDlc = it) },
         )
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.xalia_enabled)) },
+            subtitle = { Text(text = stringResource(R.string.xalia_enabled_description)) },
+            state = config.xaliaEnabled,
+            onCheckedChange = { state.config.value = config.copy(xaliaEnabled = it) },
+        )
 
         SettingsSwitch(
             colors = settingsTileColorsAlt(),

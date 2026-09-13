@@ -385,4 +385,9 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     public String execShellCommand(String command, boolean includeStderr){
         return "";
     }
+
+    /** Non-blocking twin of {@link #execShellCommand(String, boolean)}; see subclass overrides. */
+    public int execShellCommandAsync(String command, Callback<Integer> terminationCallback) {
+        return -1;
+    }
 }

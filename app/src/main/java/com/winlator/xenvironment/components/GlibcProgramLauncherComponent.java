@@ -286,10 +286,35 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
     }
 
     public String execShellCommand(String command, boolean includeStderr) {
-        Context context = environment.getContext();
-        ImageFs imageFs = ImageFs.find(context);
+        ImageFs imageFs = ImageFs.find(environment.getContext());
         File rootDir = imageFs.getRootDir();
+        EnvVars envVars = buildShellEnvVars(imageFs);
+        String finalCommand = rootDir.getPath() + "/usr/local/bin/box64 " + command;
 
+        // Execute the command and capture its output
+        Log.d("GlibcProgramLauncherComponent", "Shell command is " + finalCommand);
+        return ProcessHelper.execWithOutput(finalCommand, envVars.toStringArray(),
+                workingDir != null ? workingDir : rootDir, includeStderr);
+    }
+
+    /**
+     * Non-blocking twin of {@link #execShellCommand(String, boolean)}: same environment/command
+     * construction, but fires the process and returns its pid immediately (for a long-running
+     * auxiliary guest program rather than a short shell command whose output you need to read).
+     */
+    public int execShellCommandAsync(String command, Callback<Integer> terminationCallback) {
+        ImageFs imageFs = ImageFs.find(environment.getContext());
+        File rootDir = imageFs.getRootDir();
+        EnvVars envVars = buildShellEnvVars(imageFs);
+        String finalCommand = rootDir.getPath() + "/usr/local/bin/box64 " + command;
+
+        Log.d("GlibcProgramLauncherComponent", "Async shell command is " + finalCommand);
+        return ProcessHelper.exec(finalCommand, envVars.toStringArray(),
+                workingDir != null ? workingDir : rootDir, terminationCallback);
+    }
+
+    private EnvVars buildShellEnvVars(ImageFs imageFs) {
+        Context context = environment.getContext();
         PrefManager.init(context);
         EnvVars envVars = new EnvVars();
         envVars.put("HOME", imageFs.home_path);
@@ -330,14 +355,6 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         }
         envVars.put("WINEESYNC_WINLATOR", "1");
         if (this.envVars != null) envVars.putAll(this.envVars);
-
-        String box64Path = rootDir.getPath() + "/usr/local/bin/box64";
-
-        String finalCommand = box64Path + " " + command;
-
-        // Execute the command and capture its output
-        Log.d("GlibcProgramLauncherComponent", "Shell command is " + finalCommand);
-        return ProcessHelper.execWithOutput(finalCommand, envVars.toStringArray(),
-                workingDir != null ? workingDir : imageFs.getRootDir(), includeStderr);
+        return envVars;
     }
 }

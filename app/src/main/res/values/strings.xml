@@ -882,6 +882,8 @@
     <string name="unpack_files_description">Only use if you get \'Application Load Error 3:0000065432\'.</string>
     <string name="force_dlc">Force DLC</string>
     <string name="force_dlc_description">Only enable if DLCs are not detected or saves with DLC are not working</string>
+    <string name="xalia_enabled">Enable Xalia navigation</string>
+    <string name="xalia_enabled_description">Runs a background accessibility helper for gamepad/keyboard menu navigation in games and launchers</string>
     <string name="local_saves_only">Local saves only</string>
     <string name="local_saves_only_description">Disable cloud save sync for this game and keep saves on device only</string>
     <string name="launch_steam_client_beta">Launch Steam Client (Beta)</string>
