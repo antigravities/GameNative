@@ -2,6 +2,9 @@ package app.gamenative.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.RoomDatabase
+import androidx.sqlite.SQLiteConnection
+import app.gamenative.PrefManager
 import app.gamenative.db.DATABASE_NAME
 import app.gamenative.db.PluviaDatabase
 import app.gamenative.db.dao.AppInfoDao
@@ -46,6 +49,17 @@ class DatabaseModule {
             // registered for 26-28, so this blanket fallback rebuilds the local DB for exactly
             // that window; every other version still migrates normally via the paths above.
             .fallbackToDestructiveMigration(true)
+            .addCallback(object : RoomDatabase.Callback() {
+                // Only app_info.isDownloaded needs this: size_bytes and name_sort_key are
+                // recomputed inline by ordinary PICS sync (self-healing after any rebuild), but
+                // isDownloaded is only ever set by a download completing, so a destructive
+                // rebuild permanently loses it for already-installed games unless this resets
+                // the one-time backfill's guard so it runs again on the next launch.
+                override fun onDestructiveMigration(connection: SQLiteConnection) {
+                    PrefManager.libraryInstalledFlagBackfillDone = false
+                    PrefManager.libraryInstalledFlagBackfillCursor = 0
+                }
+            })
             // Use SEPARATE executors for queries and transactions. By default Room shares one
             // small fixed pool for both, which deadlocks under load: every open suspend
             // `withTransaction` pins one thread to host the transaction, while the DAO calls

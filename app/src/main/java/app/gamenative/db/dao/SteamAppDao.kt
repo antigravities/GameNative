@@ -477,6 +477,16 @@ interface SteamAppDao {
     @Query("UPDATE steam_app SET name_sort_key = :sortKey WHERE id = :appId")
     suspend fun _updateSortKey(appId: Int, sortKey: String)
 
+    // Pages all steam_app rows by an ascending-id cursor for the one-time isDownloaded
+    // backfill (SteamService.backfillInstalledFlagOnce). Same shape/reasoning as
+    // _getSortKeyBackfillRowsAfter above: no OWNED_APPS_WHERE (cheaper, dense cursor), and a
+    // match against the on-disk download directory set only ever occurs for real installs anyway.
+    @Query(
+        "SELECT id, name, install_dir FROM steam_app " +
+            "WHERE id > :afterId ORDER BY id LIMIT :limit",
+    )
+    suspend fun _getInstalledBackfillRowsAfter(afterId: Int, limit: Int): List<app.gamenative.data.SteamAppInstalledBackfillRow>
+
     // Fetches summaries for a specific set of app ids. Used by the library's custom-game /
     // Steam-import dedup path in filterAppsSql, which needs summaries for a small known id set
     // rather than the whole owned list.
