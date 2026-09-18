@@ -331,6 +331,7 @@ fun ScreenshotGalleryScreen(
         ScreenshotViewer(
             items = items,
             startIndex = start,
+            appId = appId,
             onClose = { currentIndex ->
                 // Deep-linked open pops back to the game; opened-from-list just closes the viewer
                 // and restores focus/scroll to the picture the viewer ended on.
