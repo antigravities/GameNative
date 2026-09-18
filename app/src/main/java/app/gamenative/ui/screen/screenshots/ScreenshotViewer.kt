@@ -68,6 +68,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.gamenative.R
 import app.gamenative.data.GameSource
 import app.gamenative.service.SteamService
+import app.gamenative.ui.component.dialog.ScreenshotUploadDialog
+import `in`.dragonbra.javasteam.enums.EUCMFilePrivacyState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -118,7 +120,8 @@ fun ScreenshotViewer(
     }
     val steamGameId = remember(appId) { ContainerUtils.extractGameIdFromContainerId(appId) }
     var uploadingItem by remember { mutableStateOf<ScreenshotItem?>(null) }
-    val uploadToSteam: (ScreenshotItem) -> Unit = { item ->
+    var pendingUploadItem by remember { mutableStateOf<ScreenshotItem?>(null) }
+    val uploadToSteam: (ScreenshotItem, String, EUCMFilePrivacyState) -> Unit = { item, caption, privacy ->
         uploadingItem = item
         scope.launch {
             val uploaded = withContext(Dispatchers.IO) {
@@ -134,6 +137,8 @@ fun ScreenshotViewer(
                             thumbBytes = thumbBytes,
                             width = bitmap.width,
                             height = bitmap.height,
+                            caption = caption,
+                            privacy = privacy,
                         ) ?: false
                     } finally {
                         bitmap.recycle()
@@ -521,7 +526,7 @@ fun ScreenshotViewer(
                 IconButton(
                     onClick = {
                         val item = current ?: return@IconButton
-                        if (uploadingItem == null) uploadToSteam(item)
+                        if (uploadingItem == null) pendingUploadItem = item
                     },
                 ) {
                     Icon(
@@ -532,6 +537,13 @@ fun ScreenshotViewer(
                 }
             }
             }
+        }
+
+        pendingUploadItem?.let { item ->
+            ScreenshotUploadDialog(
+                onDismiss = { pendingUploadItem = null },
+                onUpload = { caption, privacy -> uploadToSteam(item, caption, privacy) },
+            )
         }
     }
 }
