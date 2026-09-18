@@ -2473,6 +2473,9 @@
     <string name="screenshot_download">Save to Downloads</string>
     <string name="screenshot_delete">Delete</string>
     <string name="screenshot_share">Share</string>
+    <string name="screenshot_upload_to_steam">Upload to Steam</string>
+    <string name="screenshot_uploaded">Uploaded to Steam</string>
+    <string name="screenshot_upload_failed">Steam upload failed</string>
     <string name="screenshot_downloaded">Saved to Downloads</string>
     <string name="screenshot_download_failed">Couldn\'t save to Downloads</string>
     <string name="screenshot_deleted">Screenshot deleted</string>

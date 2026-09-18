@@ -85,6 +85,7 @@ import `in`.dragonbra.javasteam.enums.ELicenseFlags
 import `in`.dragonbra.javasteam.enums.EOSType
 import `in`.dragonbra.javasteam.enums.EPersonaState
 import `in`.dragonbra.javasteam.enums.EResult
+import `in`.dragonbra.javasteam.enums.EUCMFilePrivacyState
 import `in`.dragonbra.javasteam.enums.EUniverse
 import `in`.dragonbra.javasteam.networking.steam3.ProtocolTypes
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesClientObjects.ECloudPendingRemoteOperation
@@ -113,6 +114,7 @@ import `in`.dragonbra.javasteam.steam.handlers.steamfriends.SteamFriends
 import `in`.dragonbra.javasteam.steam.handlers.steamfriends.callback.PersonaStateCallback
 import `in`.dragonbra.javasteam.steam.handlers.steamgameserver.SteamGameServer
 import `in`.dragonbra.javasteam.steam.handlers.steammasterserver.SteamMasterServer
+import `in`.dragonbra.javasteam.steam.handlers.steamscreenshots.ScreenshotDetails
 import `in`.dragonbra.javasteam.steam.handlers.steamscreenshots.SteamScreenshots
 import `in`.dragonbra.javasteam.steam.handlers.steamunifiedmessages.SteamUnifiedMessages
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.ChatMode
@@ -132,6 +134,7 @@ import `in`.dragonbra.javasteam.steam.steamclient.callbacks.DisconnectedCallback
 import `in`.dragonbra.javasteam.steam.steamclient.configuration.SteamConfiguration
 import `in`.dragonbra.javasteam.types.DepotManifest
 import `in`.dragonbra.javasteam.types.FileData
+import `in`.dragonbra.javasteam.types.GameID
 import `in`.dragonbra.javasteam.types.KeyValue
 import `in`.dragonbra.javasteam.types.SteamID
 import `in`.dragonbra.javasteam.util.log.LogListener
@@ -144,7 +147,9 @@ import java.io.OutputStream
 import java.lang.NullPointerException
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.security.MessageDigest
 import java.util.Collections
+import java.util.Date
 import java.util.EnumSet
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
@@ -192,8 +197,11 @@ import app.gamenative.db.dao.SteamUnlockedBranchDao
 import app.gamenative.enums.SteamRealm
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.CopyOnWriteArrayList
+import okhttp3.Headers
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.FormBody
 import org.json.JSONArray
 import org.json.JSONObject
@@ -275,6 +283,7 @@ class SteamService : Service(), IChallengeUrlChanged {
     private var _steamApps: SteamApps? = null
     private var _steamFriends: SteamFriends? = null
     private var _steamCloud: SteamCloud? = null
+    private var _steamScreenshots: SteamScreenshots? = null
     private var _steamUserStats: SteamUserStats? = null
     private var _steamFamilyGroups: FamilyGroups? = null
 
@@ -5033,7 +5042,6 @@ class SteamService : Service(), IChallengeUrlChanged {
                 removeHandler(SteamGameServer::class.java)
                 removeHandler(SteamMasterServer::class.java)
                 removeHandler(SteamWorkshop::class.java)
-                removeHandler(SteamScreenshots::class.java)
                 // JavaSteam has the protobuf for game invites but no handler for them.
                 addHandler(GameInviteHandler())
             }
@@ -5046,6 +5054,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             _steamApps = steamClient!!.getHandler(SteamApps::class.java)
             _steamFriends = steamClient!!.getHandler(SteamFriends::class.java)
             _steamCloud = steamClient!!.getHandler(SteamCloud::class.java)
+            _steamScreenshots = steamClient!!.getHandler(SteamScreenshots::class.java)
             _steamUserStats = steamClient!!.getHandler(SteamUserStats::class.java)
 
             _unifiedFriends = SteamUnifiedFriends(this)
@@ -5193,6 +5202,7 @@ class SteamService : Service(), IChallengeUrlChanged {
         _steamApps = null
         _steamFriends = null
         _steamCloud = null
+        _steamScreenshots = null
 
         callbackSubscriptions.forEach { it.close() }
         callbackSubscriptions.clear()
@@ -6398,6 +6408,159 @@ class SteamService : Service(), IChallengeUrlChanged {
                         }
                     }
                 }
+        }
+    }
+
+    /**
+     * Uploads a screenshot to Steam UFS (Universal File System) and registers it in the
+     * user's Steam screenshot library. This mirrors the 5-step upload flow in
+     * [SteamAutoCloud]: begin batch → begin file upload → HTTP PUT blocks per file →
+     * commit file upload → complete batch → register with UCM via [SteamScreenshots].
+     *
+     * Must be called from a coroutine — uses suspend [await] on each async job.
+     *
+     * @return true if the screenshot was registered with Steam successfully, false otherwise.
+     */
+    suspend fun uploadScreenshotToCloud(
+        appId: Int,
+        imageBytes: ByteArray,
+        thumbBytes: ByteArray,
+        width: Int,
+        height: Int,
+    ): Boolean {
+        val cloud = _steamCloud ?: return false
+        val screenshots = _steamScreenshots ?: return false
+
+        // Steam's UCM (User Content Manager) looks for screenshot files in appId 760's UFS
+        // namespace — that's the "Steam Screenshots" service app used by the desktop client.
+        // The game's actual appId goes into ScreenshotDetails.gameID only.
+        val ufsAppId = 760
+
+        // UFS paths are arbitrary strings but must match between beginFileUpload() and addScreenshot().
+        val ts = System.currentTimeMillis()
+        val imagePath = "screenshots/${appId}_${ts}.jpg"
+        val thumbPath = "screenshots/${appId}_${ts}_thumb.jpg"
+
+        return try {
+            // SHA-1 digest is required by the UFS API to verify integrity of each uploaded file.
+            val imageSha = MessageDigest.getInstance("SHA-1").digest(imageBytes)
+            val thumbSha = MessageDigest.getInstance("SHA-1").digest(thumbBytes)
+
+            val clientId = PrefManager.clientId ?: return false
+
+            // Step 1: Open an upload batch so Steam can track this group of files together.
+            val batch = cloud.beginAppUploadBatch(
+                appId = ufsAppId,
+                machineName = SteamUtils.getMachineName(this),
+                filesToUpload = listOf(imagePath, thumbPath),
+                filesToDelete = emptyList(),
+                clientId = clientId,
+                appBuildId = 0L,
+            ).await()
+
+            val httpClient = steamClient!!.configuration.httpClient
+
+            // Steps 2–4: For each file (full image then thumbnail), get per-block upload
+            // targets from Steam, PUT each block via HTTP, then commit the upload.
+            for ((bytes, sha, path) in listOf(
+                Triple(imageBytes, imageSha, imagePath),
+                Triple(thumbBytes, thumbSha, thumbPath),
+            )) {
+                Timber.d("Beginning upload of screenshot for appId $appId")
+
+                val uploadInfo = cloud.beginFileUpload(
+                    appId = ufsAppId,
+                    fileSize = bytes.size,
+                    rawFileSize = bytes.size,
+                    fileSha = sha,
+                    timestamp = Date(),
+                    filename = path,
+                    uploadBatchId = batch.batchID,
+                ).await()
+
+                // Upload each block to the URL Steam provided (same pattern as SteamAutoCloud.kt).
+                for (block in uploadInfo.blockRequests) {
+                    val scheme = if (block.useHttps) "https" else "http"
+                    val url = "$scheme://${block.urlHost}${block.urlPath}"
+
+                    // Slice out just the bytes for this block from the full file bytes.
+                    val slice = bytes.sliceArray(
+                        block.blockOffset.toInt() until (block.blockOffset + block.blockLength).toInt()
+                    )
+
+                    val contentType = block.requestHeaders
+                        .firstOrNull { it.name.equals("Content-Type", ignoreCase = true) }
+                        ?.value ?: "application/octet-stream"
+
+                    // Build the headers list as alternating name/value pairs for Headers.headersOf().
+                    val headerPairs = block.requestHeaders
+                        .flatMap { listOf(it.name, it.value) }
+                        .toTypedArray()
+
+                    val request = Request.Builder()
+                        .url(url)
+                        .put(slice.toRequestBody(contentType.toMediaTypeOrNull()))
+                        .headers(Headers.headersOf(*headerPairs))
+                        .addHeader("user-agent", "Valve/Steam HTTP Client 1.0")
+                        .build()
+
+                    val response = withContext(Dispatchers.IO) {
+                        httpClient.newCall(request).execute()
+                    }
+                    if (!response.isSuccessful) {
+                        Timber.e("Screenshot block upload failed: HTTP ${response.code} for $path")
+                        return false
+                    }
+
+                    Timber.d("Uploaded screenshot to https://${block.urlHost}${block.urlPath}")
+                }
+
+                val committed = cloud.commitFileUpload(
+                    transferSucceeded = true,
+                    appId = ufsAppId,
+                    fileSha = sha,
+                    filename = path,
+                ).await()
+
+                // Hard-fail if Steam rejected the commit — the file won't exist in UFS and
+                // addScreenshot will fail with an opaque error if we proceed anyway.
+                if (!committed) {
+                    Timber.e("UFS commit rejected for $path (fileCommitted=false); aborting screenshot upload")
+                    return false
+                }
+                Timber.d("UFS commit accepted for $path")
+            }
+
+            // Step 5: Close the batch to finalize all uploads for this session.
+            cloud.completeAppUploadBatch(
+                appId = ufsAppId,
+                batchId = batch.batchID,
+                batchEResult = EResult.OK,
+            ).await()
+            Timber.d("Batch completed, adding screenshot")
+
+            // Step 6: Register the screenshot in the user's Steam screenshot library.
+            // We upload as Private so the screenshot doesn't appear on the user's activity
+            // feed — they can change visibility on their Steam profile page afterward.
+            val result = screenshots.addScreenshot(
+                ScreenshotDetails(
+                    gameID = GameID(appId.toLong()),
+                    ufsImageFilePath = imagePath,
+                    usfThumbnailFilePath = thumbPath,
+                    caption = "",
+                    privacy = EUCMFilePrivacyState.Private,
+                    width = width,
+                    height = height,
+                    creationTime = Date(),
+                    isContainsSpoilers = false,
+                )
+            ).await()
+
+            Timber.d("addScreenshot result: ${result.result} (code=${result.result.code()})")
+            result.result == EResult.OK
+        } catch (e: Exception) {
+            Timber.e(e, "Screenshot upload to Steam failed for appId=$appId")
+            false
         }
     }
 
