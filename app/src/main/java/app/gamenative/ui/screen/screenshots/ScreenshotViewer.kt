@@ -31,6 +31,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -65,10 +66,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.gamenative.R
+import app.gamenative.data.GameSource
+import app.gamenative.service.SteamService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.gamenative.ui.util.SnackbarManager
+import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.ScreenshotItem
 import app.gamenative.utils.ScreenshotManager
 import com.skydoves.landscapist.ImageOptions
@@ -96,6 +100,7 @@ private val ScreenshotScrim = Color(0x88000000)
 fun ScreenshotViewer(
     items: List<ScreenshotItem>,
     startIndex: Int,
+    appId: String,
     onClose: (currentIndex: Int) -> Unit,
     onDeleted: (ScreenshotItem) -> Unit,
 ) {
@@ -106,6 +111,41 @@ fun ScreenshotViewer(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val dateFormat = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
+    // Steam upload only makes sense for Steam games — GOG/Epic/Amazon/custom games have no
+    // Steam screenshot library to upload into.
+    val isSteamGame = remember(appId) {
+        ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.STEAM
+    }
+    val steamGameId = remember(appId) { ContainerUtils.extractGameIdFromContainerId(appId) }
+    var uploadingItem by remember { mutableStateOf<ScreenshotItem?>(null) }
+    val uploadToSteam: (ScreenshotItem) -> Unit = { item ->
+        uploadingItem = item
+        scope.launch {
+            val uploaded = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bitmap = android.graphics.BitmapFactory.decodeFile(item.file.absolutePath)
+                        ?: return@runCatching false
+                    try {
+                        val imageBytes = ScreenshotManager.compressBitmapToJpeg(bitmap)
+                        val thumbBytes = ScreenshotManager.generateThumbnailBytes(bitmap)
+                        SteamService.instance?.uploadScreenshotToCloud(
+                            appId = steamGameId,
+                            imageBytes = imageBytes,
+                            thumbBytes = thumbBytes,
+                            width = bitmap.width,
+                            height = bitmap.height,
+                        ) ?: false
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }.onFailure { Timber.e(it, "Screenshot upload to Steam failed") }
+                    .getOrDefault(false)
+            }
+            uploadingItem = null
+            val msg = if (uploaded) R.string.screenshot_uploaded else R.string.screenshot_upload_failed
+            SnackbarManager.show(context.getString(msg))
+        }
+    }
 
     val exportToDownloads: (ScreenshotItem) -> Unit = { item ->
         scope.launch {
@@ -476,6 +516,20 @@ fun ScreenshotViewer(
                 scope.launch { shareWithFallback(context, item) }
             }) {
                 Icon(Icons.Default.Share, contentDescription = stringResource(R.string.screenshot_share), tint = Color.White)
+            }
+            if (isSteamGame) {
+                IconButton(
+                    onClick = {
+                        val item = current ?: return@IconButton
+                        if (uploadingItem == null) uploadToSteam(item)
+                    },
+                ) {
+                    Icon(
+                        Icons.Default.CloudUpload,
+                        contentDescription = stringResource(R.string.screenshot_upload_to_steam),
+                        tint = if (uploadingItem != null) Color.White.copy(alpha = 0.4f) else Color.White,
+                    )
+                }
             }
             }
         }
