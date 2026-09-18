@@ -2476,6 +2476,12 @@
     <string name="screenshot_upload_to_steam">Upload to Steam</string>
     <string name="screenshot_uploaded">Uploaded to Steam</string>
     <string name="screenshot_upload_failed">Steam upload failed</string>
+    <string name="screenshot_upload_dialog_title">Upload to Steam</string>
+    <string name="screenshot_upload_caption_label">Caption (optional)</string>
+    <string name="screenshot_upload_privacy_public">Public</string>
+    <string name="screenshot_upload_privacy_friends_only">Friends Only</string>
+    <string name="screenshot_upload_privacy_private">Private</string>
+    <string name="screenshot_upload_confirm">Upload</string>
     <string name="screenshot_downloaded">Saved to Downloads</string>
     <string name="screenshot_download_failed">Couldn\'t save to Downloads</string>
     <string name="screenshot_deleted">Screenshot deleted</string>
