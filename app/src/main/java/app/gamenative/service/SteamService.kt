@@ -6427,6 +6427,8 @@ class SteamService : Service(), IChallengeUrlChanged {
         thumbBytes: ByteArray,
         width: Int,
         height: Int,
+        caption: String = "",
+        privacy: EUCMFilePrivacyState = EUCMFilePrivacyState.Private,
     ): Boolean {
         val cloud = _steamCloud ?: return false
         val screenshots = _steamScreenshots ?: return false
@@ -6539,16 +6541,15 @@ class SteamService : Service(), IChallengeUrlChanged {
             ).await()
             Timber.d("Batch completed, adding screenshot")
 
-            // Step 6: Register the screenshot in the user's Steam screenshot library.
-            // We upload as Private so the screenshot doesn't appear on the user's activity
-            // feed — they can change visibility on their Steam profile page afterward.
+            // Step 6: Register the screenshot in the user's Steam screenshot library, with the
+            // caption and visibility the caller chose (defaults to a private, uncaptioned upload).
             val result = screenshots.addScreenshot(
                 ScreenshotDetails(
                     gameID = GameID(appId.toLong()),
                     ufsImageFilePath = imagePath,
                     usfThumbnailFilePath = thumbPath,
-                    caption = "",
-                    privacy = EUCMFilePrivacyState.Private,
+                    caption = caption,
+                    privacy = privacy,
                     width = width,
                     height = height,
                     creationTime = Date(),
