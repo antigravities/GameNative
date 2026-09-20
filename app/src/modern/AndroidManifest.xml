@@ -4,4 +4,9 @@
 
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
 
+    <!-- Private fork only: needed for Frontend Sync (FrontendSyncManager) to write export
+         stub files to a user-chosen folder outside the app sandbox on API 30+. Not declared
+         upstream because MANAGE_EXTERNAL_STORAGE is restricted on Google Play. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+
 </manifest>

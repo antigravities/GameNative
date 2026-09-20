@@ -2525,6 +2525,8 @@
     <string name="frontend_sync_resync_complete">Frontend sync complete</string>
     <string name="frontend_sync_pick_directory_cd">Pick directory for %1$s</string>
     <string name="frontend_sync_clear_directory_cd">Clear directory for %1$s</string>
+    <string name="frontend_sync_permission_required">Frontend Sync needs \"All files access\" to write export files outside the app\'s folder.</string>
+    <string name="frontend_sync_grant_permission">Grant All Files Access</string>
 
     <!-- Radial Menu -->
     <string name="radial_menu">Radial Menu</string>
