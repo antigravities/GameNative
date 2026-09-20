@@ -1,5 +1,12 @@
 package app.gamenative.ui.screen.settings
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,9 +28,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.gamenative.BuildConfig
 import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.data.GameSource
@@ -33,9 +42,28 @@ import app.gamenative.ui.components.rememberCustomGameFolderPicker
 /**
  * Dialog for configuring per-source export directories used by frontend launchers such as ES-DE.
  * Changes are buffered until the user confirms with OK.
+ *
+ * The modern flavor doesn't declare MANAGE_EXTERNAL_STORAGE at install time (it installs games
+ * to an app-scoped path that needs no permission), so unlike legacy this dialog has to prompt
+ * for "All files access" itself before the folder pickers below can write anywhere useful.
  */
 @Composable
 fun FrontendSyncDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    // Only the modern flavor needs this prompt: legacy already requires the permission to
+    // install games at all, so by the time a user reaches this dialog it's already granted.
+    val needsAllFilesAccess = BuildConfig.MODERN_ANDROID && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+    var hasAllFilesAccess by remember {
+        mutableStateOf(!needsAllFilesAccess || Environment.isExternalStorageManager())
+    }
+    val manageStorageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) {
+        if (needsAllFilesAccess) {
+            hasAllFilesAccess = Environment.isExternalStorageManager()
+        }
+    }
+
     val sources = listOf(
         GameSource.STEAM to stringResource(R.string.frontend_sync_source_steam),
         GameSource.EPIC to stringResource(R.string.frontend_sync_source_epic),
@@ -51,6 +79,23 @@ fun FrontendSyncDialog(onDismiss: () -> Unit) {
         title = { Text(stringResource(R.string.frontend_sync_dialog_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (needsAllFilesAccess && !hasAllFilesAccess) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = stringResource(R.string.frontend_sync_permission_required),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        TextButton(onClick = {
+                            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            manageStorageLauncher.launch(intent)
+                        }) {
+                            Text(stringResource(R.string.frontend_sync_grant_permission))
+                        }
+                    }
+                }
                 sources.forEach { (source, label) ->
                     FrontendSyncSourceRow(
                         source = source,

@@ -10,6 +10,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:node="remove" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
 
+    <!-- Private fork only: needed for Frontend Sync (FrontendSyncManager) to write export
+         stub files to a user-chosen folder outside the app sandbox on API 30+. Not declared
+         upstream because MANAGE_EXTERNAL_STORAGE is restricted on Google Play. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+
     <!-- Optional: only used by the Meta Quest immersive launch mode, not required to install/run the app. -->
     <uses-feature
         android:name="android.hardware.vr.headtracking"
