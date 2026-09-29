@@ -420,6 +420,10 @@ fun ContainerStorageManagerContent(
     // is exactly the screen where showing accurate installed state matters most. Shared by both
     // entry points: the Downloads screen's Storage tab and ContainerStorageManagerDialog below.
     LaunchedEffect(Unit) {
+        // Must run before the installed-flag backfill below, since that backfill's on-disk
+        // matching depends on install_dir being correct. No-op after its first successful run, so
+        // not forced here — unlike the installed-flag pass, on-disk state changing doesn't affect it.
+        SteamService.backfillInstallDirColumnOnce()
         SteamService.backfillInstalledFlagOnce(force = true)
     }
 

@@ -26,6 +26,9 @@ interface AndroidEvent<T> : Event<T> {
     data class DownloadStatusChanged(val appId: Int, val isDownloading: Boolean) : AndroidEvent<Unit>
     data class PostInstallSyncStatusChanged(val appId: Int, val isSyncing: Boolean) : AndroidEvent<Unit>
     data class LibraryInstallStatusChanged(val appId: Int, val source: GameSource) : AndroidEvent<Unit>
+    // Bulk equivalent of LibraryInstallStatusChanged for SteamService.backfillInstalledFlagOnce,
+    // which can flip isDownloaded for many apps at once rather than one specific app+source.
+    data object LibraryInstalledFlagsChanged : AndroidEvent<Unit>
     data class PreferredCopyChanged(val appId: Int) : AndroidEvent<Unit>
     data class CustomGameImagesFetched(val appId: String) : AndroidEvent<Unit>
     data object RecommendationToggleChanged : AndroidEvent<Unit>
