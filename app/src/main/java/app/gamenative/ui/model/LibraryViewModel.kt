@@ -114,6 +114,10 @@ class LibraryViewModel @Inject constructor(
         onFilterApps(paginationCurrentPage)
     }
 
+    private val onLibraryInstalledFlagsChanged: (AndroidEvent.LibraryInstalledFlagsChanged) -> Unit = {
+        onFilterApps(paginationCurrentPage)
+    }
+
     private val onPreferredCopyChanged: (AndroidEvent.PreferredCopyChanged) -> Unit = { event ->
         viewModelScope.launch(Dispatchers.IO) {
             val updated = steamAppDao._getOwnedAppSummariesByIds(listOf(event.appId)).firstOrNull() ?: return@launch
@@ -361,6 +365,10 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             SteamService.picsSyncPending.first { it == 0 }
             delay(5_000L)
+            // install_dir repair must run before the installed-flag backfill below, since that
+            // backfill's on-disk matching depends on install_dir being correct. No-op after its
+            // first successful run.
+            SteamService.backfillInstallDirColumnOnce()
             // Installed-flag backfill first: it also drives visible ordering (INSTALLED_FIRST
             // sort), same reasoning as putting the sort-key backfill ahead of the size one below.
             // No-op after its first successful run.
@@ -480,6 +488,7 @@ class LibraryViewModel @Inject constructor(
         }
 
         PluviaApp.events.on<AndroidEvent.LibraryInstallStatusChanged, Unit>(onInstallStatusChanged)
+        PluviaApp.events.on<AndroidEvent.LibraryInstalledFlagsChanged, Unit>(onLibraryInstalledFlagsChanged)
         PluviaApp.events.on<AndroidEvent.PreferredCopyChanged, Unit>(onPreferredCopyChanged)
         PluviaApp.events.on<AndroidEvent.CustomGameImagesFetched, Unit>(onCustomGameImagesFetched)
         PluviaApp.events.on<AndroidEvent.RecommendationToggleChanged, Unit>(onRecommendationToggleChanged)
@@ -512,6 +521,7 @@ class LibraryViewModel @Inject constructor(
     override fun onCleared() {
         searchDebounceJob?.cancel()
         PluviaApp.events.off<AndroidEvent.LibraryInstallStatusChanged, Unit>(onInstallStatusChanged)
+        PluviaApp.events.off<AndroidEvent.LibraryInstalledFlagsChanged, Unit>(onLibraryInstalledFlagsChanged)
         PluviaApp.events.off<AndroidEvent.PreferredCopyChanged, Unit>(onPreferredCopyChanged)
         PluviaApp.events.off<AndroidEvent.CustomGameImagesFetched, Unit>(onCustomGameImagesFetched)
         PluviaApp.events.off<AndroidEvent.RecommendationToggleChanged, Unit>(onRecommendationToggleChanged)

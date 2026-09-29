@@ -231,6 +231,22 @@ object PrefManager {
         get() = getPref(LIBRARY_INSTALLED_FLAG_BACKFILL_CURSOR, 0)
         set(value) { setPref(LIBRARY_INSTALLED_FLAG_BACKFILL_CURSOR, value) }
 
+    // One-shot guard for the steam_app.install_dir repair backfill (SteamService.
+    // backfillInstallDirColumnOnce), which fixes rows left with a blank flat install_dir column by
+    // a since-fixed KeyValueUtils bug (it read a nonexistent KeyValues path). Not tied to
+    // onDestructiveMigration like the isDownloaded backfill above — this repairs a code bug's
+    // fallout, not something a DB rebuild itself invalidates, so it only ever needs to run once.
+    private val LIBRARY_INSTALL_DIR_BACKFILL_DONE = booleanPreferencesKey("library_install_dir_backfill_done")
+    var libraryInstallDirBackfillDone: Boolean
+        get() = getPref(LIBRARY_INSTALL_DIR_BACKFILL_DONE, false)
+        set(value) { setPref(LIBRARY_INSTALL_DIR_BACKFILL_DONE, value) }
+
+    // Resume cursor (highest processed app id) for the install_dir repair backfill.
+    private val LIBRARY_INSTALL_DIR_BACKFILL_CURSOR = intPreferencesKey("library_install_dir_backfill_cursor")
+    var libraryInstallDirBackfillCursor: Int
+        get() = getPref(LIBRARY_INSTALL_DIR_BACKFILL_CURSOR, 0)
+        set(value) { setPref(LIBRARY_INSTALL_DIR_BACKFILL_CURSOR, value) }
+
     // How many apps have been successfully sent to the PICS channel in the current refresh run.
     // On resume after crash, refreshAllApps() drops this many IDs from the front of the list.
     private val REFRESH_ALL_APPS_OFFSET = intPreferencesKey("refresh_all_apps_offset")

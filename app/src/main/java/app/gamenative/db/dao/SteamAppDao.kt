@@ -482,10 +482,24 @@ interface SteamAppDao {
     // _getSortKeyBackfillRowsAfter above: no OWNED_APPS_WHERE (cheaper, dense cursor), and a
     // match against the on-disk download directory set only ever occurs for real installs anyway.
     @Query(
-        "SELECT id, name, install_dir FROM steam_app " +
+        "SELECT id, name, install_dir, received_pics FROM steam_app " +
             "WHERE id > :afterId ORDER BY id LIMIT :limit",
     )
     suspend fun _getInstalledBackfillRowsAfter(afterId: Int, limit: Int): List<app.gamenative.data.SteamAppInstalledBackfillRow>
+
+    // Pages steam_app rows whose flat install_dir is still blank, by an ascending-id cursor, for
+    // the one-time repair backfill (SteamService.backfillInstallDirColumnOnce). Filtering on
+    // install_dir = '' skips already-correct rows cheaply; a row that gets repaired no longer
+    // matches on a later pass, and a row whose config genuinely has no installDir (rare, e.g.
+    // some tools/DLCs) simply falls behind the cursor like any other backfill here.
+    @Query(
+        "SELECT id, config FROM steam_app " +
+            "WHERE id > :afterId AND install_dir = '' ORDER BY id LIMIT :limit",
+    )
+    suspend fun _getInstallDirRepairRowsAfter(afterId: Int, limit: Int): List<app.gamenative.data.SteamAppInstallDirRepairRow>
+
+    @Query("UPDATE steam_app SET install_dir = :installDir WHERE id = :appId")
+    suspend fun _updateInstallDir(appId: Int, installDir: String)
 
     // Fetches summaries for a specific set of app ids. Used by the library's custom-game /
     // Steam-import dedup path in filterAppsSql, which needs summaries for a small known id set

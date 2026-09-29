@@ -594,6 +594,12 @@ class SteamService : Service(), IChallengeUrlChanged {
         private const val APP_INFO_TTL_MS = 60_000L
         private val appInfoScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+        // Guards backfillInstalledFlagOnce the same way: a caller cancelling (Storage Manager's
+        // LaunchedEffect leaving composition, or a ViewModel's viewModelScope tearing down) must
+        // not abort the ~47k-row scan mid-pass, and a concurrent caller (the screen reopened
+        // before a prior pass finished) should join the in-flight job instead of starting another.
+        private var backfillInstalledFlagJob: Job? = null
+
         // Tracks how many app PICS requests are queued to appPicsChannel but not yet
         // processed and written to the DB. Incremented at each appPicsChannel.send() call
         // site; decremented by the batch size once the collect{} block finishes. Reset to
@@ -1870,6 +1876,66 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
         }
 
+        @Volatile private var backfillInstallDirColumnJob: Job? = null
+
+        // Repairs the flat steam_app.install_dir column for rows synced before the KeyValueUtils
+        // installDir mapping bug was fixed — it read a nonexistent "common.config.installdir"
+        // KeyValues path instead of the root-level "config.installdir", so install_dir was left
+        // blank for every already-synced app regardless of whether config.installDir differs from
+        // the app's display name (which is exactly the case backfillInstalledFlagOnce's matching,
+        // and the live Library SQL path, both depend on install_dir for). config.installDir is
+        // already correct locally, so this repairs existing rows without any network round trip.
+        //
+        // One-time pass gated by PrefManager.libraryInstallDirBackfillDone, same id-cursor/page
+        // shape as the other backfills. Must run (and be awaited) before backfillInstalledFlagOnce
+        // so that function's matching sees the repaired install_dir values.
+        suspend fun backfillInstallDirColumnOnce(force: Boolean = false) {
+            if (!force && PrefManager.libraryInstallDirBackfillDone) {
+                Timber.i("install_dir backfill: already done, skipping")
+                return
+            }
+            val svc = instance ?: run {
+                Timber.w("install_dir backfill: no SteamService instance, skipping")
+                return
+            }
+            val job = synchronized(this) {
+                backfillInstallDirColumnJob?.takeIf { it.isActive } ?: appInfoScope.launch {
+                    try {
+                        var afterId = if (force) 0 else PrefManager.libraryInstallDirBackfillCursor
+                        Timber.i("install_dir backfill: starting from afterId=$afterId (force=$force)")
+                        var scanned = 0
+                        var repaired = 0
+                        while (true) {
+                            val page = svc.appDao._getInstallDirRepairRowsAfter(afterId, 500)
+                            if (page.isEmpty()) break
+
+                            svc.db.withTransaction {
+                                for (row in page) {
+                                    val installDir = row.config.installDir
+                                    if (installDir.isNotEmpty()) {
+                                        repaired++
+                                        svc.appDao._updateInstallDir(row.id, installDir)
+                                    }
+                                }
+                            }
+                            scanned += page.size
+                            afterId = page.last().id
+                            PrefManager.libraryInstallDirBackfillCursor = afterId
+                            Timber.d("install_dir backfill: processed $scanned apps so far (afterId=$afterId)")
+                            yield()
+                            delay(75L)
+                        }
+
+                        PrefManager.libraryInstallDirBackfillDone = true
+                        Timber.i("install_dir backfill complete: scanned $scanned apps, repaired=$repaired")
+                    } catch (e: Exception) {
+                        Timber.e(e, "install_dir backfill failed; will retry on next launch")
+                    }
+                }.also { backfillInstallDirColumnJob = it }
+            }
+            job.join()
+        }
+
         // Reconciles app_info.isDownloaded against what's actually on disk. Unlike
         // size_bytes/name_sort_key, nothing else recomputes this column from real install state —
         // it's only ever set by completeAppDownload() when a download finishes through this app's
@@ -1882,7 +1948,8 @@ class SteamService : Service(), IChallengeUrlChanged {
         // transaction, inter-page yields to stay off the hot path). Pass force = true (used when
         // the storage manager screen opens, where accuracy matters most and the on-disk state may
         // have changed since the last pass) to always run a fresh full scan regardless of the
-        // done flag or any prior cursor.
+        // done flag or any prior cursor. Callers should run backfillInstallDirColumnOnce() first —
+        // this function's matching depends on install_dir being correct.
         suspend fun backfillInstalledFlagOnce(force: Boolean = false) {
             if (!force && PrefManager.libraryInstalledFlagBackfillDone) {
                 Timber.i("isDownloaded backfill: already done, skipping")
@@ -1892,7 +1959,13 @@ class SteamService : Service(), IChallengeUrlChanged {
                 Timber.w("isDownloaded backfill: no SteamService instance, skipping")
                 return
             }
-            withContext(Dispatchers.IO) {
+            // Run on appInfoScope — independent of the caller's coroutine — instead of inline in
+            // the calling context. A UI-scoped caller (Storage Manager's LaunchedEffect, or a
+            // ViewModel's viewModelScope) can be cancelled by navigation mid-pass; this join()
+            // unwinds for that caller alone while the launched job keeps running to completion.
+            // A second concurrent caller joins the same in-flight job instead of starting another.
+            val job = synchronized(this) {
+                backfillInstalledFlagJob?.takeIf { it.isActive } ?: appInfoScope.launch {
                 try {
                     val downloadDirectorySet = (DownloadService.getDownloadDirectoryApps() + getImportedAppDirs()).toHashSet()
                     Timber.i(
@@ -1906,6 +1979,16 @@ class SteamService : Service(), IChallengeUrlChanged {
                     var updated = 0
                     var matched = 0
                     var written = 0
+                    // True if any row scanned this pass hadn't received real PICS data yet (still a
+                    // placeholder stub row from package processing — see the appIds.forEach insert in
+                    // the packagePicsChannel consumer). Right after a destructive migration, the
+                    // license/package/app PICS pipeline can still be repopulating steam_app long after
+                    // this backfill starts (picsSyncPending settling to 0 is not a reliable "sync
+                    // finished" signal — it drains between every batch by design). If we mark the pass
+                    // done anyway, any app whose real name/install_dir arrives after our cursor passes
+                    // it is permanently stuck "not installed". So: skip unsynced rows' matching, and
+                    // only latch the one-time "done" guard once a full pass finds none.
+                    var sawUnsynced = false
                     while (true) {
                         val page = svc.appDao._getInstalledBackfillRowsAfter(afterId, 500)
                         if (page.isEmpty()) break
@@ -1913,6 +1996,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                         // Batch each page's writes into one transaction instead of 500 commits.
                         svc.db.withTransaction {
                             for (row in page) {
+                                if (!row.receivedPics) {
+                                    sawUnsynced = true
+                                    continue
+                                }
                                 // Two name candidates, matching LibraryViewModel's
                                 // isInDownloadDirectory: the primary (install_dir, falling back to
                                 // name) and — for folders created under an older naming convention —
@@ -1944,12 +2031,32 @@ class SteamService : Service(), IChallengeUrlChanged {
                         delay(75L)
                     }
 
-                    PrefManager.libraryInstalledFlagBackfillDone = true
-                    Timber.i("isDownloaded backfill complete: scanned $updated apps, matched=$matched, written=$written")
+                    if (sawUnsynced) {
+                        // PICS is still catching up — restart from scratch next launch instead of
+                        // latching "done", so this keeps retrying (cheap: an indexed id-cursor scan)
+                        // until a pass lands after the resync has actually finished.
+                        PrefManager.libraryInstalledFlagBackfillCursor = 0
+                        Timber.i(
+                            "isDownloaded backfill incomplete: scanned $updated apps, matched=$matched, " +
+                                "written=$written, but some rows hadn't received PICS data yet — will retry next launch",
+                        )
+                    } else {
+                        PrefManager.libraryInstalledFlagBackfillDone = true
+                        Timber.i("isDownloaded backfill complete: scanned $updated apps, matched=$matched, written=$written")
+                    }
+                    // Nothing re-queries the Library screen on its own after a bulk DB write like
+                    // this (unlike a single-game install/uninstall, which already fires
+                    // LibraryInstallStatusChanged) — so any already-open LibraryViewModel would
+                    // otherwise keep showing stale results until its own next full rebuild.
+                    if (written > 0) {
+                        PluviaApp.events.emit(AndroidEvent.LibraryInstalledFlagsChanged)
+                    }
                 } catch (e: Exception) {
                     Timber.e(e, "isDownloaded backfill failed; will retry on next launch")
                 }
+                }.also { backfillInstalledFlagJob = it }
             }
+            job.join()
         }
 
         fun getMainAppDepots(appId: Int, containerLanguage: String): Map<Int, DepotInfo> {
