@@ -33,7 +33,6 @@ import dagger.hilt.components.SingletonComponent
 import java.io.File
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
-import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.SimpleFileVisitor
@@ -922,7 +921,7 @@ object ContainerStorageManager {
         }
     }
 
-    internal fun getContainerDirectorySize(root: Path): Long {
+    private fun getContainerDirectorySize(root: Path): Long {
         if (!Files.isDirectory(root)) return 0L
 
         var totalBytes = 0L
@@ -931,7 +930,6 @@ object ContainerStorageManager {
                 root,
                 object : SimpleFileVisitor<Path>() {
                     override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                        if (attrs.isRegularFile && hardLinkCount(file) > 1) return FileVisitResult.CONTINUE
                         totalBytes += attrs.size()
                         return FileVisitResult.CONTINUE
                     }
@@ -948,10 +946,6 @@ object ContainerStorageManager {
 
         return totalBytes
     }
-
-    private fun hardLinkCount(file: Path): Int =
-        runCatching { (Files.getAttribute(file, "unix:nlink", LinkOption.NOFOLLOW_LINKS) as Number).toInt() }
-            .getOrDefault(1)
 
     internal fun normalizeContainerId(containerId: String): String = containerId.substringBefore("(")
 
