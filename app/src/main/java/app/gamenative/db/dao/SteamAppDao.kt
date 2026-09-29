@@ -60,12 +60,16 @@ private const val OWNED_APPS_WHERE =
 // SQL-expressible library filters, appended after OWNED_APPS_WHERE on the paginated/count queries.
 // Each predicate is written so it can be toggled off by a bound parameter without changing the SQL,
 // because Room cannot conditionally include clauses:
-//   - type:        always applied (the library always has a non-empty type set; the caller returns
-//                  early when it is empty, since Room generates invalid SQL for IN ()).
+//   - type:        always applied, plus the VR bucket (same rule as searchOwnedAppSummaries and
+//                  LibraryViewModel.typeMatches): VR-only apps are excluded from the normal type
+//                  buckets and appear only when :includeVr is true (the VR filter chip). The caller
+//                  passes a [-1] sentinel instead of an empty type list, since Room generates
+//                  invalid SQL for IN ().
 //   - search:      bypassed when :search = '' (LIKE is ASCII case-insensitive only — diacritic
 //                  variants won't match, same known limitation as searchOwnedAppSummaries).
 private const val LIBRARY_FILTERS =
-    "AND app.type IN (:types) " +
+    "AND ((app.is_vr_only = 0 AND app.type IN (:types)) " +
+    "OR (:includeVr AND (app.is_vr_only = 1 OR app.is_vr_supported = 1))) " +
     "AND (:search = '' OR LOWER(app.name) LIKE '%' || LOWER(:search) || '%') "
 
 // The summary projection (kept in sync with the other *AppSummaries queries). Excludes the heavy
@@ -75,7 +79,8 @@ private const val LIBRARY_FILTERS =
 // SteamAppSummary mapping is unaffected.
 private const val SUMMARY_COLS =
     "app.id, app.name, app.type, app.package_id, app.client_icon_hash, app.library_assets, " +
-    "app.owner_account_id, app.install_dir, app.size_bytes, app.review_score, app.review_percentage "
+    "app.owner_account_id, app.install_dir, app.size_bytes, app.review_score, app.review_percentage, " +
+    "app.is_vr_only, app.is_vr_supported "
 
 // Projection for buildLibraryPageQuery: SUMMARY returns the full SteamAppSummary columns (one page,
 // blobs included); STUB returns only the lightweight OrderedSteamStub columns (id, name_sort_key,
@@ -103,6 +108,7 @@ fun buildLibraryPageQuery(
     search: String,
     sortOption: SortOption,
     installedFilter: Boolean,
+    includeVr: Boolean = false,
     limit: Int? = null,
     offset: Int = 0,
     invalidPkgId: Int = INVALID_PKG_ID,
@@ -147,8 +153,10 @@ fun buildLibraryPageQuery(
     sb.append("OR EXISTS (SELECT 1 FROM steam_app AS dlc INNER JOIN steam_license AS license ON dlc.package_id = license.packageId WHERE dlc.dlc_for_app_id = app.id AND (license.license_flags & 8) = 0)) ")
 
     // LIBRARY_FILTERS, inlined with positional args (kept in sync with the const).
-    sb.append("AND app.type IN (").append(placeholders(types.size)).append(") ")
+    sb.append("AND ((app.is_vr_only = 0 AND app.type IN (").append(placeholders(types.size)).append(")) ")
     args.addAll(types)
+    sb.append("OR (? = 1 AND (app.is_vr_only = 1 OR app.is_vr_supported = 1))) ")
+    args.add(if (includeVr) 1 else 0)
     sb.append("AND (? = '' OR LOWER(app.name) LIKE '%' || LOWER(?) || '%') ")
     args.add(search); args.add(search)
 
@@ -386,6 +394,7 @@ interface SteamAppDao {
     suspend fun countOwnedAppSummaries(
         types: List<Int>,
         search: String,
+        includeVr: Boolean = false,
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Int = 0,
     ): Int
@@ -402,6 +411,7 @@ interface SteamAppDao {
     suspend fun countInstalledOwnedAppSummaries(
         types: List<Int>,
         search: String,
+        includeVr: Boolean = false,
         invalidPkgId: Int = INVALID_PKG_ID,
         includeExpired: Int = 0,
     ): Int

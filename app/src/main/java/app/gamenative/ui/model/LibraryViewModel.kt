@@ -1461,6 +1461,8 @@ class LibraryViewModel @Inject constructor(
     private suspend fun filterAppsSql(currentState: LibraryState, paginationPage: Int) {
         val currentFilter = AppFilter.getAppType(currentState.appInfoSortType)
         val typeCodes = currentFilter.map { it.code }
+        // VR filter chip: also pulls in VR titles regardless of the selected type buckets.
+        val includeVr = currentState.appInfoSortType.contains(AppFilter.VR)
         val currentTab = currentState.currentTab
 
         // Filesystem-based installed detection, used for the per-item badge (and the comparator's
@@ -1499,7 +1501,7 @@ class LibraryViewModel @Inject constructor(
         val signature = listOf(
             currentState.currentSortOption, search, currentTab,
             includeSteam, includeOpen, includeGOG, includeEpic, includeAmazon,
-            installedFilter, includeExpired, typeCodes,
+            installedFilter, includeExpired, typeCodes, includeVr,
         ).joinToString("|")
 
         // INCREMENTAL only on a genuine scroll-driven load-more: same filter, a page past 0, and the
@@ -1587,12 +1589,14 @@ class LibraryViewModel @Inject constructor(
 
         // ── FULL rebuild ──────────────────────────────────────────────────────────────────────────
         // Total comes from the ordered skeleton's size, computed further down.
-        val steamCountable = typeCodes.isNotEmpty()
+        val steamCountable = typeCodes.isNotEmpty() || includeVr
+        // Room/SQLite can't bind an empty IN list; -1 matches no AppType (VR-only queries still work).
+        val typeCodesOrSentinel = typeCodes.ifEmpty { listOf(-1) }
         val steamBadgeCount = if (steamCountable) {
             if (installedFilter) {
-                steamAppDao.countInstalledOwnedAppSummaries(typeCodes, search, includeExpired = includeExpired)
+                steamAppDao.countInstalledOwnedAppSummaries(typeCodesOrSentinel, search, includeVr, includeExpired = includeExpired)
             } else {
-                steamAppDao.countOwnedAppSummaries(typeCodes, search, includeExpired = includeExpired)
+                steamAppDao.countOwnedAppSummaries(typeCodesOrSentinel, search, includeVr, includeExpired = includeExpired)
             }
         } else {
             0
@@ -1643,10 +1647,11 @@ class LibraryViewModel @Inject constructor(
         // Steam refs: the whole filtered set, ordered in SQL, as lightweight stubs (no blobs).
         val steamRefs: List<LibraryRef> = if (includeSteam && steamCountable) {
             val query = buildLibraryPageQuery(
-                types = typeCodes,
+                types = typeCodesOrSentinel,
                 search = search,
                 sortOption = currentState.currentSortOption,
                 installedFilter = installedFilter,
+                includeVr = includeVr,
                 limit = null,
                 includeExpired = includeExpired,
                 projection = LibraryProjection.STUB,
