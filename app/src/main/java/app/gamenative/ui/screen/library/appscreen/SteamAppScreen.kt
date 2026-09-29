@@ -76,7 +76,6 @@ import app.gamenative.workshop.WorkshopManager
 import app.gamenative.NetworkMonitor
 import app.gamenative.service.SteamService.Companion.getInstalledApp
 import com.google.android.play.core.splitcompat.SplitCompat
-import app.gamenative.utils.ConversionTracker
 import com.posthog.PostHog
 import com.winlator.container.Container
 import com.winlator.container.ContainerData
@@ -1243,8 +1242,7 @@ class SteamAppScreen : BaseAppScreen() {
                     {
                         PostHog.capture(
                             event = "game_install_started",
-                            properties = mapOf("game_name" to (appInfo?.name ?: "")) +
-                                ConversionTracker.campaignAttribution(gameId),
+                            properties = mapOf("game_name" to (appInfo?.name ?: "")),
                         )
                         hideInstallDialog(gameId)
                         CoroutineScope(Dispatchers.IO).launch {
@@ -1496,8 +1494,7 @@ class SteamAppScreen : BaseAppScreen() {
 
                     PostHog.capture(
                         event = "game_install_started",
-                        properties = mapOf("game_name" to (appInfo?.name ?: "")) +
-                            ConversionTracker.campaignAttribution(gameId),
+                        properties = mapOf("game_name" to (appInfo?.name ?: ""))
                     )
                     CoroutineScope(Dispatchers.IO).launch {
                         SteamService.downloadApp(gameId, dlcAppIds, branch = branch, isUpdateOrVerify = false)

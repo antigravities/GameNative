@@ -41,8 +41,6 @@ data class BootAdItem(
     val endsAt: String? = null,
     // template "quiz_card": one is picked at random per boot.
     val questions: List<BootQuizQuestion> = emptyList(),
-    // Build flavors this campaign targets ("modern", "legacy"); empty = every build.
-    val flavors: List<String> = emptyList(),
 )
 
 @Serializable
@@ -119,7 +117,7 @@ object BootAdRepository {
     // Weighted random among sponsors in window, under cap, renderable, not shown last boot.
     private fun eligibleSponsor(): BootAdItem? {
         if (!PrefManager.bootScreenAdsEnabled) return null
-        val eligible = cachedAds().filter { isRenderable(it) && isWithinWindow(it) && it.flavors.targetsThisBuild() }
+        val eligible = cachedAds().filter { isRenderable(it) && isWithinWindow(it) }
             .filter { it.maxShowsPerDay <= 0 || showsToday(it.campaignId) < it.maxShowsPerDay }
         if (eligible.isEmpty()) return null
         val lastShown = PrefManager.bootAdLastShown

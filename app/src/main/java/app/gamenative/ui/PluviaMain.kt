@@ -77,7 +77,6 @@ import app.gamenative.service.rockstar.RockstarHelperDeployment
 import app.gamenative.service.rockstar.RockstarLoginGate
 import app.gamenative.service.rockstar.RockstarRuntime
 import app.gamenative.service.amazon.AmazonService
-import app.gamenative.utils.ConversionTracker
 import com.posthog.PostHog
 import app.gamenative.ui.component.AchievementOverlay
 import app.gamenative.ui.component.ConnectionStatusBanner
@@ -313,11 +312,6 @@ private fun trackAiDebugOffer(event: String, appId: String, trigger: String) {
 private fun trackGameLaunched(appId: String) {
     val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
     val gameName = ContainerUtils.resolveGameName(appId)
-    val attribution = if (gameSource == GameSource.STEAM) {
-        ConversionTracker.campaignAttribution(runCatching { ContainerUtils.extractGameIdFromContainerId(appId) }.getOrNull())
-    } else {
-        emptyMap()
-    }
     PostHog.capture(
         event = "game_launched",
         properties = mapOf(
@@ -325,7 +319,7 @@ private fun trackGameLaunched(appId: String) {
             "game_store" to gameSource.name,
             "key_attestation_available" to PrefManager.keyAttestationAvailable,
             "play_integrity_available" to PrefManager.playIntegrityAvailable,
-        ) + attribution,
+        ),
     )
 }
 
@@ -407,7 +401,7 @@ fun PluviaMain(
 
     // Check for updates on app start
     LaunchedEffect(Unit) {
-        if (BuildConfig.MODERN_ANDROID || BuildConfig.XR_BUILD) return@LaunchedEffect
+        if (BuildConfig.MODERN_ANDROID) return@LaunchedEffect
         val checkedUpdateInfo = UpdateChecker.checkForUpdate(context)
         if (checkedUpdateInfo != null) {
             val appVersionCode = BuildConfig.VERSION_CODE
@@ -1605,7 +1599,6 @@ fun PluviaMain(
                     heroImageUrl = state.bootingSplashHeroImageUrl,
                     bootAd = state.bootAd,
                     onAbort = { viewModel.abortBoot() },
-                    onDismissAd = { optOut -> viewModel.dismissBootAd(optOut) },
                 )
             }
 
