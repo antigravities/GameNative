@@ -158,7 +158,6 @@ import app.gamenative.utils.WineProcessSnapshotHelper
 import com.posthog.PostHog
 import com.winlator.alsaserver.ALSAClient
 import com.winlator.container.Container
-import com.winlator.container.ContainerDeduper
 import com.winlator.container.ContainerManager
 import com.winlator.contents.AdrenotoolsManager
 import com.winlator.contents.ContentProfile
@@ -173,7 +172,6 @@ import com.winlator.core.GPUInformation
 import com.winlator.core.KeyValueSet
 import com.winlator.core.OnExtractFileListener
 import com.winlator.core.ProcessHelper
-import com.winlator.core.SharedComponents
 import com.winlator.core.TarCompressorUtils
 import com.winlator.core.Win32AppWorkarounds
 import com.winlator.core.WineInfo
@@ -5386,12 +5384,6 @@ private suspend fun setupWineSystemFiles(
         containerDataChanged = true
     }
 
-    if (!ContainerDeduper.isDone(container)) {
-        val dedupe = ContainerDeduper.dedupe(context, contentsManager, container)
-        Timber.i("Container dedupe: $dedupe")
-        if (dedupe.completed) ContainerDeduper.markDone(container)
-    }
-
     // Always refresh components files
     refreshComponentsFiles(context)
 
@@ -5634,16 +5626,16 @@ private suspend fun extractDXWrapperComponent(
     if (componentFile == null) {
         // Legacy variant: use bundled asset
         Timber.d("Extracting dxwrapper $componentId from bundled assets")
-        SharedComponents.extractAndLink(
-            context, componentId, TarCompressorUtils.Type.ZSTD,
+        TarCompressorUtils.extract(
+            TarCompressorUtils.Type.ZSTD, context.assets,
             "dxwrapper/$componentId.tzst", windowsDir, onExtractFileListener,
         )
     } else {
         // Modern variant: use downloaded file
         Timber.d("Extracting dxwrapper $componentId from downloaded file: ${componentFile.absolutePath}")
-        SharedComponents.extractAndLink(
-            context, componentId, TarCompressorUtils.Type.ZSTD,
-            componentFile, windowsDir, onExtractFileListener,
+        TarCompressorUtils.extract(
+            TarCompressorUtils.Type.ZSTD, componentFile,
+            windowsDir, onExtractFileListener,
         )
     }
 }
