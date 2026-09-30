@@ -2297,14 +2297,14 @@ fun preLaunchApp(
             }
 
             if (!container.isUseLegacyDRM && !container.isLaunchRealSteam &&
-                !SteamService.isFileInstallable(context, "experimental-drm-20260116.tzst")
+                !SteamService.isFileInstallable(context, "experimental-drm-20260929.tzst")
             ) {
                 setLoadingMessage("Downloading extras")
                 SteamService.downloadFile(
                     onDownloadProgress = { setLoadingProgress(it / 1.0f) },
                     this,
                     context = context,
-                    "experimental-drm-20260116.tzst",
+                    "experimental-drm-20260929.tzst",
                 ).await()
             }
             if (gameSource == GameSource.STEAM && container.isLaunchRealSteam && !isOffline && !container.isSteamOfflineMode &&

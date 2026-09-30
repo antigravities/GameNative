@@ -2703,7 +2703,11 @@ class SteamService : Service(), IChallengeUrlChanged {
             context: Context,
             onProgress: (Float) -> Unit,
         ) = withContext(Dispatchers.IO) {
-            val primaryUrl = "https://downloads.gamenative.app/$fileName"
+            // Fork-only: the upgraded gbe_fork bundle isn't on upstream's hosts, so it has its own URL.
+            // (`mapOf(...)[key]` returns null for other files, and `?:` then uses the default URL.)
+            val primaryUrl = mapOf(
+                "experimental-drm-20260929.tzst" to "https://antigravities.github.io/patch/experimental-drm-20260929.tzst",
+            )[fileName] ?: "https://downloads.gamenative.app/$fileName"
             val fallbackUrl = "https://pub-9fcd5294bd0d4b85a9d73615bf98f3b5.r2.dev/$fileName"
             try {
                 fetchFile(primaryUrl, dest, onProgress)
