@@ -163,6 +163,7 @@ import app.gamenative.data.StoreGameDetails
 import app.gamenative.service.SteamService
 import app.gamenative.ui.component.GamepadAction
 import app.gamenative.ui.component.GamepadActionBar
+import app.gamenative.ui.util.shouldShowGamepadUI
 import app.gamenative.ui.component.GamepadButton
 import app.gamenative.ui.component.LoadingScreen
 import app.gamenative.ui.component.ScreenshotsPreviewStrip
@@ -1221,6 +1222,9 @@ internal fun AppScreenContent(
         optionsMenuVisible = false
     }
 
+    // Must be read in the composable body (it's a @Composable function), not inside a lambda.
+    val showGamepadBar = shouldShowGamepadUI()
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -1844,6 +1848,13 @@ internal fun AppScreenContent(
             }
 
             bottomContent()
+
+            // GamepadActionBar is an overlay (a sibling in the parent Box), so it takes no layout
+            // space. Reserve room at the end of the scrollable content so the last items can be
+            // scrolled above it. Only when the bar is actually shown (same check the bar uses).
+            if (showGamepadBar) {
+                Spacer(modifier = Modifier.navigationBarsPadding().height(96.dp))
+            }
         }
 
         GamepadActionBar(
