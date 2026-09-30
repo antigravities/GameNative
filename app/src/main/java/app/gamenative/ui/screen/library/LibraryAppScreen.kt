@@ -1839,7 +1839,6 @@ internal fun AppScreenContent(
                     AchievementsRow(achievements = achievements)
                 }
                 // Screenshots preview (hidden when the game has none)
-                Spacer(modifier = Modifier.height(10.dp))
                 ScreenshotsPreviewStrip(
                     appId = displayInfo.appId,
                     onClick = onViewScreenshots,
@@ -2235,8 +2234,7 @@ private fun AchievementsRow(
     InfoCard(
         label = stringResource(R.string.achievements),
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 36.dp),
+            .fillMaxWidth(),
         isCompact = true,
         onClick = { showDialog = true },
     ) {

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,6 +42,10 @@ fun ScreenshotsPreviewStrip(
 
     val preview = items.take(PREVIEW_MAX)
     val remaining = items.size - preview.size
+
+    if( preview.isNotEmpty() ){
+        Spacer(modifier = Modifier.height(10.dp))
+    }
 
     InfoCard(
         label = stringResource(R.string.screenshots_title),

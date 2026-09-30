@@ -1889,11 +1889,11 @@ class SteamAppScreen : BaseAppScreen() {
         // Render nothing if SteamPeek returned no results or none are owned
         if (relatedApps.isEmpty()) return
 
-        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = "Games Like This (SteamPeek)",
                 style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 16.dp),
             )
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
