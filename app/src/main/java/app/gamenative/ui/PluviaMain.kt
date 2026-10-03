@@ -720,10 +720,8 @@ fun PluviaMain(
                 }
 
                 is MainViewModel.MainUiEvent.ShowGameFeedbackDialog -> {
-                    gameFeedbackState = GameFeedbackDialogState(
-                        visible = true,
-                        appId = event.appId,
-                    )
+                    // Feedback uploads to api.gamenative.app, which is disabled in this fork,
+                    // so don't show the dialog.
                 }
 
                 is MainViewModel.MainUiEvent.ShowMembershipPitch -> {
@@ -915,12 +913,8 @@ fun PluviaMain(
     }
 
     // Listen for game feedback request
-    val onShowGameFeedback: (AndroidEvent.ShowGameFeedback) -> Unit = { event ->
-        gameFeedbackState = GameFeedbackDialogState(
-            visible = true,
-            appId = event.appId,
-        )
-    }
+    // Disabled in this fork: feedback uploads to api.gamenative.app, so never show the dialog.
+    val onShowGameFeedback: (AndroidEvent.ShowGameFeedback) -> Unit = { _ -> }
 
     LaunchedEffect(Unit) {
         PluviaApp.events.on<AndroidEvent.PromptSaveContainerConfig, Unit>(onPromptSaveConfig)

@@ -660,15 +660,9 @@ abstract class BaseAppScreen {
         context: Context,
         libraryItem: LibraryItem,
     ): AppMenuOption? {
-        val scope = rememberCoroutineScope()
-        return AppMenuOption(
-            optionType = AppOptionMenuType.UseKnownConfig,
-            onClick = {
-                scope.launch(Dispatchers.IO) {
-                    applyKnownConfigForLibraryItem(context, libraryItem)
-                }
-            },
-        )
+        // "Use known config" fetches from api.gamenative.app, which is disabled in this fork; null
+        // hides the menu entry. (The original option called applyKnownConfigForLibraryItem.)
+        return null
     }
 
     @Composable
@@ -676,10 +670,9 @@ abstract class BaseAppScreen {
         context: Context,
         libraryItem: LibraryItem,
     ): AppMenuOption? {
-        return AppMenuOption(
-            optionType = AppOptionMenuType.BrowseCommunityConfigs,
-            onClick = { requestCommunityConfigs(libraryItem.appId) },
-        )
+        // Community configs come from api.gamenative.app, which is disabled in this fork; null hides
+        // the menu entry (callers use listOfNotNull).
+        return null
     }
 
     /**

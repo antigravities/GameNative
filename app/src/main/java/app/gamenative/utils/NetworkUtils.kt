@@ -3,10 +3,12 @@ package app.gamenative.utils
 import okhttp3.Dns
 import okhttp3.Dispatcher
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.dnsoverhttps.DnsOverHttps
 import timber.log.Timber
+import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 
@@ -36,8 +38,21 @@ object Net {
         }
     }
 
+    // Hosts this fork never contacts. downloads.gamenative.app (driver/component CDN) is intentionally
+    // NOT listed because the emulator needs it.
+    private val blockedHosts = setOf("api.gamenative.app", "relay.gamenative.app")
+
+    // An OkHttp Interceptor sees every request before it hits the network; throwing IOException makes
+    // callers treat it as an ordinary network failure (e.g. ApiResult.NetworkError) instead of crashing.
+    private val blockGameNativeBackend = Interceptor { chain ->
+        val host = chain.request().url.host
+        if (host in blockedHosts) throw IOException("Blocked request to $host (disabled in this fork)")
+        chain.proceed(chain.request())
+    }
+
     val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .addInterceptor(blockGameNativeBackend)
             .dns(fallbackDns)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)

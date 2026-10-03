@@ -14,6 +14,9 @@ import timber.log.Timber
 object GameCompatibilityCache {
     private const val CACHE_TTL_MS = 6 * 60 * 60 * 1000L // 6 hours
 
+    // Fork change: compatibility badges are removed. With this true the cache never holds data.
+    private const val DISABLED = true
+
     private val inMemoryCache = mutableMapOf<String, GameCompatibilityService.GameCompatibilityResponse>()
     private val timestamps = mutableMapOf<String, Long>()
     private var cacheLoaded = false
@@ -71,6 +74,16 @@ object GameCompatibilityCache {
      */
     private fun loadCache() {
         if (cacheLoaded) return
+
+        if (DISABLED) {
+            // Compatibility data came from api.gamenative.app, which this fork never contacts. Wipe any
+            // stale persisted results once and leave the in-memory map empty so no badges are shown.
+            cacheLoaded = true
+            if (PrefManager.gameCompatibilityCache.let { it.isNotEmpty() && it != "{}" }) {
+                PrefManager.gameCompatibilityCache = "{}"
+            }
+            return
+        }
 
         try {
             val cacheJson = PrefManager.gameCompatibilityCache
@@ -141,6 +154,7 @@ object GameCompatibilityCache {
      * Caches a compatibility response for a game.
      */
     fun cache(gameName: String, response: GameCompatibilityService.GameCompatibilityResponse) {
+        if (DISABLED) return
         loadCache()
         val now = System.currentTimeMillis()
         inMemoryCache[gameName] = response
@@ -153,6 +167,7 @@ object GameCompatibilityCache {
      * Caches multiple compatibility responses at once.
      */
     fun cacheAll(responses: Map<String, GameCompatibilityService.GameCompatibilityResponse>) {
+        if (DISABLED) return
         loadCache()
         val now = System.currentTimeMillis()
         inMemoryCache.putAll(responses)

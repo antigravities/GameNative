@@ -14,6 +14,9 @@ data class KofiSupporter(
  * Fetch supporters from the worker API.
  */
 suspend fun fetchKofiSupporters(): List<KofiSupporter> {
+    // api.gamenative.app is disabled in this fork; an empty list hides supporters.
+    return emptyList()
+    @Suppress("UNREACHABLE_CODE")
     return when (val result = SupportersApi.fetch()) {
         is ApiResult.Success -> result.data.map {
             KofiSupporter(name = it.name, oneOff = it.oneOff, total = it.total)

@@ -25,7 +25,8 @@ object DeviceGameStatsService {
     // Hardcoded to production to match GameCompatibilityService (the "Compatible" badge source).
     // GameNativeApi.BASE_URL points at http://10.0.2.2:8787 in debug builds, which is unreachable
     // from a physical device.
-    private const val DEVICE_URL = "https://api.gamenative.app/api/device-game-stats"
+    private const val BACKEND_ENABLED = false
+    private const val DEVICE_URL ="https://api.gamenative.app/api/device-game-stats"
     private const val GPU_URL = "https://api.gamenative.app/api/gpu-game-stats"
 
     data class DeviceGameStats(
@@ -68,6 +69,8 @@ object DeviceGameStatsService {
         modernBuild: Boolean,
         tag: String,
     ): Map<GameSource, Map<String, DeviceGameStats>>? = withContext(Dispatchers.IO) {
+        // api.gamenative.app is disabled in this fork; callers already handle null (no stats shown).
+        if (!BACKEND_ENABLED) return@withContext null
         Timber.tag("DeviceGameStatsService").d("Fetching $tag game stats: $url")
 
         val request = GameNativeApi.buildGetRequest(url)

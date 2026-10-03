@@ -89,6 +89,14 @@ import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.adaptivePanelWidth
 import java.util.EnumSet
 
+// Sorts driven by device/GPU stats from the disabled GameNative API; hidden in this fork.
+private val statSortOptions = setOf(
+    SortOption.FPS_HIGH,
+    SortOption.RUNS_HIGH,
+    SortOption.REVIEWS_HIGH,
+    SortOption.REVIEWS_GPU_HIGH,
+)
+
 @Composable
 fun LibraryOptionsPanel(
     isOpen: Boolean,
@@ -204,10 +212,7 @@ fun LibraryOptionsPanel(
                             .verticalScroll(rememberScrollState())
                             .padding(vertical = 12.dp)
                     ) {
-                        GameStatsKey(modifier = Modifier.padding(horizontal = 8.dp))
-
-                        Spacer(modifier = Modifier.height(20.dp))
-
+                        // Fork change: GameStatsKey removed (no stats row to explain; API data is disabled).
                         OptionSectionHeader(text = stringResource(R.string.options_sort_by))
                         Column(
                             modifier = Modifier
@@ -216,7 +221,8 @@ fun LibraryOptionsPanel(
                                 .padding(horizontal = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            SortOption.entries.forEachIndexed { index, option ->
+                            // Fork change: hide sorts that depend on API-provided stats (always empty now).
+                            SortOption.entries.filterNot { it in statSortOptions }.forEachIndexed { index, option ->
                                 OptionRadioItem(
                                     text = stringResource(option.displayTextRes),
                                     selected = currentSortOption == option,
@@ -273,13 +279,10 @@ fun LibraryOptionsPanel(
                                 // accounts now use the SQL fast path, which always shows shared games
                                 // (tagged with the isShared badge), so the toggle would be a no-op.
                                 if (appFilter in listOf(
+                                        // Fork change: COMPATIBLE / PLAYABLE / FIVE_STAR / FIVE_STAR_GPU /
+                                        // PROVEN_GPU are omitted; they depend on API data that is disabled.
                                         AppFilter.INSTALLED,
-                                        AppFilter.COMPATIBLE,
                                         AppFilter.EXPIRED,
-                                        AppFilter.PLAYABLE,
-                                        AppFilter.FIVE_STAR,
-                                        AppFilter.FIVE_STAR_GPU,
-                                        AppFilter.PROVEN_GPU,
                                         AppFilter.VR,
                                     )
                                 ) {

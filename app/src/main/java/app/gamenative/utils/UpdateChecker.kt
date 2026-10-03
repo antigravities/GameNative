@@ -27,7 +27,12 @@ object UpdateChecker {
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
+    // Update checks hit api.gamenative.app, which this fork never contacts. This class uses its own
+    // OkHttpClient (so Net.http's blocking interceptor doesn't apply), hence the explicit guard.
+    private const val ENABLED = false
+
     suspend fun checkForUpdate(context: Context): UpdateInfo? = withContext(Dispatchers.IO) {
+        if (!ENABLED) return@withContext null
         try {
             val url = "${Constants.Misc.UPDATE_CHECK_URL}?versionCode=${BuildConfig.VERSION_CODE}&versionName=${BuildConfig.VERSION_NAME}"
             val request = Request.Builder()

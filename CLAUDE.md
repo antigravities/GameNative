@@ -76,7 +76,8 @@ When making a schema change, increment the schema version in `PluviaDatabase` an
 #### API / Network — `app/src/main/java/app/gamenative/api/`
 
 - **HTTP client**: OkHttp 5.1.0 with DNS-over-HTTPS
-- **Backend**: `https://api.gamenative.app` (dev: `http://10.0.2.2:8787`)
+- **Backend**: `https://api.gamenative.app` (dev: `http://10.0.2.2:8787`) — **blocked in this fork** by an interceptor on `Net.http` (also `relay.gamenative.app`). `downloads.gamenative.app` is a required CDN (drivers/components) and is NOT blocked.
+- **Shared client**: `Net.http` (`utils/NetworkUtils.kt`) is used by nearly every service, so it is the one place for global network policy.
 - **Clients**: `GameNativeApi`, `GameRunApi`, `SupportersApi`
 - **Result type**: `ApiResult` sealed class — `Success`, `HttpError`, `NetworkError`
 - **Auth validation**: Play Integrity API (v1.6.0)
@@ -144,7 +145,7 @@ PluviaApp (Application, @HiltAndroidApp)
 | Kotlin Coroutines | 1.10.2 | Async |
 | JavaSteam | 1.8.0.1-18-SNAPSHOT | Steam API |
 | Coil | 2.4.6 | Image loading |
-| PostHog | 3.8.0 | Analytics (consent-based) |
+| PostHog | removed | Replaced by a local no-op shim `com/posthog/PostHog.kt` so call sites compile unchanged |
 | OkHttp | 5.1.0 | HTTP |
 | Navigation Compose | 2.8.6 | Screen navigation |
 | DataStore | 1.1.2 | Preferences (`PrefManager.kt`) |

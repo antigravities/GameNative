@@ -36,7 +36,12 @@ object RecommendationRepository {
             cached ?: loadBundledFallback(context)
         }
 
+    // Remote fetch disabled in this fork (api.gamenative.app is never contacted); callers fall back
+    // to the cached or bundled recommendation, so the feature still works offline.
+    private const val REMOTE_ENABLED = false
+
     private fun fetchRemote(): RecommendedGame? {
+        if (!REMOTE_ENABLED) return null
         return try {
             val mediaType = "application/json".toMediaType()
             val body = "{}".toRequestBody(mediaType)

@@ -15,7 +15,8 @@ import timber.log.Timber
  * Service for fetching game compatibility information from GameNative API.
  */
 object GameCompatibilityService {
-    private const val API_BASE_URL = "https://api.gamenative.app/api/game-runs"
+    private const val BACKEND_ENABLED = false
+    private const val API_BASE_URL ="https://api.gamenative.app/api/game-runs"
     private val httpClient = Net.http
 
     /**
@@ -86,6 +87,8 @@ object GameCompatibilityService {
         gameNames: List<String>,
         gpuName: String
     ): Map<String, GameCompatibilityResponse>? = withContext(Dispatchers.IO) {
+        // api.gamenative.app is disabled in this fork: no badges, no request.
+        if (!BACKEND_ENABLED) return@withContext null
         if (gameNames.isEmpty()) {
             return@withContext emptyMap()
         }

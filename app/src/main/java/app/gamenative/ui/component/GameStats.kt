@@ -36,6 +36,8 @@ import app.gamenative.ui.data.GameCardStats
  */
 private data class StatEntry(val icon: ImageVector, val value: String)
 
+private const val STATS_ROW_ENABLED = false
+
 private fun Int?.orUnknown(): String = this?.toString() ?: "?"
 
 private fun statEntries(stats: GameCardStats?): List<StatEntry> = listOf(
@@ -59,6 +61,9 @@ fun GameStatsRow(
     modifier: Modifier = Modifier,
     animate: Boolean = true,
 ) {
+    // Fork change: the stats came from api.gamenative.app (disabled), so rendering would show only
+    // "0/0 0/0 ? ?" on every card. Draw nothing instead.
+    if (!STATS_ROW_ENABLED) return
     Row(
         modifier = modifier
             .fillMaxWidth()

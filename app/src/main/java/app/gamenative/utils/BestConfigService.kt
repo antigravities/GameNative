@@ -31,6 +31,7 @@ import timber.log.Timber
  * Service for fetching best configurations for games from GameNative API.
  */
 object BestConfigService {
+    private const val BACKEND_ENABLED = false
     private const val API_BASE_URL = "https://api.gamenative.app/api/best-config"
     private val httpClient = Net.http
 
@@ -77,6 +78,8 @@ object BestConfigService {
         gpuName: String,
         gameStore: String,
     ): BestConfigResponse? = withContext(Dispatchers.IO) {
+        // api.gamenative.app is disabled in this fork; null already means "no config available".
+        if (!BACKEND_ENABLED) return@withContext null
         val cacheKey = "${gameName}_${gpuName}_${gameStore}"
 
         // Check cache first
