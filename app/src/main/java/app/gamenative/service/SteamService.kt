@@ -2609,14 +2609,23 @@ class SteamService : Service(), IChallengeUrlChanged {
                 //      (e.g., 504231 for Celeste) was filtered out by the gid=0 check in
                 //      filterForDownloadableDepots — leaving depots non-empty but missing
                 //      the game content entirely.
+                //   3. The map has only DLC-app depots and no base-game depots. This happens
+                //      on a stub/stale row: getDownloadableDepots() merges in depots from DLC
+                //      apps, so the map is non-empty even though the base game has nothing
+                //      downloadable, and the later base-depot filter would silently abort.
                 // runBlocking is safe here because downloadApp is always called from a
                 // background coroutine (Dispatchers.IO launch in the UI layer).
                 val hasStubDepot = appInfo.depots.values.any { depot ->
                     !depot.sharedInstall && depot.manifests.isNotEmpty() &&
                         depot.manifests.values.all { it.gid == 0L }
                 }
-                if (depots.isEmpty() || hasStubDepot) {
-                    Timber.i("downloadApp($appId): depots empty or contain stub manifests — attempting on-demand PICS refresh")
+                // Base-game depots are the ones not tied to a DLC app. (A Kotlin lambda stored in
+                // a local val, called below as noBaseDepots(depots).)
+                val noBaseDepots = { map: Map<Int, DepotInfo> ->
+                    map.values.none { it.dlcAppId == INVALID_APP_ID }
+                }
+                if (depots.isEmpty() || hasStubDepot || noBaseDepots(depots)) {
+                    Timber.i("downloadApp($appId): depots empty, stub, or missing base-game depots — attempting on-demand PICS refresh")
                     runBlocking { requestAppInfoNow(appId) }
                     depots = getDownloadableDepots(appId = appId, preferredLanguage = containerLanguage)
                 }
@@ -2630,13 +2639,25 @@ class SteamService : Service(), IChallengeUrlChanged {
                     return@let null
                 }
 
-                downloadApp(
+                val started = downloadApp(
                     appId = appId,
                     downloadableDepots = depots,
                     userSelectedDlcAppIds = dlcAppIds,
                     branch = branch,
                     containerLanguage = containerLanguage,
                     isUpdateOrVerify = isUpdateOrVerify)
+
+                // The second overload also returns null for legitimate "nothing to download" cases,
+                // so only notify when nothing started AND base-game depots are still missing after
+                // the refresh; a DLC-only download returns non-null and never reaches this.
+                if (started == null && noBaseDepots(depots)) {
+                    Timber.w("downloadApp($appId): no base-game depots after PICS refresh — notifying user")
+                    instance?.notificationHelper?.notify(
+                        instance?.getString(R.string.download_metadata_not_ready)
+                            ?: "Game data not ready. Please wait for Steam to finish syncing.",
+                    )
+                }
+                started
             }
         }
 
