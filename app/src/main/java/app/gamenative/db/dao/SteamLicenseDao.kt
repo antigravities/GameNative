@@ -38,6 +38,21 @@ interface SteamLicenseDao {
     @Query("SELECT * FROM steam_license WHERE packageId = :packageId")
     suspend fun findLicense(packageId: Int): SteamLicense?
 
+    // Licenses whose app_ids contain exactly [appId]. app_ids is stored as compact JSON written by
+    // LicenseConverter (e.g. "[10,20,30]"), so an element is either the only one, first, middle
+    // or last; the four patterns cover those cases and cannot match a longer number that merely
+    // contains these digits (every pattern is anchored by '[', ',' or ']'). SQLite scans the
+    // column without building Kotlin objects and returns only the 1-2 matching rows, unlike
+    // getAllLicenses() which materializes every row (~59k) with its JSON lists on each call.
+    // This is only a query: it does not change the table schema, so no migration is needed.
+    @Query(
+        "SELECT * FROM steam_license WHERE app_ids = '[' || :appId || ']' " +
+            "OR app_ids LIKE '[' || :appId || ',%' " +
+            "OR app_ids LIKE '%,' || :appId || ',%' " +
+            "OR app_ids LIKE '%,' || :appId || ']'",
+    )
+    suspend fun findLicensesForApp(appId: Int): List<SteamLicense>
+
     /* ----------------------------------------------------------
        INTERNAL queries that Room generates.  Keep them abstract.
        ---------------------------------------------------------- */

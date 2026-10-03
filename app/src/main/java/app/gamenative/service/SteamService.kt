@@ -746,9 +746,11 @@ class SteamService : Service(), IChallengeUrlChanged {
                 else -> null
             }
 
-            // Load licenses once; reuse for owner discovery (fallback) and package lookup.
-            val allLicenses = svc.licenseDao.getAllLicenses()
-            val licensesForApp = allLicenses.filter { appId in it.appIds }
+            // Only this app's licenses are needed, so query them directly rather than loading the
+            // whole table (~59k rows) on every call; this runs on each game-page open and the
+            // full load caused heavy GC churn and UI lag. Reused for owner discovery (fallback)
+            // and package lookup.
+            val licensesForApp = svc.licenseDao.findLicensesForApp(appId)
             val resolvedOwnerSource = if (ownerSource == null && licensesForApp.isNotEmpty()) {
                 for (license in licensesForApp) {
                     for (accountId in license.ownerAccountId) {
