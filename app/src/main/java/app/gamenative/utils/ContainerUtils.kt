@@ -100,10 +100,17 @@ object ContainerUtils {
             DefaultVersion.STEAM_TYPE = Container.STEAM_TYPE_HEADLESS
             DefaultVersion.ASYNC_CACHE = "0"
         }
-        DefaultVersion.DISPLAY_SERVER = Container.defaultDisplayServer(
-            GPUInformation.getRenderer(context).orEmpty().contains("adreno", ignoreCase = true),
-            Build.VERSION.SDK_INT,
-        )
+        DefaultVersion.DISPLAY_SERVER = if (BuildConfig.MINIMAL_UI) {
+            // Minimal: X11 by default. Under gamescope the game's window maps on Xwayland, which
+            // the app never sees, so Steam "in-game" status isn't reported; X11 also skips the
+            // extra gamescope + Xwayland processes (~130-180 MB). Still selectable per container.
+            Container.DISPLAY_SERVER_X11
+        } else {
+            Container.defaultDisplayServer(
+                GPUInformation.getRenderer(context).orEmpty().contains("adreno", ignoreCase = true),
+                Build.VERSION.SDK_INT,
+            )
+        }
     }
 
     fun getGPUCards(context: Context): Map<Int, GpuInfo> {

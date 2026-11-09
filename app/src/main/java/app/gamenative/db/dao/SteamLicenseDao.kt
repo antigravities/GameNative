@@ -1,5 +1,6 @@
 package app.gamenative.db.dao
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -7,9 +8,71 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import app.gamenative.data.SteamLicense
+import `in`.dragonbra.javasteam.enums.ELicenseFlags
+import `in`.dragonbra.javasteam.enums.ELicenseType
+import `in`.dragonbra.javasteam.enums.EPaymentMethod
+import java.util.Date
+import java.util.EnumSet
 import kotlin.math.min
 
 val SQLITE_MAX_VARS = 999
+
+/**
+ * The license fields onLicenseList diffs against, plus whether package PICS has filled in
+ * app_ids. Skips the large app_ids / depot_ids lists themselves.
+ */
+data class SteamLicenseStub(
+    val packageId: Int,
+    @ColumnInfo("last_change_number") val lastChangeNumber: Int,
+    @ColumnInfo("license_flags") val licenseFlags: EnumSet<ELicenseFlags>,
+    @ColumnInfo("owner_account_id") val ownerAccountId: List<Int>,
+    @ColumnInfo("access_token") val accessToken: Long,
+    val mapped: Boolean,
+)
+
+/**
+ * Every [SteamLicense] column except the PICS-derived app_ids / depot_ids, for partial
+ * updates that refresh license metadata without wiping the cached mapping.
+ */
+data class SteamLicenseMeta(
+    val packageId: Int,
+    @ColumnInfo("last_change_number") val lastChangeNumber: Int,
+    @ColumnInfo("time_created") val timeCreated: Date,
+    @ColumnInfo("time_next_process") val timeNextProcess: Date,
+    @ColumnInfo("minute_limit") val minuteLimit: Int,
+    @ColumnInfo("minutes_used") val minutesUsed: Int,
+    @ColumnInfo("payment_method") val paymentMethod: EPaymentMethod,
+    @ColumnInfo("license_flags") val licenseFlags: EnumSet<ELicenseFlags>,
+    @ColumnInfo("purchase_code") val purchaseCode: String,
+    @ColumnInfo("license_type") val licenseType: ELicenseType,
+    @ColumnInfo("territory_code") val territoryCode: Int,
+    @ColumnInfo("access_token") val accessToken: Long,
+    @ColumnInfo("owner_account_id") val ownerAccountId: List<Int>,
+    @ColumnInfo("master_package_id") val masterPackageID: Int,
+)
+
+fun SteamLicense.toMeta() = SteamLicenseMeta(
+    packageId = packageId,
+    lastChangeNumber = lastChangeNumber,
+    timeCreated = timeCreated,
+    timeNextProcess = timeNextProcess,
+    minuteLimit = minuteLimit,
+    minutesUsed = minutesUsed,
+    paymentMethod = paymentMethod,
+    licenseFlags = licenseFlags,
+    purchaseCode = purchaseCode,
+    licenseType = licenseType,
+    territoryCode = territoryCode,
+    accessToken = accessToken,
+    ownerAccountId = ownerAccountId,
+    masterPackageID = masterPackageID,
+)
+
+/** Lightweight package -> app ids projection (avoids loading full license rows). */
+data class LicenseAppIds(
+    val packageId: Int,
+    @ColumnInfo("app_ids") val appIds: List<Int>,
+)
 
 @Dao
 interface SteamLicenseDao {
@@ -31,6 +94,18 @@ interface SteamLicenseDao {
 
     @Query("SELECT * FROM steam_license WHERE packageId = :packageId")
     suspend fun findLicense(packageId: Int): SteamLicense?
+
+    @Query("SELECT packageId, app_ids FROM steam_license WHERE app_ids != '[]'")
+    suspend fun getLicenseAppIds(): List<LicenseAppIds>
+
+    @Query(
+        "SELECT packageId, last_change_number, license_flags, owner_account_id, access_token, " +
+            "(app_ids != '[]') AS mapped FROM steam_license",
+    )
+    suspend fun getLicenseStubs(): List<SteamLicenseStub>
+
+    @Update(entity = SteamLicense::class)
+    suspend fun updateMeta(rows: List<SteamLicenseMeta>)
 
     /* ----------------------------------------------------------
        INTERNAL queries that Room generates.  Keep them abstract.

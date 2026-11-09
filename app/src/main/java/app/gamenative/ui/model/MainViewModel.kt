@@ -429,7 +429,12 @@ class MainViewModel @Inject constructor(
                 (if (held.sponsored) PrefManager.bootScreenAdsEnabled else PrefManager.bootScreenRecommendationsEnabled)
             val reuse = heldAllowed && System.currentTimeMillis() - bootAdHiddenAtMs < BOOT_AD_REUSE_WINDOW_MS
             val dismissed = System.currentTimeMillis() - bootAdDismissedAtMs < BOOT_AD_REUSE_WINDOW_MS
-            val ad = if (reuse || dismissed) {
+            val ad = if (BuildConfig.MINIMAL_UI) {
+                // Minimal: plain boot screen, no sponsor/recommendation card (no video player
+                // competing with the game while it boots, no impression tracking). The ad store
+                // is shared with the regular build, so a card it cached could otherwise show.
+                null
+            } else if (reuse || dismissed) {
                 held
             } else {
                 BootAdRepository.pickBootCard()?.also {
@@ -797,6 +802,9 @@ class MainViewModel @Inject constructor(
                     return@launch
                 }
 
+                // The fork can't reach upstream's feedback/support/membership services; skip their prompts.
+                if (BuildConfig.MINIMAL_UI) return@launch
+
                 val aiOfferRequested = maybeOfferAiDebugRun(context, appId, sessionLengthMs)
                 if (aiOfferRequested) {
                     return@launch
@@ -1027,7 +1035,11 @@ class MainViewModel @Inject constructor(
 
             val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
 
-            SteamService.getAppInfoOf(gameId)?.let { appInfo ->
+            val appInfoForStatus = SteamService.getAppInfoOf(gameId)
+            if (appInfoForStatus == null) {
+                Timber.tag("PlayingStatus").w("No app info for %d; window '%s' can't report in-game status", gameId, window.className)
+            }
+            appInfoForStatus?.let { appInfo ->
                 if (ActiveGameRegistry.get()?.appId == gameId) {
                     return@launch
                 }
@@ -1040,6 +1052,10 @@ class MainViewModel @Inject constructor(
                 val isGameWindow = matchesLaunchConfig ||
                     (window.isApplicationWindow() && !WineProcessSnapshotHelper.isSystemProcessName(window.className))
 
+                Timber.tag("PlayingStatus").i(
+                    "Window '%s' mapped for %d: gameWindow=%b (launchConfigMatch=%b)",
+                    window.className, gameId, isGameWindow, matchesLaunchConfig,
+                )
                 if (isGameWindow) {
                     val steamProcessId = Process.myPid()
                     val processes = mutableListOf<AppProcessInfo>()

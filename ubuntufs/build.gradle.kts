@@ -22,6 +22,9 @@ android {
         create("modern") {
             dimension = "androidApi"
         }
+        create("modernMinimal") {
+            dimension = "androidApi"
+        }
         create("modernXr") {
             dimension = "androidApi"
         }

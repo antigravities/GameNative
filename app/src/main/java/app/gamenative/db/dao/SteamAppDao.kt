@@ -1,5 +1,6 @@
 package app.gamenative.db.dao
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -7,12 +8,28 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import app.gamenative.data.SteamApp
+import app.gamenative.enums.AppType
 import app.gamenative.service.SteamService.Companion.INVALID_PKG_ID
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+
+/** modernMinimal list row: just what the launcher list needs. */
+data class MinimalAppRow(
+    val id: Int,
+    val name: String,
+    val type: AppType,
+    @ColumnInfo("dlc_for_app_id") val dlcForAppId: Int,
+    @ColumnInfo("received_pics") val receivedPics: Boolean,
+)
+
+/** Lightweight id -> parent projection (two ints per row) used by the minimal purge. */
+data class AppParent(
+    val id: Int,
+    @ColumnInfo("dlc_for_app_id") val dlcForAppId: Int,
+)
 
 // An app is considered "owned" if there's any non-expired license that grants access
 // to it: either its own package's license, or any DLC of it (e.g. for free-to-start
@@ -180,6 +197,16 @@ interface SteamAppDao {
 
     @Query("SELECT id FROM steam_app")
     suspend fun getAllAppIds(): List<Int>
+
+    @Query("SELECT id, dlc_for_app_id FROM steam_app")
+    suspend fun getAppParents(): List<AppParent>
+
+    @Query("DELETE FROM steam_app WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Int>)
+
+    /** modernMinimal list source: light columns only (the table is small after the minimal purge). */
+    @Query("SELECT id, name, type, dlc_for_app_id, received_pics FROM steam_app")
+    fun observeMinimalRows(): Flow<List<MinimalAppRow>>
 
     @Query("UPDATE steam_app SET workshop_mods = :workshopMods, enabled_workshop_item_ids = :enabledIds WHERE id = :appId")
     suspend fun updateWorkshopState(appId: Int, workshopMods: Boolean, enabledIds: String)

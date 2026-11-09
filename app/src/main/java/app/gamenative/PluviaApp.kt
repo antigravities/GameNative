@@ -137,6 +137,22 @@ class PluviaApp : SplitCompatApplication() {
             Timber.e(e, "[PluviaApp]: Failed to clear temporary config overrides")
         }
 
+        // Minimal build: skip analytics and Play Integrity. PostHog installs lifecycle hooks, a
+        // flush timer and a session-replay `logcat *:E` reader process that parses every system
+        // error line even with replay off; the GPU super-properties thread leaves an EGL context
+        // behind. PostHog calls made elsewhere are no-ops when it isn't set up. Play Integrity
+        // can't issue tokens without the fork's (absent) cloud project number anyway.
+        if (!BuildConfig.MINIMAL_UI) {
+            setupAnalyticsAndIntegrity()
+        }
+
+        Thread {
+            PowerManager.initialize(this)
+            if (!BuildConfig.MINIMAL_UI) DeviceInfo.registerPowerSuperProperties()
+        }.start()
+    }
+
+    private fun setupAnalyticsAndIntegrity() {
         // Initialize PostHog Analytics
         val postHogConfig = PostHogAndroidConfig(
             apiKey = BuildConfig.POSTHOG_API_KEY,
@@ -175,11 +191,6 @@ class PluviaApp : SplitCompatApplication() {
         }
 
         PlayIntegrity.warmUp(this)
-
-        Thread {
-            PowerManager.initialize(this)
-            DeviceInfo.registerPowerSuperProperties()
-        }.start()
     }
 
     /**

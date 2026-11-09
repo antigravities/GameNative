@@ -257,7 +257,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         File rootDir = imageFs.getRootDir();
 
         PrefManager.init(context);
-        boolean enableBox86_64Logs = PrefManager.getBoolean("enable_box86_64_logs", true);
+        // Minimal build: default off, matching the settings toggle (Box64 log output costs CPU in-game).
+        boolean enableBox86_64Logs = PrefManager.getBoolean("enable_box86_64_logs", !BuildConfig.MINIMAL_UI);
         boolean shareAndroidClipboard = PrefManager.getBoolean("share_android_clipboard", false);
         boolean enablePebLogs = PrefManager.getBoolean("enable_peb_logs", false);
 

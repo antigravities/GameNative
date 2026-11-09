@@ -27,7 +27,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public abstract class ProcessHelper {
-    public static final boolean PRINT_DEBUG = true; // FIXME change to false
+    // Echo every guest stdout/stderr line to logcat. Off in the minimal build: it costs CPU per
+    // line in-game. The pipes are still drained by the debug threads so processes never block.
+    public static final boolean PRINT_DEBUG = !BuildConfig.MINIMAL_UI; // FIXME change to false
     private static final ArrayList<Callback<String>> debugCallbacks = new ArrayList<>();
     private static final byte SIGCONT = 18;
     private static final byte SIGSTOP = 19;

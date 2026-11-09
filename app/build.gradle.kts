@@ -61,8 +61,10 @@ android {
         minSdk = 26
 
         manifestPlaceholders["screenOrientation"] = "unspecified"
+        manifestPlaceholders["mainLaunchMode"] = "singleTop"
         buildConfigField("boolean", "XR_BUILD", "false")
         buildConfigField("boolean", "MODERN_XR", "false")
+        buildConfigField("boolean", "MINIMAL_UI", "false")
 
         versionCode = 24
         versionName = "1.4.0"
@@ -147,6 +149,20 @@ android {
             ndk.abiFilters += listOf("arm64-v8a")
             buildConfigField("boolean", "MODERN_ANDROID", "true")
             buildConfigField("String", "PRELOAD_BIONIC_SO", "\"libredirect-bionic-wx.so\"")
+        }
+        // Same as modern, with the MinUI-style launcher UI (MINIMAL_UI). Keeps the base
+        // applicationId because libredirect depends on it.
+        create("modernMinimal") {
+            dimension = "androidApi"
+            minSdk = 29
+            targetSdk = 36
+            ndk.abiFilters += listOf("arm64-v8a")
+            buildConfigField("boolean", "MODERN_ANDROID", "true")
+            buildConfigField("String", "PRELOAD_BIONIC_SO", "\"libredirect-bionic-wx.so\"")
+            buildConfigField("boolean", "MINIMAL_UI", "true")
+            // singleTask so an opt-in home-screen launch (MainActivityHome alias) reuses the one
+            // existing MainActivity instead of creating a second one in the home task.
+            manifestPlaceholders["mainLaunchMode"] = "singleTask"
         }
         create("modernXr") {
             dimension = "androidApi"
@@ -277,6 +293,17 @@ android {
             java.srcDir("src/nonXr/java")
             assets {
                 srcDirs("src/modern/assets", "src/main/assets")
+            }
+        }
+        getByName("modernMinimal") {
+            java.srcDir("src/nonXr/java")
+            // Own manifest: modern's rules plus the opt-in home-screen alias and <queries>.
+            manifest.srcFile("src/modernMinimal/AndroidManifest.xml")
+            assets {
+                srcDirs("src/modern/assets", "src/main/assets")
+            }
+            jniLibs {
+                srcDirs("src/modern/jniLibs")
             }
         }
         getByName("modernXr") {

@@ -34,6 +34,7 @@ import coil.memory.MemoryCache
 import coil.intercept.Interceptor
 import coil.request.CachePolicy
 import app.gamenative.BuildConfig
+import app.gamenative.utils.PlatformAuthUtils
 import app.gamenative.PrefManager
 import app.gamenative.events.AndroidEvent
 import app.gamenative.mods.NexusAuthManager
@@ -294,7 +295,11 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             val imageLoader = remember {
                 val memoryCache = MemoryCache.Builder(context)
-                    .maxSizePercent(0.1)
+                    .apply {
+                        // Minimal shows one capsule at a time; a percent of the (largeHeap)
+                        // memory class allowed ~50 MB of bitmaps that the game could use.
+                        if (BuildConfig.MINIMAL_UI) maxSizeBytes(16 * 1024 * 1024) else maxSizePercent(0.1)
+                    }
                     .strongReferencesEnabled(true)
                     .build()
 
@@ -341,6 +346,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // Minimal home-screen mode: Home returns to the game list, unless a game is running
+        // (then it just brings the game back; the session is never torn down).
+        if (BuildConfig.MINIMAL_UI &&
+            intent.action == Intent.ACTION_MAIN &&
+            intent.hasCategory(Intent.CATEGORY_HOME)
+        ) {
+            if (PluviaApp.xEnvironment == null) PluviaApp.events.emit(AndroidEvent.HomePressed)
+            return
+        }
         handleLaunchIntent(intent, isNewIntent = true)
     }
 
@@ -563,6 +577,9 @@ class MainActivity : ComponentActivity() {
         // disable auto-stop when returning to foreground
         SteamService.autoStopWhenIdle = false
 
+        // modernMinimal: pick up collection changes made on Steam while we were away.
+        if (BuildConfig.MINIMAL_UI) SteamService.requestMinimalCollectionRefresh()
+
         // Resume game according to the active suspend policy.
         if (hasReadyGameLifecycleState("resume")) {
             when {
@@ -587,14 +604,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Restart GOG service if it went down
-        if (GOGService.hasStoredCredentials(this) && !GOGService.isRunning) {
+        // Restart GOG service if it went down (never in the Steam-only minimal build)
+        if (PlatformAuthUtils.otherStoresEnabled && GOGService.hasStoredCredentials(this) && !GOGService.isRunning) {
             Timber.i("GOG service was down on resume - restarting")
             GOGService.start(this)
         }
 
         // Restart EpicService if it went down and user is authenticated
-        if (EpicService.hasStoredCredentials(this) &&
+        if (PlatformAuthUtils.otherStoresEnabled && EpicService.hasStoredCredentials(this) &&
             !EpicService.isRunning) {
             Timber.i("EpicService was down on resume - restarting")
             EpicService.start(this)

@@ -34,4 +34,7 @@ interface AppInfoDao {
 
     @Query("DELETE from app_info")
     suspend fun deleteAll()
+
+    @Query("SELECT id FROM app_info")
+    suspend fun getAllIds(): List<Int>
 }

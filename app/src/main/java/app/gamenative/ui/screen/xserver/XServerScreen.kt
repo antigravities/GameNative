@@ -1530,6 +1530,7 @@ fun XServerScreen(
                 val enabled = !ui.isPerformanceHudEnabled
                 ui.isPerformanceHudEnabled = enabled
                 PrefManager.showFps = enabled
+                if (enabled) PowerManager.ensureMetricsCollector()
                 updatePerformanceHud(enabled)
                 if (PrefManager.usageAnalyticsEnabled) {
                     PostHog.capture(
@@ -1882,7 +1883,8 @@ fun XServerScreen(
         PluviaApp.events.on<AndroidEvent.GuestProgramTerminated, Unit>(onGuestProgramTerminated)
         PluviaApp.events.on<SteamEvent.ForceCloseApp, Unit>(onForceCloseApp)
         PluviaApp.events.on<SteamEvent.PlayingBlocked, Unit>(onPlayingBlocked)
-        ProcessHelper.addDebugCallback(debugCallback)
+        // Minimal build: don't re-log every guest output line through Timber.
+        if (!BuildConfig.MINIMAL_UI) ProcessHelper.addDebugCallback(debugCallback)
 
         onDispose {
             PluviaApp.events.off<AndroidEvent.ActivityDestroyed, Unit>(onActivityDestroyed)

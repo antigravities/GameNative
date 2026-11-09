@@ -20,5 +20,12 @@ interface CachedLicenseDao {
     
     @Query("DELETE FROM cached_license")
     suspend fun deleteAll()
+
+    /** True when any license is cached; avoids deserializing the whole table for an emptiness check. */
+    @Query("SELECT EXISTS(SELECT 1 FROM cached_license)")
+    suspend fun hasAny(): Boolean
+
+    @Query("SELECT COUNT(*) FROM cached_license")
+    suspend fun count(): Int
 }
 

@@ -1005,6 +1005,18 @@ object PrefManager {
         get() = getPref(LIBRARY_STEAM_COLLECTIONS_CACHE, "")
         set(value) { setPref(LIBRARY_STEAM_COLLECTIONS_CACHE, value) }
 
+    // modernMinimal: the single Steam collection the minimal launcher shows ("" = none selected).
+    private val MINIMAL_COLLECTION_ID = stringPreferencesKey("minimal_collection_id")
+    var minimalCollectionId: String
+        get() = getPref(MINIMAL_COLLECTION_ID, "")
+        set(value) { setPref(MINIMAL_COLLECTION_ID, value) }
+
+    // Last known display name of [minimalCollectionId], for offline use and the deleted-collection prompt.
+    private val MINIMAL_COLLECTION_NAME = stringPreferencesKey("minimal_collection_name")
+    var minimalCollectionName: String
+        get() = getPref(MINIMAL_COLLECTION_NAME, "")
+        set(value) { setPref(MINIMAL_COLLECTION_NAME, value) }
+
     private val LIBRARY_STEAM_COLLECTIONS_SKIPPED_DYNAMIC = booleanPreferencesKey("library_steam_collections_skipped_dynamic")
     var librarySteamCollectionsSkippedDynamic: Boolean
         get() = getPref(LIBRARY_STEAM_COLLECTIONS_SKIPPED_DYNAMIC, false)

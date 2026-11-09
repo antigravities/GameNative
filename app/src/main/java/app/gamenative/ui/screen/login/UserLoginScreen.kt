@@ -95,6 +95,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import app.gamenative.BuildConfig
 import app.gamenative.Constants
 import app.gamenative.ui.screen.auth.AmazonOAuthActivity
 import app.gamenative.ui.screen.auth.EpicOAuthActivity
@@ -529,8 +530,11 @@ private fun UserLoginScreenContent(
                 }
             }
 
-            // Or sign in with: Epic · GOG · Amazon · Skip login
+            // Or sign in with: Epic · GOG · Amazon · Skip login.
+            // Not in the Steam-only minimal build: the other stores are off, and skipping
+            // Steam sign-in leaves it with no collections to show and no account to launch with.
             if (
+                !BuildConfig.MINIMAL_UI &&
                 userLoginState.isLoggingIn.not() &&
                 userLoginState.loginResult != LoginResult.Success
             ) {

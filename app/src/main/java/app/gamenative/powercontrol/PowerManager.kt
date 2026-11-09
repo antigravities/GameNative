@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.AtomicFile
 import app.gamenative.BuildConfig
 import app.gamenative.PluviaApp
+import app.gamenative.PrefManager
 import app.gamenative.powercontrol.autotuning.ClusterTuner
 import app.gamenative.powercontrol.autotuning.PerformanceAutoTuner
 import app.gamenative.powercontrol.drivers.NoOpPerformanceDriver
@@ -213,13 +214,28 @@ object PowerManager {
             AdaptiveFpsCapController.start(containerDir, tunerLogDirectory())
         }
 
-        appContext.let { PerformanceMetricsCollector.start(it) }
-
         isGameStarted = true
+        ensureMetricsCollector()
+
         if (gamescopeSession) {
             // The gamescope session may have connected before the profile was loaded.
             Thread({ applyCompositorAffinity("power control start") }, "compositor-affinity").start()
         }
+    }
+
+    /**
+     * Starts the metrics collector for the running game when something consumes it. The
+     * collector samples every 500 ms and periodically scans /proc; the regular build always runs
+     * it, the minimal build only for the HUD, power control (tuner / fan) or the adaptive FPS cap.
+     * Idempotent; call again whenever one of those is switched on mid-game.
+     */
+    fun ensureMetricsCollector() {
+        if (!isGameStarted) return
+        val wanted = !BuildConfig.MINIMAL_UI ||
+            PrefManager.showFps ||
+            isProfilePowerControlEnabled() ||
+            currentProfile.adaptiveFpsCapEnabled
+        if (wanted) PerformanceMetricsCollector.start(appContext)
     }
 
     /**
@@ -272,6 +288,7 @@ object PowerManager {
 
         if (enabled) {
             startPowerControl()
+            ensureMetricsCollector()
         } else {
             stopPowerControl()
         }
@@ -613,6 +630,7 @@ object PowerManager {
         } else {
             AdaptiveFpsCapController.stop()
         }
+        ensureMetricsCollector()
 
         if (isGameStarted) {
             if (previousProfile.enableFanControl != profile.enableFanControl) {

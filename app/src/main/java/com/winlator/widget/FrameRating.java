@@ -108,7 +108,9 @@ public class FrameRating extends FrameLayout implements Runnable {
                 lastReadingTime = time;
             }
 
-            post(this);
+            // An unattached view queues post() runnables until it is attached; XServerScreen often
+            // never attaches this widget, so that queue grew by ~7k runnables an hour of play.
+            if (!app.gamenative.BuildConfig.MINIMAL_UI || isAttachedToWindow()) post(this);
             lastTime = time;
             frameCount = 0;
         }

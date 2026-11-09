@@ -6,10 +6,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.gamenative.BuildConfig
 import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.service.SteamService
 import app.gamenative.ui.component.dialog.SteamAgreementDialog
+import app.gamenative.ui.screen.minimal.MinUiAgreementDialog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -84,12 +86,21 @@ object SteamAgreementGate {
     fun Prompt() {
         val current = request ?: return
         key(current) {
-            SteamAgreementDialog(
-                title = current.title,
-                url = current.url,
-                onAccept = { current.result.complete(true) },
-                onDecline = { current.result.complete(false) },
-            )
+            if (BuildConfig.MINIMAL_UI) {
+                MinUiAgreementDialog(
+                    title = current.title,
+                    url = current.url,
+                    onAccept = { current.result.complete(true) },
+                    onDecline = { current.result.complete(false) },
+                )
+            } else {
+                SteamAgreementDialog(
+                    title = current.title,
+                    url = current.url,
+                    onAccept = { current.result.complete(true) },
+                    onDecline = { current.result.complete(false) },
+                )
+            }
         }
     }
 }

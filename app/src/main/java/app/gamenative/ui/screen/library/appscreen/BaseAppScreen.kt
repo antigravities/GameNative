@@ -105,6 +105,120 @@ internal fun canShowUpdatePending(
     isDownloading: Boolean,
 ): Boolean = isInstalled && !isDownloading
 
+/**
+ * Fetches the "known config" (community best config) for a game and applies it to its
+ * container, installing any missing manifest components first. Shared by the game page's
+ * "Use known config" option and the minimal launcher's menu.
+ *
+ * Progress is published via [BaseAppScreen.showKnownConfigInstallState]; if some components
+ * can't be satisfied, [BaseAppScreen.showMissingComponentsDialog] is raised for [appId] with
+ * an "apply anyway" callback, and this returns without applying.
+ */
+internal suspend fun applyKnownConfig(
+    context: Context,
+    appId: String,
+    gameId: Int,
+    gameSource: GameSource,
+) {
+    val uiScope = CoroutineScope(Dispatchers.Main.immediate)
+    try {
+        val gameName = ContainerUtils.resolveGameName(appId)
+        val gpuName = GPUInformation.getRenderer(context)
+
+        val bestConfig = BestConfigService.fetchBestConfig(
+            context = context,
+            gameName = gameName,
+            gpuName = gpuName,
+            gameStore = gameSource.name,
+        )
+        if (bestConfig == null) {
+            SnackbarManager.show(context.getString(R.string.best_config_fetch_failed))
+            return
+        }
+        if (bestConfig.matchType == "no_match") {
+            SnackbarManager.show(context.getString(R.string.best_config_no_config_available))
+            return
+        }
+
+        val installsOk = installMissingComponentsForConfig(
+            context = context,
+            gameId = gameId,
+            configJson = bestConfig.bestConfig,
+            matchType = bestConfig.matchType,
+            matchedGpu = bestConfig.matchedGpu,
+        )
+        if (!installsOk) return
+
+        val configJson = bestConfig.bestConfig
+        val matchType = bestConfig.matchType
+
+        val parsedResult = BestConfigService.parseConfigResult(
+            context = context,
+            configJson = configJson,
+            matchType = matchType,
+            applyKnownConfig = true,
+            storeMatch = bestConfig.matchedStore.equals(gameSource.name, ignoreCase = true),
+            matchedGpu = bestConfig.matchedGpu,
+        )
+        val parsedConfig = parsedResult.config
+        val missingComponents = parsedResult.missingComponents
+
+        if (missingComponents.isNotEmpty()) {
+            BaseAppScreen.showMissingComponentsDialog(appId, missingComponents) {
+                // "apply anyway" — re-parse with defaults replacing missing components
+                uiScope.launch(Dispatchers.IO) {
+                    try {
+                        val forced = BestConfigService.parseConfigToContainerData(
+                            context, configJson, matchType, true,
+                            storeMatch = bestConfig.matchedStore.equals(gameSource.name, ignoreCase = true),
+                            forceApply = true,
+                            matchedGpu = bestConfig.matchedGpu,
+                        )
+                        if (!forced.isNullOrEmpty()) {
+                            val c = ContainerUtils.getOrCreateContainer(context, appId)
+                            val cd = ContainerUtils.toContainerData(c)
+                            val updated = ContainerUtils.applyBestConfigMapToContainerData(cd, forced)
+                            ContainerUtils.applyToContainer(context, c, updated)
+                            SessionReport.markConfigApplied(c, "known", bestConfig.toMatch())
+                            SnackbarManager.show(context.getString(R.string.best_config_applied_with_defaults))
+                        } else {
+                            SnackbarManager.show(context.getString(R.string.best_config_known_config_invalid))
+                        }
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to force-apply config: ${e.message}")
+                        SnackbarManager.show(context.getString(R.string.best_config_apply_failed, e.message ?: "Unknown error"))
+                    }
+                }
+            }
+        } else if (parsedConfig.isNotEmpty()) {
+            val container = ContainerUtils.getOrCreateContainer(context, appId)
+            val currentData = ContainerUtils.toContainerData(container)
+            val updatedData = ContainerUtils.applyBestConfigMapToContainerData(
+                currentData,
+                parsedConfig,
+            )
+            ContainerUtils.applyToContainer(context, container, updatedData)
+            SessionReport.markConfigApplied(container, "known", bestConfig.toMatch())
+            SnackbarManager.show(context.getString(R.string.best_config_applied_successfully))
+        } else {
+            SnackbarManager.show(context.getString(R.string.best_config_known_config_invalid))
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Timber.w(e, "Failed to apply known config for $appId: ${e.message}")
+        withContext(Dispatchers.Main) {
+            BaseAppScreen.hideKnownConfigInstallState(gameId)
+        }
+        SnackbarManager.show(
+            context.getString(
+                R.string.best_config_apply_failed,
+                e.message ?: "Unknown error",
+            ),
+        )
+    }
+}
+
 internal suspend fun installMissingComponentsForConfig(
     context: Context,
     gameId: Int,
@@ -999,107 +1113,7 @@ abstract class BaseAppScreen {
     protected open suspend fun applyKnownConfigForLibraryItem(
         context: Context,
         libraryItem: LibraryItem,
-    ) {
-        val gameId = libraryItem.gameId
-        val uiScope = CoroutineScope(Dispatchers.Main.immediate)
-        try {
-            val gameName = ContainerUtils.resolveGameName(libraryItem.appId)
-            val gpuName = GPUInformation.getRenderer(context)
-
-            val bestConfig = BestConfigService.fetchBestConfig(
-                context = context,
-                gameName = gameName,
-                gpuName = gpuName,
-                gameStore = libraryItem.gameSource.name,
-            )
-            if (bestConfig == null) {
-                SnackbarManager.show(context.getString(R.string.best_config_fetch_failed))
-                return
-            }
-            if (bestConfig.matchType == "no_match") {
-                SnackbarManager.show(context.getString(R.string.best_config_no_config_available))
-                return
-            }
-
-            val installsOk = installMissingComponentsForConfig(
-                context = context,
-                gameId = gameId,
-                configJson = bestConfig.bestConfig,
-                matchType = bestConfig.matchType,
-                matchedGpu = bestConfig.matchedGpu,
-            )
-            if (!installsOk) return
-
-            val appId = libraryItem.appId
-            val configJson = bestConfig.bestConfig
-            val matchType = bestConfig.matchType
-
-            val parsedResult = BestConfigService.parseConfigResult(
-                context = context,
-                configJson = configJson,
-                matchType = matchType,
-                applyKnownConfig = true,
-                storeMatch = bestConfig.matchedStore.equals(libraryItem.gameSource.name, ignoreCase = true),
-                matchedGpu = bestConfig.matchedGpu,
-            )
-            val parsedConfig = parsedResult.config
-            val missingComponents = parsedResult.missingComponents
-
-            if (missingComponents.isNotEmpty()) {
-                showMissingComponentsDialog(appId, missingComponents) {
-                    // "apply anyway" — re-parse with defaults replacing missing components
-                    uiScope.launch(Dispatchers.IO) {
-                        try {
-                            val forced = BestConfigService.parseConfigToContainerData(
-                                context, configJson, matchType, true,
-                                storeMatch = bestConfig.matchedStore.equals(libraryItem.gameSource.name, ignoreCase = true),
-                                forceApply = true,
-                                matchedGpu = bestConfig.matchedGpu,
-                            )
-                            if (!forced.isNullOrEmpty()) {
-                                val c = ContainerUtils.getOrCreateContainer(context, appId)
-                                val cd = ContainerUtils.toContainerData(c)
-                                val updated = ContainerUtils.applyBestConfigMapToContainerData(cd, forced)
-                                ContainerUtils.applyToContainer(context, c, updated)
-                                SessionReport.markConfigApplied(c, "known", bestConfig.toMatch())
-                                SnackbarManager.show(context.getString(R.string.best_config_applied_with_defaults))
-                            } else {
-                                SnackbarManager.show(context.getString(R.string.best_config_known_config_invalid))
-                            }
-                        } catch (e: Exception) {
-                            Timber.w(e, "Failed to force-apply config: ${e.message}")
-                            SnackbarManager.show(context.getString(R.string.best_config_apply_failed, e.message ?: "Unknown error"))
-                        }
-                    }
-                }
-            } else if (parsedConfig.isNotEmpty()) {
-                val container = ContainerUtils.getOrCreateContainer(context, appId)
-                val currentData = ContainerUtils.toContainerData(container)
-                val updatedData = ContainerUtils.applyBestConfigMapToContainerData(
-                    currentData,
-                    parsedConfig,
-                )
-                ContainerUtils.applyToContainer(context, container, updatedData)
-                SessionReport.markConfigApplied(container, "known", bestConfig.toMatch())
-                SnackbarManager.show(context.getString(R.string.best_config_applied_successfully))
-            } else {
-                SnackbarManager.show(context.getString(R.string.best_config_known_config_invalid))
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to apply known config for ${libraryItem.appId}: ${e.message}")
-            withContext(Dispatchers.Main) {
-                hideKnownConfigInstallState(gameId)
-            }
-            SnackbarManager.show(
-                context.getString(
-                    R.string.best_config_apply_failed,
-                    e.message ?: "Unknown error",
-                ),
-            )
-        }
-    }
+    ) = applyKnownConfig(context, libraryItem.appId, libraryItem.gameId, libraryItem.gameSource)
 
     /** Applies a selected community config using the existing validation and dependency installers. */
     protected open suspend fun applyCommunityConfigForLibraryItem(

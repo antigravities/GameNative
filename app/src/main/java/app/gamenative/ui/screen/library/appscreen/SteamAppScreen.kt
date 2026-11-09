@@ -102,6 +102,7 @@ import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.screen.library.GameMigrationDialog
 import app.gamenative.ui.component.dialog.state.GameManagerDialogState
 import app.gamenative.ui.util.SnackbarManager
+import app.gamenative.utils.SteamGameOps
 import app.gamenative.ui.util.SteamSaveTransfer
 import app.gamenative.utils.ContainerUtils.getContainer
 import app.gamenative.utils.CustomGameScanner
@@ -1028,14 +1029,7 @@ class SteamAppScreen : BaseAppScreen() {
     }
 
     override fun saveContainerConfig(context: Context, libraryItem: LibraryItem, config: ContainerData) {
-        val container = getContainer(context, libraryItem.appId)
-        ContainerUtils.applyToContainer(context, libraryItem.appId, config)
-
-        if (container.language != config.language) {
-            CoroutineScope(Dispatchers.IO).launch {
-                SteamService.downloadApp(libraryItem.gameId, SteamDownloadMode.UPDATE)
-            }
-        }
+        SteamGameOps.saveContainerConfig(context, libraryItem.gameId, config)
     }
 
     override fun supportsContainerConfig(): Boolean = true
@@ -1302,9 +1296,8 @@ class SteamAppScreen : BaseAppScreen() {
                         showDeletingDialog = true
                         CoroutineScope(Dispatchers.IO).launch {
                             try {
-                                SteamService.deleteApp(gameId)
-                                DownloadService.invalidateCache()
-                                PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(gameId, GameSource.STEAM))
+                                // Repeats the cancel above (idempotent), then deletes the partial files.
+                                SteamGameOps.cancelDownload(gameId)
                             } finally {
                                 withContext(NonCancellable + Dispatchers.Main) {
                                     showDeletingDialog = false
@@ -1368,25 +1361,7 @@ class SteamAppScreen : BaseAppScreen() {
                         // Note: This should ideally show a loading dialog, but for now we'll do it in the background
                         CoroutineScope(Dispatchers.IO).launch {
                             try {
-                                val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
-                                val variant = container.containerVariant
-
-                                if (!SteamService.isImageFsInstallable(context, variant)) {
-                                    SteamService.downloadImageFs(
-                                        onDownloadProgress = { /* TODO: Update loading dialog progress */ },
-                                        this,
-                                        variant = variant,
-                                        context = context,
-                                    ).await()
-                                }
-                                if (!SteamService.isImageFsInstalled(context)) {
-                                    withContext(Dispatchers.Main) {
-                                        SplitCompat.install(context)
-                                    }
-                                    ImageFsInstaller.installIfNeededFuture(context, context.assets, container) { progress ->
-                                        // TODO: Update loading dialog progress
-                                    }.get()
-                                }
+                                SteamGameOps.installImageFs(context, libraryItem.appId)
                                 // After installation, trigger container edit
                                 SnackbarManager.show(context.getString(R.string.steam_imagefs_installed))
                             } catch (e: Exception) {
@@ -1440,19 +1415,11 @@ class SteamAppScreen : BaseAppScreen() {
                             CoroutineScope(Dispatchers.IO).launch {
                                 try {
                                     val installedAppInfo = getInstalledApp(libraryItem.gameId)
-                                    val gameRootDir = getInstallPath(context, libraryItem)?.let(::File)
 
-                                    val success = SteamService.deleteApp(gameId)
-                                    DownloadService.invalidateCache()
-                                    if (success) {
-                                        cleanupNexusModsForApp(context, libraryItem, gameRootDir)
-                                    }
-                                    withContext(Dispatchers.Main) {
-                                        ContainerUtils.deleteContainer(context, libraryItem.appId)
-                                    }
+                                    // Files, DB state, Nexus mods, container + install-status event.
+                                    val success = SteamGameOps.uninstall(context, gameId)
                                     withContext(Dispatchers.Main) {
                                         if (success) {
-                                            PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(gameId, GameSource.STEAM))
                                             SnackbarManager.show(
                                                 context.getString(
                                                     R.string.steam_uninstall_success,

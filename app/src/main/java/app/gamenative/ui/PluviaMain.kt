@@ -116,6 +116,9 @@ import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.model.MainViewModel
 import app.gamenative.ui.screen.DebugPaywallScreen
 import app.gamenative.ui.screen.HomeScreen
+import app.gamenative.ui.screen.minimal.MinUiLoadingDialog
+import app.gamenative.ui.screen.minimal.MinUiMessageDialog
+import app.gamenative.ui.screen.minimal.MinimalHome
 import app.gamenative.ui.screen.PluviaScreen
 import app.gamenative.ui.screen.login.UserLoginScreen
 import app.gamenative.ui.screen.settings.SettingsScreen
@@ -407,6 +410,7 @@ fun PluviaMain(
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
+    val coilImageLoader = com.skydoves.landscapist.coil.LocalCoilImageLoader.current
 
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -636,10 +640,25 @@ fun PluviaMain(
         }
     }
 
+    // Minimal home-screen mode: Home pops back to the game list (Settings etc.). MainActivity
+    // only emits this when no game is running.
+    DisposableEffect(navController) {
+        val onHomePressed: (AndroidEvent.HomePressed) -> Unit = {
+            navController.popBackStack(PluviaScreen.Home.route + "?offline={offline}", inclusive = false)
+        }
+        if (BuildConfig.MINIMAL_UI) PluviaApp.events.on<AndroidEvent.HomePressed, Unit>(onHomePressed)
+        onDispose {
+            if (BuildConfig.MINIMAL_UI) PluviaApp.events.off<AndroidEvent.HomePressed, Unit>(onHomePressed)
+        }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collect { event ->
             when (event) {
                 MainViewModel.MainUiEvent.LaunchApp -> {
+                    // The game runs in this same activity, so onStop/onTrimMemory never free the
+                    // cover-art bitmaps; drop them here so the memory goes to the game.
+                    if (BuildConfig.MINIMAL_UI) coilImageLoader?.memoryCache?.clear()
                     navController.navigate(PluviaScreen.XServer.route)
                 }
 
@@ -919,6 +938,8 @@ fun PluviaMain(
                 context.startForegroundService(Intent(context, SteamService::class.java))
             }
 
+            // GOG / Epic / Amazon (not in the Steam-only minimal build)
+            if (PlatformAuthUtils.otherStoresEnabled) {
             // Start GOGService if user has GOG
             if (app.gamenative.service.gog.GOGService.hasStoredCredentials(context) &&
                 !app.gamenative.service.gog.GOGService.isRunning
@@ -943,6 +964,7 @@ fun PluviaMain(
             ) {
                 Timber.d("[PluviaMain]: Starting AmazonService for logged-in user")
                 AmazonService.start(context)
+            }
             }
 
             // Handle navigation when already logged in (e.g., app resumed with active session)
@@ -1502,25 +1524,48 @@ fun PluviaMain(
         style = state.paletteStyle,
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            LoadingDialog(
-                visible = state.loadingDialogVisible,
-                progress = state.loadingDialogProgress,
-                message = state.loadingDialogMessage,
-            )
+            if (BuildConfig.MINIMAL_UI) {
+                MinUiLoadingDialog(
+                    visible = state.loadingDialogVisible,
+                    progress = state.loadingDialogProgress,
+                    message = state.loadingDialogMessage,
+                )
+            } else {
+                LoadingDialog(
+                    visible = state.loadingDialogVisible,
+                    progress = state.loadingDialogProgress,
+                    message = state.loadingDialogMessage,
+                )
+            }
 
-            MessageDialog(
-                visible = msgDialogState.visible,
-                onDismissRequest = onDismissRequest,
-                onConfirmClick = onConfirmClick,
-                confirmBtnText = msgDialogState.confirmBtnText,
-                onDismissClick = onDismissClick,
-                dismissBtnText = msgDialogState.dismissBtnText,
-                onActionClick = onActionClick,
-                actionBtnText = msgDialogState.actionBtnText,
-                icon = msgDialogState.type.icon,
-                title = msgDialogState.title,
-                message = msgDialogState.message,
-            )
+            if (BuildConfig.MINIMAL_UI) {
+                MinUiMessageDialog(
+                    visible = msgDialogState.visible,
+                    onDismissRequest = onDismissRequest,
+                    onConfirmClick = onConfirmClick,
+                    confirmBtnText = msgDialogState.confirmBtnText,
+                    onDismissClick = onDismissClick,
+                    dismissBtnText = msgDialogState.dismissBtnText,
+                    onActionClick = onActionClick,
+                    actionBtnText = msgDialogState.actionBtnText,
+                    title = msgDialogState.title,
+                    message = msgDialogState.message,
+                )
+            } else {
+                MessageDialog(
+                    visible = msgDialogState.visible,
+                    onDismissRequest = onDismissRequest,
+                    onConfirmClick = onConfirmClick,
+                    confirmBtnText = msgDialogState.confirmBtnText,
+                    onDismissClick = onDismissClick,
+                    dismissBtnText = msgDialogState.dismissBtnText,
+                    onActionClick = onActionClick,
+                    actionBtnText = msgDialogState.actionBtnText,
+                    icon = msgDialogState.type.icon,
+                    title = msgDialogState.title,
+                    message = msgDialogState.message,
+                )
+            }
 
             SteamAgreementGate.Prompt()
 
@@ -1997,9 +2042,13 @@ fun PluviaMain(
                     SteamService.isLoggedIn -> PluviaScreen.Home.route + "?offline=false"
                     // skip login screen if any service has stored credentials
                     SteamUtils.hasStoredCredentials() ||
-                        GOGService.hasStoredCredentials(context) ||
-                        EpicService.hasStoredCredentials(context) ||
-                        AmazonService.hasStoredCredentials(context) ->
+                        (
+                            PlatformAuthUtils.otherStoresEnabled && (
+                                GOGService.hasStoredCredentials(context) ||
+                                    EpicService.hasStoredCredentials(context) ||
+                                    AmazonService.hasStoredCredentials(context)
+                                )
+                            ) ->
                         PluviaScreen.Home.route + "?offline=true"
                     else -> PluviaScreen.LoginUser.route
                 }
@@ -2088,27 +2137,51 @@ fun PluviaMain(
                         }
                     }
 
+                    val onClickPlay: (String, Boolean) -> Unit = { appId, asContainer ->
+                        trackGameLaunched(context, appId)
+                        viewModel.setLaunchedAppId(appId)
+                        viewModel.setBootToContainer(asContainer)
+                        viewModel.setTestGraphics(false)
+                        viewModel.setDiagnostics(false)
+                        viewModel.setDebugRun(false)
+                        viewModel.setOffline(isOffline)
+                        preLaunchApp(
+                            context = context,
+                            appId = appId,
+                            setLoadingDialogVisible = viewModel::setLoadingDialogVisible,
+                            setLoadingProgress = viewModel::setLoadingDialogProgress,
+                            setLoadingMessage = viewModel::setLoadingDialogMessage,
+                            setMessageDialogState = { msgDialogState = it },
+                            onSuccess = viewModel::launchApp,
+                            isOffline = isOffline,
+                            bootToContainer = asContainer,
+                        )
+                    }
+
+                    val onClickExit: () -> Unit = {
+                        if (!PrefManager.warnBeforeExit) {
+                            PluviaApp.events.emit(AndroidEvent.EndProcess)
+                        } else if (exitSnackbarVisible) {
+                            PluviaApp.events.emit(AndroidEvent.EndProcess)
+                        } else {
+                            exitSnackbarVisible = true
+                            SnackbarManager.show(context.getString(R.string.back_press_exit_warning))
+                        }
+                    }
+
+                    if (BuildConfig.MINIMAL_UI) {
+                        MinimalHome(
+                            onClickPlay = onClickPlay,
+                            onExit = onClickExit,
+                            onOpenSettings = { navController.navigate(PluviaScreen.Settings.route) },
+                            onLogout = { SteamService.logOut() },
+                            isOffline = isOffline,
+                        )
+                        return@composable
+                    }
+
                     HomeScreen(
-                        onClickPlay = { appId, asContainer ->
-                            trackGameLaunched(context, appId)
-                            viewModel.setLaunchedAppId(appId)
-                            viewModel.setBootToContainer(asContainer)
-                            viewModel.setTestGraphics(false)
-                            viewModel.setDiagnostics(false)
-                            viewModel.setDebugRun(false)
-                            viewModel.setOffline(isOffline)
-                            preLaunchApp(
-                                context = context,
-                                appId = appId,
-                                setLoadingDialogVisible = viewModel::setLoadingDialogVisible,
-                                setLoadingProgress = viewModel::setLoadingDialogProgress,
-                                setLoadingMessage = viewModel::setLoadingDialogMessage,
-                                setMessageDialogState = { msgDialogState = it },
-                                onSuccess = viewModel::launchApp,
-                                isOffline = isOffline,
-                                bootToContainer = asContainer,
-                            )
-                        },
+                        onClickPlay = onClickPlay,
                         onTestGraphics = { appId ->
                             viewModel.setLaunchedAppId(appId)
                             viewModel.setBootToContainer(true)
@@ -2154,16 +2227,7 @@ fun PluviaMain(
                             debugPreRunOffline = isOffline
                             debugPreRunVisible = true
                         },
-                        onClickExit = {
-                            if (!PrefManager.warnBeforeExit) {
-                                PluviaApp.events.emit(AndroidEvent.EndProcess)
-                            } else if (exitSnackbarVisible) {
-                                PluviaApp.events.emit(AndroidEvent.EndProcess)
-                            } else {
-                                exitSnackbarVisible = true
-                                SnackbarManager.show(context.getString(R.string.back_press_exit_warning))
-                            }
-                        },
+                        onClickExit = onClickExit,
                         onChat = {
                             navController.navigate(PluviaScreen.Chat.route(it))
                         },

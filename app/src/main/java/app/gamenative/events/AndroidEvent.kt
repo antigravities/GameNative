@@ -18,6 +18,9 @@ interface AndroidEvent<T> : Event<T> {
     data class KeyEvent(val event: android.view.KeyEvent) : AndroidEvent<Boolean>
     data class MotionEvent(val event: android.view.MotionEvent?) : AndroidEvent<Boolean>
     data object EndProcess : AndroidEvent<Unit>
+
+    /** modernMinimal home-screen mode: the Home key was pressed while GameNative is the home app. */
+    data object HomePressed : AndroidEvent<Unit>
     data class ExternalGameLaunch(val appId: String, val execArgs: String? = null) : AndroidEvent<Unit>
     data class PromptSaveContainerConfig(val appId: String) : AndroidEvent<Unit>
     data class ShowGameFeedback(val appId: String) : AndroidEvent<Unit>
